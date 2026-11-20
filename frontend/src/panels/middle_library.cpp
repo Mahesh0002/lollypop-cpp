@@ -108,12 +108,13 @@ void MiddleLibrary::create_header_bar() {
     gtk_widget_add_css_class(greeting, "library-greeting");
     gtk_label_set_xalign(GTK_LABEL(greeting), 0.0);
 
-    // Search entry
-    search_entry_ = gtk_search_entry_new();
+    // Search entry - use regular entry with search icon
+    search_entry_ = gtk_entry_new();
     gtk_widget_add_css_class(search_entry_, "library-search");
     gtk_widget_set_hexpand(search_entry_, TRUE);
     gtk_widget_set_size_request(search_entry_, 300, -1);
     gtk_entry_set_placeholder_text(GTK_ENTRY(search_entry_), "Search your library");
+    gtk_entry_set_icon_from_icon_name(GTK_ENTRY(search_entry_), GTK_ENTRY_ICON_PRIMARY, "system-search-symbolic");
 
     // Menu button (ellipsis)
     GtkWidget* menu_button = gtk_menu_button_new();

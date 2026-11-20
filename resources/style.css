@@ -1,6 +1,7 @@
 /**
  * Lollypop C++ - GTK4 CSS Stylesheet
  * Apple Music-inspired design with custom playback areas
+ * GTK4 compatible - only uses supported CSS properties
  */
 
 /* ============================================================================
@@ -51,7 +52,6 @@ button {
     padding: 6px 12px;
     background-color: transparent;
     color: @fg_primary;
-    transition: all 150ms ease;
 }
 
 button:hover {
@@ -77,16 +77,11 @@ entry, searchentry {
     padding: 8px 16px;
     background-color: @bg_secondary;
     color: @fg_primary;
-    transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
 entry:focus, searchentry:focus {
     border-color: @border_focus;
     box-shadow: 0 0 0 2px alpha(@border_focus, 0.3);
-}
-
-entry:placeholder, searchentry:placeholder {
-    color: @fg_tertiary;
 }
 
 scrolledwindow {
@@ -148,7 +143,6 @@ listboxrow:selected {
     background-color: @bg_secondary;
     border-right: 1px solid @border_subtle;
     min-width: 64px;
-    max-width: 220px;
 }
 
 .sidebar-header {
@@ -176,7 +170,6 @@ listboxrow:selected {
     border-radius: 10px;
     padding: 10px 12px;
     margin: 2px 8px;
-    transition: all 150ms ease;
 }
 
 .sidebar-nav-item:hover {
@@ -208,13 +201,21 @@ listboxrow:selected {
     font-weight: 400;
 }
 
+/* Compact sidebar mode - controlled via CSS class */
+.sidebar.compact {
+    min-width: 64px;
+}
+
+.sidebar.compact .sidebar-nav-label {
+    /* GTK will hide via widget visibility in code */
+}
+
 /* ============================================================================
  * Middle Library Styles
  * ============================================================================ */
 
 .middle-library {
     background-color: @bg_primary;
-    overflow: hidden;
 }
 
 .library-header {
@@ -230,7 +231,6 @@ listboxrow:selected {
 
 .library-search {
     min-width: 300px;
-    max-width: 500px;
 }
 
 .library-menu-button {
@@ -269,12 +269,10 @@ listboxrow:selected {
     background-color: @bg_secondary;
     border-radius: 12px;
     padding: 12px;
-    transition: all 200ms ease;
 }
 
 .album-card:hover, .artist-card:hover {
     background-color: @bg_hover;
-    transform: translateY(-2px);
 }
 
 .album-card:selected, .artist-card:selected {
@@ -286,8 +284,6 @@ listboxrow:selected {
     border-radius: 8px;
     min-width: 140px;
     min-height: 140px;
-    max-width: 140px;
-    max-height: 140px;
 }
 
 .album-title {
@@ -313,26 +309,6 @@ listboxrow:selected {
     font-size: 17px;
     font-weight: 600;
     margin-bottom: 16px;
-}
-
-.horizontal-scroll {
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: thin;
-    scrollbar-color: @bg_tertiary transparent;
-}
-
-.horizontal-scroll::-webkit-scrollbar {
-    height: 6px;
-}
-
-.horizontal-scroll::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.horizontal-scroll::-webkit-scrollbar-thumb {
-    background-color: @bg_tertiary;
-    border-radius: 3px;
 }
 
 /* ============================================================================
@@ -361,12 +337,9 @@ listboxrow:selected {
     box-shadow: 0 16px 48px @shadow_strong;
     min-width: 280px;
     min-height: 280px;
-    max-width: 100%;
-    max-height: 100%;
 }
 
 .now-playing-track-info {
-    text-align: center;
     margin-bottom: 16px;
 }
 
@@ -375,7 +348,6 @@ listboxrow:selected {
     font-weight: 600;
     letter-spacing: -0.2px;
     color: @fg_primary;
-    max-width: 100%;
 }
 
 .now-playing-artist {
@@ -410,7 +382,6 @@ listboxrow:selected {
 
 .now-playing-control-button:hover {
     background-color: @bg_hover;
-    transform: scale(1.05);
 }
 
 .now-playing-modes {
@@ -485,8 +456,6 @@ listboxrow:selected {
     border-radius: 6px;
     min-width: 40px;
     min-height: 40px;
-    max-width: 40px;
-    max-height: 40px;
 }
 
 .queue-item-title {
@@ -509,7 +478,6 @@ listboxrow:selected {
     background-color: @bg_secondary;
     border-top: 1px solid @border_subtle;
     min-height: 80px;
-    max-height: 250px;
 }
 
 .bottom-playback-separator {
@@ -525,8 +493,6 @@ listboxrow:selected {
     border-radius: 6px;
     min-width: 56px;
     min-height: 56px;
-    max-width: 56px;
-    max-height: 56px;
     box-shadow: 0 4px 16px @shadow_subtle;
 }
 
@@ -534,22 +500,16 @@ listboxrow:selected {
     font-size: 14px;
     font-weight: 500;
     color: @fg_primary;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 .bottom-playback-artist {
     font-size: 12px;
     font-weight: 400;
     color: @fg_tertiary;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 .bottom-playback-center {
-    flex-grow: 1;
+    /* flex-grow handled by GTK layout */
 }
 
 .bottom-playback-control-button {
@@ -562,7 +522,6 @@ listboxrow:selected {
 
 .bottom-playback-control-button:hover {
     background-color: @bg_hover;
-    transform: scale(1.05);
 }
 
 .bottom-playback-play-button {
@@ -577,12 +536,11 @@ listboxrow:selected {
 
 .bottom-playback-play-button:hover {
     background-color: @fg_primary;
-    transform: scale(1.05);
     box-shadow: 0 6px 24px @shadow_strong;
 }
 
 .bottom-playback-play-button:active {
-    transform: scale(0.95);
+    background-color: @fg_primary;
 }
 
 .bottom-playback-progress {
@@ -644,7 +602,6 @@ listboxrow:selected {
 
 .bottom-playback-volume-scale slider:hover {
     background-color: @fg_primary;
-    transform: scale(1.2);
 }
 
 .bottom-playback-pip-button {
@@ -659,7 +616,7 @@ listboxrow:selected {
 }
 
 /* ============================================================================
- * Scrollbar Styles
+ * Scrollbar Styles (GTK4)
  * ============================================================================ */
 
 scrollbar {
@@ -683,7 +640,10 @@ scrollbar slider:active {
 }
 
 scrollbar button {
-    display: none;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    background-color: transparent;
 }
 
 /* ============================================================================
@@ -691,7 +651,7 @@ scrollbar button {
  * ============================================================================ */
 
 * {
-    transition-property: background-color, color, border-color, box-shadow, transform;
+    transition-property: background-color, color, border-color, box-shadow;
     transition-duration: 150ms;
     transition-timing-function: ease-out;
 }
@@ -703,65 +663,12 @@ button:active,
 }
 
 /* ============================================================================
- * Responsive Adjustments
- * ============================================================================ */
-
-/* Compact sidebar */
-.sidebar:compact .sidebar-nav-label {
-    display: none;
-}
-
-.sidebar:compact {
-    min-width: 64px;
-    max-width: 64px;
-}
-
-/* Small window adjustments */
-@media (max-width: 900px) {
-    .now-playing-artwork-image {
-        min-width: 200px;
-        min-height: 200px;
-    }
-
-    .library-greeting {
-        font-size: 22px;
-    }
-}
-
-@media (max-width: 700px) {
-    .bottom-playback-left {
-        min-width: 200px;
-    }
-
-    .bottom-playback-title {
-        font-size: 13px;
-    }
-
-    .library-search {
-        min-width: 200px;
-    }
-}
-
-/* ============================================================================
  * Accessibility
  * ============================================================================ */
 
-*:focus-visible {
+*:focus {
     outline: 2px solid @border_focus;
     outline-offset: 2px;
 }
 
-@media (prefers-reduced-motion: reduce) {
-    * {
-        transition-duration: 0.01ms !important;
-        animation-duration: 0.01ms !important;
-    }
-}
-
-/* High contrast mode adjustments */
-@media (prefers-contrast: high) {
-    :root {
-        @define-color border_subtle #555555;
-        @define-color fg_tertiary #cccccc;
-    }
-}
+/* Reduced motion - GTK handles this via settings */

@@ -58,9 +58,31 @@ void Application::on_activate() {
 void Application::on_startup() {
     // Set up CSS provider for styling
     GtkCssProvider* provider = gtk_css_provider_new();
-    GFile* file = g_file_new_for_path("resources/style.css");
-    gtk_css_provider_load_from_file(provider, file);
-    g_object_unref(file);
+
+    // Try to load CSS from multiple locations
+    const char* css_paths[] = {
+        "resources/style.css",                          // Build directory (when run from build dir)
+        "../resources/style.css",                       // Build directory (when run from build/bin)
+        "/usr/local/share/lollypop-cpp/style.css",      // Installed location
+        "/usr/share/lollypop-cpp/style.css",            // Alternative installed location
+        nullptr
+    };
+
+    gboolean loaded = FALSE;
+    for (int i = 0; css_paths[i] != nullptr; ++i) {
+        GFile* file = g_file_new_for_path(css_paths[i]);
+        if (g_file_query_exists(file, nullptr)) {
+            gtk_css_provider_load_from_file(provider, file);
+            loaded = TRUE;
+            g_object_unref(file);
+            break;
+        }
+        g_object_unref(file);
+    }
+
+    if (!loaded) {
+        std::cerr << "Warning: Could not find style.css in any known location" << std::endl;
+    }
 
     gtk_style_context_add_provider_for_display(
         gdk_display_get_default(),
