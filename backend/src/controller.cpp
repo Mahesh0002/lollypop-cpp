@@ -61,6 +61,16 @@ bool BackendController::initialize() {
         handle_file_event(event);
     });
 
+    // Initialize CAVA visualizer
+    cava_visualizer_ = std::make_unique<CavaVisualizer>();
+    if (cava_visualizer_->is_cava_available()) {
+        cava_visualizer_->start();
+        setup_cava_callbacks();
+    } else {
+        std::cerr << "BackendController: CAVA not available, visualization disabled"
+                  << std::endl;
+    }
+
     std::cout << "BackendController: Initialized successfully" << std::endl;
     return true;
 }
@@ -70,12 +80,22 @@ void BackendController::shutdown() {
     if (audio_engine_) {
         audio_engine_->stop();
     }
+    if (cava_visualizer_) {
+        cava_visualizer_->stop();
+        cava_visualizer_.reset();
+    }
     if (mpris_manager_) {
         mpris_manager_->shutdown();
         mpris_manager_.reset();
     }
     storage_.reset();
     audio_engine_.reset();
+}
+
+void BackendController::setup_cava_callbacks() {
+    cava_visualizer_->set_points_callback([this](const std::vector<float>& points) {
+        if (visualization_cb_) visualization_cb_(points);
+    });
 }
 
 void BackendController::setup_audio_callbacks() {

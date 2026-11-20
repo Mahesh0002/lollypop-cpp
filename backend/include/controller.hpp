@@ -15,6 +15,7 @@
 #include "mpris_manager.hpp"
 #include "library_scanner.hpp"
 #include "file_watcher.hpp"
+#include "cava_visualizer.hpp"
 
 namespace lollypop {
 
@@ -95,17 +96,20 @@ public:
     MprisManager* get_mpris_manager() const { return mpris_manager_.get(); }
     LibraryScanner* get_library_scanner() const { return library_scanner_.get(); }
     FileWatcher* get_file_watcher() const { return file_watcher_.get(); }
+    CavaVisualizer* get_cava_visualizer() const { return cava_visualizer_.get(); }
 
     // Callbacks for UI updates
     using TrackChangedCallback = std::function<void(const Track&)>;
     using PositionChangedCallback = std::function<void(double position, double duration)>;
     using PlaybackStateChangedCallback = std::function<void(bool playing)>;
     using QueueChangedCallback = std::function<void(const std::vector<std::string>&)>;
+    using VisualizationCallback = std::function<void(const std::vector<float>&)>;
 
     void set_track_changed_callback(TrackChangedCallback cb) { track_changed_cb_ = std::move(cb); }
     void set_position_changed_callback(PositionChangedCallback cb) { position_changed_cb_ = std::move(cb); }
     void set_playback_state_changed_callback(PlaybackStateChangedCallback cb) { playback_state_changed_cb_ = std::move(cb); }
     void set_queue_changed_callback(QueueChangedCallback cb) { queue_changed_cb_ = std::move(cb); }
+    void set_visualization_changed_callback(VisualizationCallback cb) { visualization_cb_ = std::move(cb); }
 
 private:
     std::unique_ptr<StorageManager> storage_;
@@ -113,11 +117,13 @@ private:
     std::unique_ptr<MprisManager> mpris_manager_;
     std::unique_ptr<LibraryScanner> library_scanner_;
     std::unique_ptr<FileWatcher> file_watcher_;
+    std::unique_ptr<CavaVisualizer> cava_visualizer_;
 
     TrackChangedCallback track_changed_cb_;
     PositionChangedCallback position_changed_cb_;
     PlaybackStateChangedCallback playback_state_changed_cb_;
     QueueChangedCallback queue_changed_cb_;
+    VisualizationCallback visualization_cb_;
 
     // Current playback state
     bool playing_ = false;
@@ -134,6 +140,8 @@ private:
     void setup_audio_callbacks();
 
     void handle_file_event(const FileEvent& event);
+
+    void setup_cava_callbacks();
 
     void emit_track_changed(const Track& track);
     void emit_position_changed(double position, double duration);
