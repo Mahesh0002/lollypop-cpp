@@ -9,8 +9,13 @@
 #include <vector>
 #include <functional>
 #include <memory>
+#include <mutex>
 
 #include "types.hpp"
+
+namespace Glib {
+class Dispatcher;
+}
 #include "audio_engine.hpp"
 #include "mpris_manager.hpp"
 #include "mpris_server.hpp"
@@ -34,6 +39,7 @@ public:
     void scan_library(const std::string& path);
     void add_watch_directory(const std::string& path);
     void remove_watch_directory(const std::string& path);
+    void open_uri(const std::string& uri);
 
     // Track queries
     std::vector<Track> get_all_tracks();
@@ -51,6 +57,7 @@ public:
     // Artist queries
     std::vector<Artist> get_all_artists();
     Artist get_artist(const std::string& artist_id);
+    std::vector<Track> get_tracks_by_artist(const std::string& artist_name);
 
     // Playlist queries
     std::vector<Playlist> get_all_playlists();
@@ -106,12 +113,14 @@ public:
     using PlaybackStateChangedCallback = std::function<void(bool playing)>;
     using QueueChangedCallback = std::function<void(const std::vector<std::string>&)>;
     using VisualizationCallback = std::function<void(const std::vector<float>&)>;
+    using LibraryChangedCallback = std::function<void()>;
 
     void set_track_changed_callback(TrackChangedCallback cb) { track_changed_cb_ = std::move(cb); }
     void set_position_changed_callback(PositionChangedCallback cb) { position_changed_cb_ = std::move(cb); }
     void set_playback_state_changed_callback(PlaybackStateChangedCallback cb) { playback_state_changed_cb_ = std::move(cb); }
     void set_queue_changed_callback(QueueChangedCallback cb) { queue_changed_cb_ = std::move(cb); }
     void set_visualization_changed_callback(VisualizationCallback cb) { visualization_cb_ = std::move(cb); }
+    void set_library_changed_callback(LibraryChangedCallback cb) { library_changed_cb_ = std::move(cb); }
 
 private:
     std::unique_ptr<StorageManager> storage_;
@@ -127,6 +136,13 @@ private:
     PlaybackStateChangedCallback playback_state_changed_cb_;
     QueueChangedCallback queue_changed_cb_;
     VisualizationCallback visualization_cb_;
+    LibraryChangedCallback library_changed_cb_;
+
+    // File watcher events arrive on its own thread; queue them and hand them
+    // to the GLib main loop where storage and UI callbacks are safe to touch.
+    std::unique_ptr<Glib::Dispatcher> file_event_dispatcher_;
+    std::mutex file_events_mutex_;
+    std::vector<FileEvent> pending_file_events_;
 
     // Current playback state
     bool playing_ = false;
@@ -143,15 +159,22 @@ private:
     void setup_audio_callbacks();
 
     void handle_file_event(const FileEvent& event);
+    void dispatch_file_events();
+    void process_file_event(const FileEvent& event);
 
     void setup_cava_callbacks();
 
     void setup_mpris_server_callbacks();
+    void sync_mpris_capabilities();
+
+    bool start_queue_index(size_t index);
+    void update_play_statistics();
 
     void emit_track_changed(const Track& track);
     void emit_position_changed(double position, double duration);
     void emit_playback_state_changed(bool playing);
     void emit_queue_changed();
+    void emit_library_changed();
 };
 
 } // namespace lollypop

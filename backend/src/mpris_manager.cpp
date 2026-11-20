@@ -187,6 +187,9 @@ struct MprisManager::Impl {
 
     bool is_filtered(const std::string& name,
                      const std::vector<std::string>& all_names) const {
+        // Never list Lollypop itself as an external player.
+        if (name.starts_with("org.mpris.MediaPlayer2.lollypop")) return true;
+
         if (!filter_duplicates) return false;
 
         // playerctld mirrors other buses; showing it duplicates every player.

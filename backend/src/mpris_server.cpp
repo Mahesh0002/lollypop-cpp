@@ -8,6 +8,7 @@
 #include <giomm.h>
 
 #include <algorithm>
+#include <cctype>
 #include <iostream>
 #include <map>
 #include <vector>
@@ -81,6 +82,18 @@ int loop_state_from_string(const std::string& status) {
     return 0;
 }
 
+// MPRIS track ids must be valid D-Bus object paths. Track ids and especially
+// file paths (which contain dots, dashes and other invalid characters) cannot
+// be used directly.
+std::string track_object_path(const Track& track) {
+    std::string element;
+    for (unsigned char c : track.id) {
+        element += (std::isalnum(c) || c == '_') ? static_cast<char>(c) : '_';
+    }
+    if (element.empty()) element = "none";
+    return "/org/lollypop/track/" + element;
+}
+
 // Build MPRIS Metadata dict (a{sv})
 Glib::VariantContainerBase build_metadata(const Track& track) {
     std::vector<Glib::VariantBase> entries;
@@ -106,18 +119,26 @@ Glib::VariantContainerBase build_metadata(const Track& track) {
         };
         entries.push_back(Glib::VariantContainerBase::create_tuple(kv));
     }
-    if (!track.file_path.empty()) {
+    if (!track.id.empty()) {
         std::vector<Glib::VariantBase> kv = {
             Glib::Variant<Glib::ustring>::create("mpris:trackid"),
             Glib::Variant<Glib::DBusObjectPathString>::create(
-                Glib::DBusObjectPathString(track.file_path)),
+                Glib::DBusObjectPathString(track_object_path(track))),
         };
         entries.push_back(Glib::VariantContainerBase::create_tuple(kv));
     }
     if (!track.artwork_path.empty()) {
+        std::string art_url = track.artwork_path;
+        if (art_url.starts_with("/")) {
+            try {
+                art_url = Glib::filename_to_uri(art_url);
+            } catch (const Glib::Error&) {
+                // Keep the plain path if it cannot be converted.
+            }
+        }
         std::vector<Glib::VariantBase> kv = {
             Glib::Variant<Glib::ustring>::create("mpris:artUrl"),
-            Glib::Variant<Glib::ustring>::create(track.artwork_path),
+            Glib::Variant<Glib::ustring>::create(art_url),
         };
         entries.push_back(Glib::VariantContainerBase::create_tuple(kv));
     }
@@ -183,6 +204,11 @@ struct MprisServer::Impl {
     VolumeChangedCallback volume_cb;
     LoopStateChangedCallback loop_state_cb;
     ShuffleChangedCallback shuffle_cb;
+    NextCallback next_cb;
+    PreviousCallback previous_cb;
+    PlayPauseCallback play_pause_cb;
+    StopCallback stop_cb;
+    OpenUriCallback open_uri_cb;
 
     void emit_properties_changed(const char* interface_name,
                                  const std::vector<Glib::VariantBase>& changed_entries) {
@@ -258,11 +284,10 @@ struct MprisServer::Impl {
 
         try {
             if (method_name == "Next") {
-                // Next handled by playback state callback (playing=true)
-                if (playback_state_cb) playback_state_cb(true);
+                if (next_cb) next_cb();
                 invocation->return_value({});
             } else if (method_name == "Previous") {
-                if (playback_state_cb) playback_state_cb(true);
+                if (previous_cb) previous_cb();
                 invocation->return_value({});
             } else if (method_name == "Pause") {
                 if (playback_state_cb) playback_state_cb(false);
@@ -271,12 +296,13 @@ struct MprisServer::Impl {
                 if (playback_state_cb) playback_state_cb(true);
                 invocation->return_value({});
             } else if (method_name == "PlayPause") {
-                // Toggle - handled by caller
+                if (play_pause_cb) play_pause_cb();
                 invocation->return_value({});
             } else if (method_name == "Stop") {
-                if (playback_state_cb) playback_state_cb(false);
+                if (stop_cb) stop_cb();
                 invocation->return_value({});
             } else if (method_name == "Seek") {
+                // MPRIS Seek takes a relative offset in microseconds.
                 gint64 us =
                     Glib::VariantBase::cast_dynamic<Glib::Variant<gint64>>(
                         parameters.get_child(0)).get();
@@ -289,11 +315,18 @@ struct MprisServer::Impl {
                 gint64 us =
                     Glib::VariantBase::cast_dynamic<Glib::Variant<gint64>>(
                         parameters.get_child(1)).get();
-                if (set_position_cb)
+                // Ignore SetPosition for a track that is no longer current.
+                if (set_position_cb && !current_track.id.empty() &&
+                    track_id.raw() == track_object_path(current_track)) {
                     set_position_cb(track_id.raw(),
                                     static_cast<double>(us) / 1'000'000.0);
+                }
                 invocation->return_value({});
             } else if (method_name == "OpenUri") {
+                Glib::ustring uri =
+                    Glib::VariantBase::cast_dynamic<Glib::Variant<Glib::ustring>>(
+                        parameters.get_child(0)).get();
+                if (open_uri_cb) open_uri_cb(uri.raw());
                 invocation->return_value({});
             } else if (method_name == "SetVolume") {
                 double vol =
@@ -326,7 +359,7 @@ struct MprisServer::Impl {
                 property = Glib::Variant<Glib::ustring>::create("lollypop-cpp");
             } else if (property_name == "SupportedUriSchemes") {
                 property = Glib::Variant<std::vector<Glib::ustring>>::create(
-                    {"file", "http", "https"});
+                    {"file"});
             } else if (property_name == "SupportedMimeTypes") {
                 property = Glib::Variant<std::vector<Glib::ustring>>::create(
                     {"audio/mpeg", "audio/flac", "audio/ogg", "audio/mp4"});
@@ -499,6 +532,14 @@ void MprisServer::update_playback_status(bool playing) {
         Glib::Variant<Glib::ustring>::create(impl_->playback_status));
 }
 
+void MprisServer::update_stopped() {
+    impl_->playback_status = "Stopped";
+    impl_->position_sec = 0.0;
+    impl_->emit_properties_changed_simple(
+        kPlayerInterface, "PlaybackStatus",
+        Glib::Variant<Glib::ustring>::create(impl_->playback_status));
+}
+
 void MprisServer::update_track(const Track& track) {
     impl_->current_track = track;
 
@@ -517,11 +558,13 @@ void MprisServer::update_track(const Track& track) {
 }
 
 void MprisServer::update_position(double position_seconds) {
+    // Called on every position tick. Just cache it; emitting Seeked and
+    // PropertiesChanged here would flood clients ten times per second.
     impl_->position_sec = std::max(0.0, position_seconds);
-    impl_->emit_properties_changed_simple(
-        kPlayerInterface, "Position",
-        Glib::Variant<gint64>::create(
-            static_cast<gint64>(impl_->position_sec * 1'000'000.0)));
+}
+
+void MprisServer::notify_seeked(double position_seconds) {
+    impl_->position_sec = std::max(0.0, position_seconds);
     impl_->emit_seeked(impl_->position_sec);
 }
 
@@ -550,6 +593,31 @@ void MprisServer::update_shuffle(bool shuffle) {
         Glib::Variant<bool>::create(shuffle));
 }
 
+void MprisServer::update_capabilities(bool can_go_next, bool can_go_previous,
+                                      bool can_play, bool can_pause,
+                                      bool can_seek) {
+    impl_->can_go_next = can_go_next;
+    impl_->can_go_previous = can_go_previous;
+    impl_->can_play = can_play;
+    impl_->can_pause = can_pause;
+    impl_->can_seek = can_seek;
+
+    std::vector<Glib::VariantBase> entries;
+    auto add = [&entries](const char* name, bool value) {
+        entries.push_back(Glib::VariantContainerBase::create_tuple(
+            std::vector<Glib::VariantBase>{
+                Glib::Variant<Glib::ustring>::create(name),
+                Glib::Variant<bool>::create(value),
+            }));
+    };
+    add("CanGoNext", can_go_next);
+    add("CanGoPrevious", can_go_previous);
+    add("CanPlay", can_play);
+    add("CanPause", can_pause);
+    add("CanSeek", can_seek);
+    impl_->emit_properties_changed(kPlayerInterface, entries);
+}
+
 void MprisServer::set_playback_state_changed_callback(PlaybackStateChangedCallback cb) {
     impl_->playback_state_cb = std::move(cb);
 }
@@ -570,6 +638,21 @@ void MprisServer::set_loop_state_changed_callback(LoopStateChangedCallback cb) {
 }
 void MprisServer::set_shuffle_changed_callback(ShuffleChangedCallback cb) {
     impl_->shuffle_cb = std::move(cb);
+}
+void MprisServer::set_next_callback(NextCallback cb) {
+    impl_->next_cb = std::move(cb);
+}
+void MprisServer::set_previous_callback(PreviousCallback cb) {
+    impl_->previous_cb = std::move(cb);
+}
+void MprisServer::set_play_pause_callback(PlayPauseCallback cb) {
+    impl_->play_pause_cb = std::move(cb);
+}
+void MprisServer::set_stop_callback(StopCallback cb) {
+    impl_->stop_cb = std::move(cb);
+}
+void MprisServer::set_open_uri_callback(OpenUriCallback cb) {
+    impl_->open_uri_cb = std::move(cb);
 }
 
 }  // namespace lollypop

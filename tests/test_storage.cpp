@@ -169,10 +169,6 @@ TEST_F(StorageTest, Preferences) {
 }
 
 TEST_F(StorageTest, SearchTracks) {
-    // FTS search test - currently skipped due to trigger issues
-    // TODO: Fix FTS triggers
-    GTEST_SKIP() << "FTS search not fully implemented";
-    
     Track track1;
     track1.id = "search-1";
     track1.title = "Hello World";
@@ -197,6 +193,70 @@ TEST_F(StorageTest, SearchTracks) {
 
     results = storage->search_tracks("Nonexistent");
     EXPECT_EQ(results.size(), 0);
+}
+
+TEST_F(StorageTest, SearchHandlesPunctuation) {
+    Track track;
+    track.id = "punct-1";
+    track.title = "AC/DC Live";
+    track.artist = "AC/DC";
+    track.file_path = "/music/punct.mp3";
+    ASSERT_TRUE(storage->add_track(track));
+
+    // '/', quotes and '-' used to produce FTS syntax errors.
+    EXPECT_EQ(storage->search_tracks("AC/DC").size(), 1);
+    EXPECT_EQ(storage->search_tracks("\"unterminated").size(), 0);
+}
+
+TEST_F(StorageTest, AddTrackPopulatesAlbumAndArtist) {
+    Track track;
+    track.id = "album-track-1";
+    track.title = "Song";
+    track.artist = "Track Artist";
+    track.album_artist = "Album Artist";
+    track.album = "The Album";
+    track.genre = "Rock";
+    track.file_path = "/music/album-track.mp3";
+    ASSERT_TRUE(storage->add_track(track));
+
+    const auto albums = storage->get_all_albums();
+    ASSERT_EQ(albums.size(), 1u);
+    EXPECT_EQ(albums[0].title, "The Album");
+
+    const auto album = storage->get_album(albums[0].id);
+    EXPECT_EQ(album.track_ids, std::vector<std::string>{"album-track-1"});
+
+    const auto artists = storage->get_all_artists();
+    EXPECT_EQ(artists.size(), 2u);  // track artist + album artist
+    EXPECT_EQ(storage->get_tracks_by_artist("Album Artist").size(), 1u);
+    EXPECT_EQ(storage->get_tracks_by_artist("Nobody").size(), 0u);
+
+    ASSERT_TRUE(storage->toggle_favorite_album(albums[0].id));
+    const auto refreshed = storage->get_album(albums[0].id);
+    EXPECT_TRUE(refreshed.favorite);
+}
+
+TEST_F(StorageTest, AddTrackUpsertsByFilePath) {
+    Track track;
+    track.id = "original-id";
+    track.title = "Old Title";
+    track.artist = "Artist";
+    track.album = "Album";
+    track.file_path = "/music/upsert.mp3";
+    ASSERT_TRUE(storage->add_track(track));
+    ASSERT_TRUE(storage->toggle_like("original-id"));
+    storage->update_play_count("original-id");
+
+    Track updated = track;
+    updated.id = "different-id";
+    updated.title = "New Title";
+    ASSERT_TRUE(storage->add_track(updated));
+
+    const Track stored = storage->get_track_by_path("/music/upsert.mp3");
+    EXPECT_EQ(stored.id, "original-id");
+    EXPECT_EQ(stored.title, "New Title");
+    EXPECT_TRUE(stored.liked);
+    EXPECT_EQ(stored.play_count, 1);
 }
 
 int main(int argc, char** argv) {

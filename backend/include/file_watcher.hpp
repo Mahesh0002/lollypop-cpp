@@ -23,6 +23,7 @@ struct FileEvent {
     FileEventType type;
     std::string path;
     std::string dest_path;  // For move events (destination)
+    bool is_dir = false;
 };
 
 class FileWatcher {

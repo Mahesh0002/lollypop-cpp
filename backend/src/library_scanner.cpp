@@ -12,13 +12,17 @@
 #include <taglib/attachedpictureframe.h>
 #include <taglib/mpegfile.h>
 #include <taglib/flacfile.h>
+#include <taglib/flacpicture.h>
 #include <taglib/oggfile.h>
 #include <taglib/vorbisfile.h>
 #include <taglib/mp4file.h>
+#include <taglib/mp4tag.h>
 #include <taglib/mp4coverart.h>
 #include <taglib/apefile.h>
+#include <taglib/tpropertymap.h>
 
 #include <chrono>
+#include <atomic>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -65,28 +69,59 @@ std::string artwork_dir_path() {
     return base + "/.local/share/lollypop-cpp/artwork";
 }
 
-std::string save_artwork(const TagLib::ByteVector& data, const std::string& mime_type) {
-    std::string dir = artwork_dir_path();
-    ::mkdir(dir.c_str(), 0755);
-    mkdir((dir + "/.").c_str(), 0755);
+uint64_t fnv1a(const std::string& value) {
+    uint64_t hash = 1469598103934665603ULL;
+    for (unsigned char c : value) {
+        hash ^= c;
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
 
-    std::stringstream ss;
-    ss << dir << "/" << std::hex << (std::hash<std::string>()(mime_type) ^ std::random_device{}());
-    std::string path = ss.str();
+std::string artwork_extension(const TagLib::ByteVector& data,
+                              const std::string& mime_type) {
+    if (mime_type == "image/png") return ".png";
+    if (mime_type == "image/gif") return ".gif";
+    if (mime_type == "image/bmp") return ".bmp";
+    if (mime_type == "image/jpeg" || mime_type == "image/jpg") return ".jpg";
 
-    std::string ext = ".jpg";
-    if (mime_type == "image/png") ext = ".png";
-    else if (mime_type == "image/gif") ext = ".gif";
-    path += ext;
+    // Fall back to magic bytes: FLAC/MP4 often carry an empty MIME type.
+    const std::string bytes(data.data(), data.size());
+    if (bytes.starts_with("\x89PNG")) return ".png";
+    if (bytes.starts_with("GIF8")) return ".gif";
+    if (bytes.starts_with("BM")) return ".bmp";
+    return ".jpg";
+}
 
-    std::ofstream out(path, std::ios::binary);
+std::string save_artwork(const TagLib::ByteVector& data, const std::string& mime_type,
+                         const std::string& key) {
+    if (data.isEmpty()) return {};
+
+    const std::filesystem::path dir(artwork_dir_path());
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec) {
+        std::cerr << "LibraryScanner: cannot create artwork directory "
+                  << dir << ": " << ec.message() << std::endl;
+        return {};
+    }
+
+    // A stable name per album (or per file when there is no album) means a
+    // rescan overwrites the same file instead of leaking a new random one.
+    uint64_t hash = fnv1a(key.empty() ? std::string("unknown") : key);
+    if (hash == 0) hash = 1;
+    const std::filesystem::path path =
+        dir / (std::to_string(hash) + artwork_extension(data, mime_type));
+
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
     if (!out) return {};
     out.write(data.data(), static_cast<std::streamsize>(data.size()));
     out.close();
-    return path;
+    if (!out) return {};
+    return path.string();
 }
 
-void extract_artwork(TagLib::File* file, Track& track) {
+void extract_artwork(TagLib::File* file, Track& track, const std::string& key) {
     if (!file) return;
 
     // ID3v2 APIC picture (MP3 and other ID3v2-tagged formats)
@@ -95,18 +130,46 @@ void extract_artwork(TagLib::File* file, Track& track) {
             TagLib::ID3v2::FrameList frames = id3v2->frameListMap()["APIC"];
             if (!frames.isEmpty()) {
                 if (auto* pic =
-                        static_cast<TagLib::ID3v2::AttachedPictureFrame*>(
+                        dynamic_cast<TagLib::ID3v2::AttachedPictureFrame*>(
                             frames.front())) {
-                    track.artwork_path =
-                        save_artwork(pic->picture(), pic->mimeType().to8Bit(true));
+                    track.artwork_path = save_artwork(
+                        pic->picture(), pic->mimeType().to8Bit(true), key);
                 }
             }
         }
     }
 
-    // TODO: FLAC (pictureList on FLAC::Tag), Ogg (Vorbis comment picture),
-    // MP4 (cover art) artwork extraction can be added here once the
-    // corresponding TagLib APIs are verified against the installed version.
+    // FLAC PICTURE metadata blocks
+    if (auto* flac = dynamic_cast<TagLib::FLAC::File*>(file)) {
+        const auto pictures = flac->pictureList();
+        if (!pictures.isEmpty()) {
+            const TagLib::FLAC::Picture* picture = pictures.front();
+            track.artwork_path = save_artwork(
+                picture->data(), picture->mimeType().to8Bit(true), key);
+        }
+    }
+
+    // MP4/M4A "covr" atom
+    if (auto* mp4 = dynamic_cast<TagLib::MP4::File*>(file)) {
+        if (auto* tag = dynamic_cast<TagLib::MP4::Tag*>(mp4->tag());
+            tag && tag->contains("covr")) {
+            const TagLib::MP4::CoverArtList covers =
+                tag->item("covr").toCoverArtList();
+            if (!covers.isEmpty()) {
+                const TagLib::MP4::CoverArt cover = covers.front();
+                const std::string mime =
+                    cover.format() == TagLib::MP4::CoverArt::PNG
+                        ? "image/png"
+                        : (cover.format() == TagLib::MP4::CoverArt::GIF
+                               ? "image/gif"
+                               : (cover.format() == TagLib::MP4::CoverArt::BMP
+                                      ? "image/bmp"
+                                      : "image/jpeg"));
+                track.artwork_path =
+                    save_artwork(cover.data(), mime, key);
+            }
+        }
+    }
 }
 
 }  // namespace
@@ -116,7 +179,7 @@ struct LibraryScanner::Impl {
     ProgressCallback progress_cb;
     TrackFoundCallback track_cb;
     ErrorCallback error_cb;
-    bool cancelled = false;
+    std::atomic<bool> cancelled{false};
 
     void scan_recursive(const std::filesystem::path& path) {
         try {
@@ -149,12 +212,22 @@ struct LibraryScanner::Impl {
                 progress.current_file = file_path.string();
                 if (progress_cb) progress_cb(progress);
 
-                process_file(file_path.string());
+                process_file_safe(file_path.string());
                 progress.files_processed++;
                 if (progress_cb) progress_cb(progress);
             }
         } catch (const std::filesystem::filesystem_error& e) {
             std::cerr << "LibraryScanner: filesystem error: " << e.what() << std::endl;
+        }
+    }
+
+    void process_file_safe(const std::string& file_path) {
+        try {
+            process_file(file_path);
+        } catch (const std::exception& e) {
+            if (error_cb) error_cb(file_path, e.what());
+        } catch (...) {
+            if (error_cb) error_cb(file_path, "Unknown metadata error");
         }
     }
 
@@ -173,8 +246,6 @@ struct LibraryScanner::Impl {
         track.title = tag->title().to8Bit(true);
         track.artist = tag->artist().to8Bit(true);
         track.album = tag->album().to8Bit(true);
-        // tag->albumArtist() is not available on the base Tag class in this
-        // TagLib version; album_artist is left empty for now.
         track.genre = tag->genre().to8Bit(true);
         track.track_number = tag->track();
         track.year = tag->year();
@@ -182,7 +253,31 @@ struct LibraryScanner::Impl {
         track.file_path = file_path;
         track.date_added = now_epoch_seconds();
 
-        extract_artwork(file.file(), track);
+        // Album artist is not exposed by TagLib::Tag; read it from the
+        // format-independent property map.
+        if (file.file()) {
+            const TagLib::PropertyMap properties = file.file()->properties();
+            if (properties.contains("ALBUMARTIST")) {
+                const TagLib::StringList values = properties.value("ALBUMARTIST");
+                if (!values.isEmpty()) {
+                    track.album_artist = values.front().to8Bit(true);
+                }
+            }
+        }
+
+        // Keep the UI readable when files have missing or partial tags.
+        if (track.title.empty()) {
+            track.title = std::filesystem::path(file_path).stem().string();
+        }
+        if (track.artist.empty()) track.artist = "Unknown Artist";
+        if (track.album.empty()) track.album = "Unknown Album";
+        if (track.album_artist.empty()) track.album_artist = track.artist;
+
+        const std::string artwork_key =
+            track.album != "Unknown Album"
+                ? (track.album_artist + "|" + track.album)
+                : track.file_path;
+        extract_artwork(file.file(), track, artwork_key);
 
         if (track_cb) track_cb(track);
     }
@@ -227,7 +322,7 @@ void LibraryScanner::scan_directory(const std::string& path, bool recursive) {
             impl_->progress.files_found++;
             impl_->progress.current_file = it->path().string();
             if (impl_->progress_cb) impl_->progress_cb(impl_->progress);
-            impl_->process_file(it->path().string());
+            impl_->process_file_safe(it->path().string());
             impl_->progress.files_processed++;
             if (impl_->progress_cb) impl_->progress_cb(impl_->progress);
         }
@@ -249,7 +344,7 @@ void LibraryScanner::scan_file(const std::string& path) {
     impl_->progress.files_found++;
     impl_->progress.current_file = path;
     if (impl_->progress_cb) impl_->progress_cb(impl_->progress);
-    impl_->process_file(path);
+    impl_->process_file_safe(path);
     impl_->progress.files_processed++;
     if (impl_->progress_cb) impl_->progress_cb(impl_->progress);
 }

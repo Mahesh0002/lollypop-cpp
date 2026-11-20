@@ -17,10 +17,6 @@ namespace lollypop {
 struct AudioEngine::Impl {
     GstElement* pipeline = nullptr;
     GstElement* playbin = nullptr;
-    GstElement* volume = nullptr;
-    GstElement* audio_sink = nullptr;
-    GstElement* tee = nullptr;
-    GstElement* appsink = nullptr;
 
     // Use full std::function types to avoid nested class typedef issues
     std::function<void(double position, double duration)> position_cb;
@@ -58,97 +54,15 @@ bool AudioEngine::initialize() {
         return false;
     }
 
-    // Create playbin for automatic format handling
+    // Use playbin's default autoaudiosink. Visualization is handled by the
+    // separate CAVA process, so the previous tee/appsink branch was dead code
+    // that only added latency and an unnecessary appsink dependency.
     impl_->playbin = gst_element_factory_make("playbin", "player");
     if (!impl_->playbin) {
         std::cerr << "Failed to create playbin" << std::endl;
         return false;
     }
-
-    // Create custom audio sink with tee for visualization
-    impl_->audio_sink = gst_bin_new("audio-sink");
-    if (!impl_->audio_sink) {
-        std::cerr << "Failed to create audio-sink bin" << std::endl;
-        return false;
-    }
-
-    // Elements for audio sink bin
-    GstElement* convert = gst_element_factory_make("audioconvert", "convert");
-    GstElement* resample = gst_element_factory_make("audioresample", "resample");
-    impl_->tee = gst_element_factory_make("tee", "tee");
-
-    // Output branch
-    GstElement* queue_out = gst_element_factory_make("queue", "queue-out");
-    GstElement* auto_sink = gst_element_factory_make("autoaudiosink", "auto-sink");
-
-    // Visualization branch
-    GstElement* queue_vis = gst_element_factory_make("queue", "queue-vis");
-    impl_->appsink = gst_element_factory_make("appsink", "vis-sink");
-    if (!impl_->appsink) {
-        std::cerr << "Failed to create appsink" << std::endl;
-        return false;
-    }
-
-    GstCaps* caps = gst_caps_new_simple("audio/x-raw",
-        "format", G_TYPE_STRING, "F32LE",
-        "layout", G_TYPE_STRING, "interleaved",
-        "rate", G_TYPE_INT, 44100,
-        "channels", G_TYPE_INT, 2,
-        nullptr);
-    g_object_set(impl_->appsink,
-        "emit-signals", TRUE,
-        "sync", FALSE,
-        "max-buffers", 1,
-        "drop", TRUE,
-        "caps", caps,
-        nullptr);
-    gst_caps_unref(caps);
-
-    // Build audio sink bin
-    gst_bin_add_many(GST_BIN(impl_->audio_sink), 
-        convert, resample, impl_->tee, 
-        queue_out, auto_sink, 
-        queue_vis, impl_->appsink, 
-        nullptr);
-
-    // Link output branch: convert -> resample -> tee -> queue_out -> auto_sink
-    gst_element_link_many(convert, resample, impl_->tee, nullptr);
-    gst_element_link_many(queue_out, auto_sink, nullptr);
-
-    // Link visualization branch: tee -> queue_vis -> appsink
-    gst_element_link_many(queue_vis, impl_->appsink, nullptr);
-
-    // Link tee pads
-    GstPad* tee_src_out = gst_element_get_request_pad(impl_->tee, "src_%u");
-    GstPad* queue_out_sink = gst_element_get_static_pad(queue_out, "sink");
-    GstPad* tee_src_vis = gst_element_get_request_pad(impl_->tee, "src_%u");
-    GstPad* queue_vis_sink = gst_element_get_static_pad(queue_vis, "sink");
-
-    gst_pad_link(tee_src_out, queue_out_sink);
-    gst_pad_link(tee_src_vis, queue_vis_sink);
-
-    gst_object_unref(tee_src_out);
-    gst_object_unref(queue_out_sink);
-    gst_object_unref(tee_src_vis);
-    gst_object_unref(queue_vis_sink);
-
-    // Create ghost pad for audio sink bin
-    GstPad* sink_pad = gst_element_get_static_pad(convert, "sink");
-    GstPad* ghost_pad = gst_ghost_pad_new("sink", sink_pad);
-    gst_element_add_pad(impl_->audio_sink, ghost_pad);
-    gst_object_unref(sink_pad);
-
-    // Set audio sink on playbin
-    g_object_set(impl_->playbin, "audio-sink", impl_->audio_sink, nullptr);
-
-    // Volume control
-    impl_->volume = gst_element_factory_make("volume", "volume");
-    if (impl_->volume) {
-        g_object_set(impl_->volume, "volume", impl_->volume_, nullptr);
-        // Insert volume before tee in the chain
-        // We'll set it on playbin's volume property instead for simplicity
-        g_object_set(impl_->playbin, "volume", impl_->volume_, nullptr);
-    }
+    g_object_set(impl_->playbin, "volume", impl_->volume_, nullptr);
 
     // Add playbin to pipeline
     gst_bin_add(GST_BIN(impl_->pipeline), impl_->playbin);
@@ -188,7 +102,16 @@ void AudioEngine::shutdown() {
 }
 
 bool AudioEngine::load_track(const std::string& file_path) {
+    if (!impl_->playbin) return false;
+
     gchar* uri = gst_filename_to_uri(file_path.c_str(), nullptr);
+    if (!uri) {
+        std::cerr << "Invalid file path: " << file_path << std::endl;
+        return false;
+    }
+
+    // Stop the previous stream before switching URI.
+    gst_element_set_state(impl_->pipeline, GST_STATE_READY);
     g_object_set(impl_->playbin, "uri", uri, nullptr);
     g_free(uri);
 
@@ -317,7 +240,7 @@ void AudioEngine::Impl::handle_message(GstMessage* msg) {
             gst_message_parse_error(msg, &err, &debug);
             std::string error = err ? err->message : "Unknown error";
             if (debug) error += " (" + std::string(debug) + ")";
-            g_error_free(err);
+            if (err) g_error_free(err);
             g_free(debug);
             if (error_cb) error_cb(error);
             current_state = AudioEngine::PlaybackState::Error;

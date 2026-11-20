@@ -28,6 +28,11 @@ public:
     bool create_schema();
     bool migrate_schema(int from_version, int to_version);
 
+    // Bulk updates (e.g. a full library scan)
+    bool begin_transaction();
+    bool commit_transaction();
+    bool rollback_transaction();
+
     // Track operations
     std::vector<Track> get_all_tracks();
     std::vector<Track> get_recently_added(int limit);
@@ -35,10 +40,12 @@ public:
     std::vector<Track> get_liked_tracks();
     std::vector<Track> search_tracks(const std::string& query);
     Track get_track(const std::string& track_id);
+    Track get_track_by_path(const std::string& file_path);
     bool add_track(const Track& track);
     bool update_track(const Track& track);
     bool delete_track(const std::string& track_id);
     bool delete_track_by_path(const std::string& file_path);
+    bool delete_tracks_under_path(const std::string& directory_path);
     bool toggle_like(const std::string& track_id);
     void update_play_count(const std::string& track_id);
     void update_last_played(const std::string& track_id);
@@ -54,6 +61,7 @@ public:
     // Artist operations
     std::vector<Artist> get_all_artists();
     Artist get_artist(const std::string& artist_id);
+    std::vector<Track> get_tracks_by_artist(const std::string& artist_name);
     bool add_artist(const Artist& artist);
     bool update_artist(const Artist& artist);
 

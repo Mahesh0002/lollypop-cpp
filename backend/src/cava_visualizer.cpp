@@ -6,11 +6,14 @@
 #include "cava_visualizer.hpp"
 
 #include <giomm.h>
+#include <glibmm/dispatcher.h>
 
 #include <atomic>
+#include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <thread>
 #include <unistd.h>
@@ -23,6 +26,29 @@ struct CavaVisualizer::Impl {
     std::atomic<bool> running{false};
     PointsCallback points_cb;
     std::string config_path;
+    bool owns_config = false;
+
+    // The reader thread must never call the UI callback directly: GTK is not
+    // thread-safe. It stores the newest frame and wakes the GLib main loop,
+    // which then invokes the callback in the main thread.
+    std::mutex points_mutex;
+    std::vector<float> pending_points;
+    Glib::Dispatcher dispatcher;
+
+    Impl() {
+        dispatcher.connect([this] { dispatch_points(); });
+    }
+
+    void dispatch_points() {
+        std::vector<float> points;
+        {
+            std::lock_guard<std::mutex> lock(points_mutex);
+            points.swap(pending_points);
+        }
+        if (!points.empty() && points_cb) {
+            points_cb(points);
+        }
+    }
 
     void read_output() {
         try {
@@ -49,8 +75,12 @@ struct CavaVisualizer::Impl {
                     }
                 }
 
-                if (!points.empty() && points_cb) {
-                    points_cb(points);
+                if (!points.empty()) {
+                    {
+                        std::lock_guard<std::mutex> lock(points_mutex);
+                        pending_points = std::move(points);
+                    }
+                    dispatcher.emit();
                 }
             }
         } catch (const Glib::Error& e) {
@@ -73,23 +103,30 @@ bool CavaVisualizer::start(const std::string& config_path) {
         return false;
     }
 
-    if (config_path.empty()) {
+    impl_->owns_config = config_path.empty();
+    if (impl_->owns_config) {
         impl_->config_path = generate_default_config();
     } else {
         impl_->config_path = config_path;
     }
 
     try {
+        // CAVA writes diagnostics to stderr. Leaving that pipe unread would
+        // eventually fill the pipe buffer and block CAVA, so discard it.
         impl_->cava_process = Gio::Subprocess::create(
             {"cava", "-p", impl_->config_path},
             Gio::Subprocess::Flags::STDOUT_PIPE |
-                Gio::Subprocess::Flags::STDERR_PIPE);
+                Gio::Subprocess::Flags::STDERR_SILENCE);
 
         impl_->running = true;
         impl_->reader_thread = std::thread(&Impl::read_output, impl_.get());
         return true;
     } catch (const Glib::Error& e) {
         std::cerr << "Failed to start CAVA: " << e.what() << std::endl;
+        if (impl_->owns_config && !impl_->config_path.empty()) {
+            std::remove(impl_->config_path.c_str());
+            impl_->config_path.clear();
+        }
         return false;
     }
 }
@@ -106,6 +143,11 @@ void CavaVisualizer::stop() {
     }
     if (impl_->reader_thread.joinable()) {
         impl_->reader_thread.join();
+    }
+    if (impl_->owns_config && !impl_->config_path.empty()) {
+        std::remove(impl_->config_path.c_str());
+        impl_->config_path.clear();
+        impl_->owns_config = false;
     }
 }
 
