@@ -27,6 +27,7 @@ public:
     // Schema management
     bool create_schema();
     bool migrate_schema(int from_version, int to_version);
+    int get_schema_version() const;
 
     // Bulk updates (e.g. a full library scan)
     bool begin_transaction();
@@ -46,6 +47,7 @@ public:
     bool delete_track(const std::string& track_id);
     bool delete_track_by_path(const std::string& file_path);
     bool delete_tracks_under_path(const std::string& directory_path);
+    std::vector<std::string> prune_orphaned_entities();
     bool toggle_like(const std::string& track_id);
     void update_play_count(const std::string& track_id);
     void update_last_played(const std::string& track_id);
@@ -68,11 +70,22 @@ public:
     // Playlist operations
     std::vector<Playlist> get_all_playlists();
     Playlist get_playlist(const std::string& playlist_id);
+    std::vector<Track> get_smart_playlist_tracks(const std::string& playlist_id);
     bool create_playlist(const std::string& name);
+    bool create_smart_playlist(const std::string& name, const std::string& criteria);
+    bool update_smart_playlist(const std::string& playlist_id,
+                               const std::string& name,
+                               const std::string& criteria);
     bool delete_playlist(const std::string& playlist_id);
     bool add_track_to_playlist(const std::string& playlist_id, const std::string& track_id);
     bool remove_track_from_playlist(const std::string& playlist_id, const std::string& track_id);
     bool reorder_playlist_tracks(const std::string& playlist_id, const std::vector<std::string>& track_ids);
+
+    // Lyrics are always stored locally; a caller may mark text as synchronized.
+    bool set_lyrics(const std::string& track_id, const std::string& text,
+                    bool synced = false, const std::string& source = {});
+    std::optional<Lyrics> get_lyrics(const std::string& track_id) const;
+    bool delete_lyrics(const std::string& track_id);
 
     // Genre operations
     std::vector<std::string> get_all_genres();

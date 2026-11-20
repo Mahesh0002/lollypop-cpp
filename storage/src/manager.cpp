@@ -13,6 +13,7 @@
 #include <sstream>
 #include <iomanip>
 #include <random>
+#include <unordered_map>
 
 namespace lollypop {
 namespace {
@@ -128,7 +129,7 @@ void backfill_library_index(sqlite3* db) {
 struct StorageManager::Impl {
     sqlite3* db = nullptr;
     std::string db_path;
-    int schema_version = 1;
+    int schema_version = 2;
 
     Impl() = default;
     ~Impl() {
@@ -205,10 +206,21 @@ bool StorageManager::initialize(const std::string& db_path) {
     // Enable WAL mode for better concurrency
     sqlite3_exec(impl_->db, "PRAGMA journal_mode = WAL;", nullptr, nullptr, nullptr);
 
-    // Create schema
-    if (!create_schema()) {
-        return false;
+    // Schema changes are applied transactionally. A failed DDL or migration
+    // leaves the previous version intact and fails initialization visibly.
+    sqlite3_stmt* version_stmt = nullptr;
+    int current_version = 0;
+    if (sqlite3_prepare_v2(impl_->db, "PRAGMA user_version;", -1,
+                           &version_stmt, nullptr) == SQLITE_OK) {
+        if (sqlite3_step(version_stmt) == SQLITE_ROW) {
+            current_version = sqlite3_column_int(version_stmt, 0);
+        }
+        sqlite3_finalize(version_stmt);
     }
+    // Start from the last durable schema version. Migration and subsequent
+    // idempotent schema repair are safe for both fresh and existing databases.
+    if (!migrate_schema(current_version, 2)) return false;
+    if (!create_schema()) return false;
 
     std::cout << "StorageManager: Initialized at " << impl_->db_path << std::endl;
     return true;
@@ -330,6 +342,18 @@ bool StorageManager::create_schema() {
         );
     )")) return false;
 
+    // Lyrics cache, including synchronized LRC text when available.
+    if (!impl_->execute(R"(
+        CREATE TABLE IF NOT EXISTS lyrics (
+            track_id TEXT PRIMARY KEY,
+            text TEXT NOT NULL,
+            synced INTEGER NOT NULL DEFAULT 0,
+            source TEXT NOT NULL DEFAULT '',
+            updated_at INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+        );
+    )")) return false;
+
     // Preferences table
     if (!impl_->execute(R"(
         CREATE TABLE IF NOT EXISTS preferences (
@@ -379,7 +403,7 @@ bool StorageManager::create_schema() {
         END;
     )");
 
-    impl_->execute("PRAGMA user_version = 1;");
+    impl_->execute("PRAGMA user_version = 2;");
 
     // Repair indexes in databases that were populated before albums/artists
     // were derived from tracks (or by an older scanner).
@@ -389,16 +413,57 @@ bool StorageManager::create_schema() {
 }
 
 bool StorageManager::migrate_schema(int from_version, int to_version) {
-    if (from_version >= to_version) return true;
+    if (from_version < 0 || from_version > to_version || to_version != 2) return false;
+    if (from_version == to_version) return true;
 
-    // Version 1 is the initial schema. Future migrations should be applied
-    // step by step here and bump PRAGMA user_version.
-    if (from_version < 1 && to_version >= 1) {
-        if (!create_schema()) return false;
+    // Schema creation is idempotent, but CREATE TABLE IF NOT EXISTS does not
+    // add columns to existing tables. Keep this explicit migration additive.
+    if (!begin_transaction()) return false;
+    auto has_column = [this](const char* table, const char* column) {
+        sqlite3_stmt* stmt = nullptr;
+        const std::string sql = std::string("PRAGMA table_info(") + table + ");";
+        bool found = false;
+        if (sqlite3_prepare_v2(impl_->db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                if (column_text(stmt, 1) == column) { found = true; break; }
+            }
+            sqlite3_finalize(stmt);
+        }
+        return found;
+    };
+    if (!create_schema()) {
+        rollback_transaction();
+        return false;
     }
+    if (!has_column("playlists", "is_smart") &&
+        !impl_->execute("ALTER TABLE playlists ADD COLUMN is_smart INTEGER NOT NULL DEFAULT 0;")) {
+        rollback_transaction();
+        return false;
+    }
+    if (!has_column("playlists", "smart_criteria") &&
+        !impl_->execute("ALTER TABLE playlists ADD COLUMN smart_criteria TEXT NOT NULL DEFAULT '';")) {
+        rollback_transaction();
+        return false;
+    }
+    // Re-run idempotent schema repair after legacy columns are in place.
+    if (!impl_->execute("PRAGMA user_version = 2;") || !commit_transaction()) {
+        rollback_transaction();
+        return false;
+    }
+    return true;
+}
 
-    return impl_->execute("PRAGMA user_version = " +
-                          std::to_string(to_version) + ";");
+int StorageManager::get_schema_version() const {
+    sqlite3_stmt* stmt = nullptr;
+    int version = 0;
+    if (sqlite3_prepare_v2(impl_->db, "PRAGMA user_version;", -1,
+                           &stmt, nullptr) == SQLITE_OK) {
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            version = sqlite3_column_int(stmt, 0);
+        }
+        sqlite3_finalize(stmt);
+    }
+    return version;
 }
 
 bool StorageManager::begin_transaction() {
@@ -845,6 +910,7 @@ bool StorageManager::delete_track(const std::string& track_id) {
     sqlite3_bind_text(stmt, 1, track_id.c_str(), -1, SQLITE_TRANSIENT);
     bool success = sqlite3_step(stmt) == SQLITE_DONE;
     sqlite3_finalize(stmt);
+    if (success) prune_orphaned_entities();
     return success;
 }
 
@@ -859,6 +925,7 @@ bool StorageManager::delete_track_by_path(const std::string& file_path) {
     sqlite3_bind_text(stmt, 1, file_path.c_str(), -1, SQLITE_TRANSIENT);
     bool success = sqlite3_step(stmt) == SQLITE_DONE;
     sqlite3_finalize(stmt);
+    if (success) prune_orphaned_entities();
     return success;
 }
 
@@ -866,18 +933,59 @@ bool StorageManager::delete_tracks_under_path(const std::string& directory_path)
     std::string prefix = directory_path;
     if (!prefix.empty() && !prefix.ends_with('/')) prefix += '/';
 
-    // substr() avoids LIKE wildcard escaping for paths containing % or _.
+    // Match the directory itself and its descendants without LIKE wildcards.
     const char* sql =
-        "DELETE FROM tracks WHERE substr(file_path, 1, length(?)) = ?;";
+        "DELETE FROM tracks WHERE file_path = ? "
+        "OR substr(file_path, 1, length(?)) = ?;";
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
         return false;
     }
-    sqlite3_bind_text(stmt, 1, prefix.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 1, directory_path.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, prefix.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, prefix.c_str(), -1, SQLITE_TRANSIENT);
     const bool success = sqlite3_step(stmt) == SQLITE_DONE;
     sqlite3_finalize(stmt);
+    if (success) prune_orphaned_entities();
     return success;
+}
+
+std::vector<std::string> StorageManager::prune_orphaned_entities() {
+    std::vector<std::string> orphaned_artwork;
+    sqlite3_stmt* stmt = nullptr;
+    const char* artwork_sql = R"(
+        SELECT artwork_path FROM albums
+        WHERE artwork_path IS NOT NULL AND artwork_path != ''
+          AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.artwork_path = albums.artwork_path)
+          AND NOT EXISTS (
+              SELECT 1 FROM tracks t JOIN album_tracks at ON at.track_id = t.id
+              WHERE at.album_id = albums.id)
+    )";
+    if (sqlite3_prepare_v2(impl_->db, artwork_sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const std::string path = column_text(stmt, 0);
+            if (!path.empty()) orphaned_artwork.push_back(path);
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    if (!impl_->execute(R"(
+        DELETE FROM albums
+        WHERE NOT EXISTS (SELECT 1 FROM album_tracks at WHERE at.album_id = albums.id);
+        DELETE FROM artists
+        WHERE NOT EXISTS (SELECT 1 FROM artist_albums aa WHERE aa.artist_id = artists.id)
+          AND NOT EXISTS (SELECT 1 FROM tracks t
+                          WHERE t.artist = artists.name OR t.album_artist = artists.name);
+        DELETE FROM genres
+        WHERE NOT EXISTS (SELECT 1 FROM track_genres tg WHERE tg.genre = genres.name)
+          AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.genre = genres.name);
+        DELETE FROM artist_albums
+        WHERE NOT EXISTS (SELECT 1 FROM albums a WHERE a.id = artist_albums.album_id)
+           OR NOT EXISTS (SELECT 1 FROM artists ar WHERE ar.id = artist_albums.artist_id);
+    )")) {
+        orphaned_artwork.clear();
+    }
+    return orphaned_artwork;
 }
 
 bool StorageManager::toggle_like(const std::string& track_id) {
@@ -1141,6 +1249,122 @@ std::vector<Playlist> StorageManager::get_all_playlists() {
     return playlists;
 }
 
+std::vector<Track> StorageManager::get_smart_playlist_tracks(
+    const std::string& playlist_id) {
+    std::vector<Track> tracks;
+    const char* criteria_sql =
+        "SELECT smart_criteria FROM playlists WHERE id = ? AND is_smart = 1;";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(impl_->db, criteria_sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        return tracks;
+    }
+    sqlite3_bind_text(stmt, 1, playlist_id.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(stmt) != SQLITE_ROW) {
+        sqlite3_finalize(stmt);
+        return tracks;
+    }
+    const std::string criteria = column_text(stmt, 0);
+    sqlite3_finalize(stmt);
+
+    const std::unordered_map<std::string, std::string> columns = {
+        {"title", "title"}, {"artist", "artist"}, {"album", "album"},
+        {"album_artist", "album_artist"}, {"genre", "genre"},
+        {"year", "year"}, {"duration", "duration"},
+        {"play_count", "play_count"}, {"liked", "liked"}};
+    std::string where;
+    std::vector<std::string> values;
+    std::istringstream input(criteria);
+    std::string clause;
+    while (std::getline(input, clause, ';')) {
+        const auto first = clause.find_first_not_of(" \t\r\n");
+        if (first == std::string::npos) continue;
+        clause.erase(0, first);
+        const auto last = clause.find_last_not_of(" \t\r\n");
+        clause.erase(last + 1);
+        const auto op_pos = clause.find_first_of("=<>!");
+        if (op_pos == std::string::npos) return {};
+        const std::string field = clause.substr(0, op_pos);
+        if (!columns.contains(field)) return {};
+        size_t op_end = op_pos + 1;
+        if (op_end < clause.size() && clause[op_end] == '=') ++op_end;
+        const std::string op = clause.substr(op_pos, op_end - op_pos);
+        if (op != "=" && op != "!=" && op != ">" && op != "<" &&
+            op != ">=" && op != "<=") return {};
+        std::string value = clause.substr(op_end);
+        const auto value_first = value.find_first_not_of(" \t\r\n");
+        if (value_first == std::string::npos) return {};
+        value.erase(0, value_first);
+        const auto value_last = value.find_last_not_of(" \t\r\n");
+        value.erase(value_last + 1);
+        if (value.size() >= 2 &&
+            ((value.front() == '\'' && value.back() == '\'') ||
+             (value.front() == '"' && value.back() == '"'))) {
+            value = value.substr(1, value.size() - 2);
+        }
+        if (!where.empty()) where += " AND ";
+        where += "t." + columns.at(field) + " " + op + " ?";
+        values.push_back(std::move(value));
+    }
+
+    std::string sql = std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks t";
+    // The shared column list uses the tracks qualifier, so alias the table
+    // without changing the selected column names.
+    if (where.empty()) {
+        sql = std::string("SELECT ") + kTrackColumns + " FROM tracks ORDER BY artist, album, track_number;";
+    } else {
+        sql = std::string("SELECT ") + kTrackColumns + " FROM tracks t WHERE " +
+              where + " ORDER BY t.artist, t.album, t.track_number;";
+    }
+    if (sqlite3_prepare_v2(impl_->db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        return tracks;
+    }
+    for (size_t i = 0; i < values.size(); ++i) {
+        sqlite3_bind_text(stmt, static_cast<int>(i + 1), values[i].c_str(),
+                          -1, SQLITE_TRANSIENT);
+    }
+    while (sqlite3_step(stmt) == SQLITE_ROW) tracks.push_back(row_to_track(stmt));
+    sqlite3_finalize(stmt);
+    return tracks;
+}
+
+bool StorageManager::create_smart_playlist(const std::string& name,
+                                            const std::string& criteria) {
+    if (name.empty() || criteria.empty()) return false;
+    sqlite3_stmt* stmt = nullptr;
+    const char* sql =
+        "INSERT INTO playlists (id, name, is_smart, smart_criteria, date_created, date_modified) "
+        "VALUES (?, ?, 1, ?, ?, ?);";
+    if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+    const std::string id = impl_->generate_id();
+    const int64_t now = impl_->get_current_timestamp();
+    sqlite3_bind_text(stmt, 1, id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, criteria.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(stmt, 4, now);
+    sqlite3_bind_int64(stmt, 5, now);
+    const bool success = sqlite3_step(stmt) == SQLITE_DONE;
+    sqlite3_finalize(stmt);
+    return success;
+}
+
+bool StorageManager::update_smart_playlist(const std::string& playlist_id,
+                                           const std::string& name,
+                                           const std::string& criteria) {
+    if (name.empty() || criteria.empty()) return false;
+    sqlite3_stmt* stmt = nullptr;
+    const char* sql =
+        "UPDATE playlists SET name = ?, smart_criteria = ?, date_modified = ? "
+        "WHERE id = ? AND is_smart = 1;";
+    if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, criteria.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(stmt, 3, impl_->get_current_timestamp());
+    sqlite3_bind_text(stmt, 4, playlist_id.c_str(), -1, SQLITE_TRANSIENT);
+    const bool success = sqlite3_step(stmt) == SQLITE_DONE && sqlite3_changes(impl_->db) == 1;
+    sqlite3_finalize(stmt);
+    return success;
+}
+
 Playlist StorageManager::get_playlist(const std::string& playlist_id) {
     Playlist playlist;
     const char* sql = "SELECT id, name, is_smart, smart_criteria, date_created, date_modified FROM playlists WHERE id = ?;";
@@ -1293,6 +1517,55 @@ std::vector<Track> StorageManager::get_tracks_by_genre(const std::string& genre)
         sqlite3_finalize(stmt);
     }
     return tracks;
+}
+
+bool StorageManager::set_lyrics(const std::string& track_id, const std::string& text,
+                                bool synced, const std::string& source) {
+    sqlite3_stmt* stmt = nullptr;
+    const char* sql =
+        "INSERT INTO lyrics (track_id, text, synced, source, updated_at) "
+        "VALUES (?, ?, ?, ?, ?) ON CONFLICT(track_id) DO UPDATE SET "
+        "text=excluded.text, synced=excluded.synced, source=excluded.source, "
+        "updated_at=excluded.updated_at;";
+    if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(stmt, 1, track_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, text.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 3, synced ? 1 : 0);
+    sqlite3_bind_text(stmt, 4, source.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(stmt, 5, impl_->get_current_timestamp());
+    const bool success = sqlite3_step(stmt) == SQLITE_DONE;
+    sqlite3_finalize(stmt);
+    return success;
+}
+
+std::optional<Lyrics> StorageManager::get_lyrics(const std::string& track_id) const {
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(impl_->db,
+            "SELECT track_id, text, synced, source, updated_at FROM lyrics WHERE track_id = ?;",
+            -1, &stmt, nullptr) != SQLITE_OK) return std::nullopt;
+    sqlite3_bind_text(stmt, 1, track_id.c_str(), -1, SQLITE_TRANSIENT);
+    std::optional<Lyrics> result;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        Lyrics lyrics;
+        lyrics.track_id = column_text(stmt, 0);
+        lyrics.text = column_text(stmt, 1);
+        lyrics.synced = sqlite3_column_int(stmt, 2) != 0;
+        lyrics.source = column_text(stmt, 3);
+        lyrics.updated_at = sqlite3_column_int64(stmt, 4);
+        result = std::move(lyrics);
+    }
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+bool StorageManager::delete_lyrics(const std::string& track_id) {
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(impl_->db, "DELETE FROM lyrics WHERE track_id = ?;",
+                           -1, &stmt, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(stmt, 1, track_id.c_str(), -1, SQLITE_TRANSIENT);
+    const bool success = sqlite3_step(stmt) == SQLITE_DONE;
+    sqlite3_finalize(stmt);
+    return success;
 }
 
 bool StorageManager::set_preference(const std::string& key, const std::string& value) {

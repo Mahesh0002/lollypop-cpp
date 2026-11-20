@@ -10,6 +10,10 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <atomic>
+#include <thread>
+#include <optional>
+#include <cstddef>
 
 #include "types.hpp"
 
@@ -36,7 +40,18 @@ public:
     void shutdown();
 
     // Library management
+    using ScanProgressCallback = LibraryScanner::ProgressCallback;
+    using ScanFinishedCallback = std::function<void(bool success, bool cancelled)>;
     void scan_library(const std::string& path);
+    bool start_scan_library(const std::string& path);
+    void cancel_scan_library();
+    bool is_scan_running() const;
+    void set_scan_progress_callback(ScanProgressCallback cb) {
+        scan_progress_cb_ = std::move(cb);
+    }
+    void set_scan_finished_callback(ScanFinishedCallback cb) {
+        scan_finished_cb_ = std::move(cb);
+    }
     void add_watch_directory(const std::string& path);
     void remove_watch_directory(const std::string& path);
     void open_uri(const std::string& uri);
@@ -62,10 +77,26 @@ public:
     // Playlist queries
     std::vector<Playlist> get_all_playlists();
     Playlist get_playlist(const std::string& playlist_id);
+    std::vector<Track> get_smart_playlist_tracks(const std::string& playlist_id);
     void create_playlist(const std::string& name);
+    void create_smart_playlist(const std::string& name, const std::string& criteria);
+    void update_smart_playlist(const std::string& id, const std::string& name,
+                               const std::string& criteria);
     void delete_playlist(const std::string& playlist_id);
     void add_track_to_playlist(const std::string& playlist_id, const std::string& track_id);
     void remove_track_from_playlist(const std::string& playlist_id, const std::string& track_id);
+
+    // Lyrics
+    std::optional<Lyrics> get_lyrics(const std::string& track_id);
+    void set_lyrics(const std::string& track_id, const std::string& text,
+                    bool synced = false, const std::string& source = {});
+
+    // Queue editing (all indices refer to the live queue).
+    bool enqueue_track(const std::string& track_id, bool next = false);
+    bool remove_from_queue(size_t index);
+    bool move_queue_item(size_t from, size_t to);
+    bool play_queue_index(size_t index);
+    void clear_queue();
 
     // Playback control
     void play_track(const std::string& track_id);
@@ -144,6 +175,27 @@ private:
     std::mutex file_events_mutex_;
     std::vector<FileEvent> pending_file_events_;
 
+    struct ScanResult { bool success = false; bool cancelled = false; };
+    std::thread scan_thread_;
+    std::unique_ptr<LibraryScanner> active_scan_scanner_;
+    std::atomic<bool> scan_running_{false};
+    mutable std::mutex scan_mutex_;
+    std::vector<Track> scan_tracks_;
+    std::vector<Track> pending_scan_tracks_;
+    std::string pending_scan_path_;
+    std::atomic<bool> scan_cancel_requested_{false};
+    ScanProgress scan_progress_;
+    ScanProgressCallback scan_progress_cb_;
+    ScanFinishedCallback scan_finished_cb_;
+    std::unique_ptr<Glib::Dispatcher> scan_dispatcher_;
+    std::optional<ScanResult> pending_scan_result_;
+
+    // Serialize storage operations across the scan worker and GLib thread.
+    mutable std::mutex storage_mutex_;
+    std::vector<std::string> shuffle_history_;
+    size_t shuffle_history_index_ = 0;
+    bool restoring_playback_ = false;
+
     // Current playback state
     bool playing_ = false;
     double volume_ = 0.7;
@@ -161,6 +213,7 @@ private:
     void handle_file_event(const FileEvent& event);
     void dispatch_file_events();
     void process_file_event(const FileEvent& event);
+    void dispatch_scan_updates();
 
     void setup_cava_callbacks();
 
@@ -169,6 +222,7 @@ private:
 
     bool start_queue_index(size_t index);
     void update_play_statistics();
+    void persist_queue();
 
     void emit_track_changed(const Track& track);
     void emit_position_changed(double position, double duration);

@@ -36,6 +36,8 @@ public:
     void scan_directory(const std::string& path, bool recursive = true);
     void scan_file(const std::string& path);
     void cancel();
+    void reset_cancellation();
+    bool is_cancelled() const;
 
     void set_progress_callback(ProgressCallback cb);
     void set_track_found_callback(TrackFoundCallback cb);

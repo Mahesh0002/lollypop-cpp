@@ -13,10 +13,14 @@
 #include <random>
 #include <chrono>
 #include <ctime>
+#include <filesystem>
+#include <thread>
 
 namespace lollypop {
 
 BackendController::BackendController() {
+    scan_dispatcher_ = std::make_unique<Glib::Dispatcher>();
+    scan_dispatcher_->connect([this] { dispatch_scan_updates(); });
     file_event_dispatcher_ = std::make_unique<Glib::Dispatcher>();
     file_event_dispatcher_->connect([this] { dispatch_file_events(); });
 }
@@ -70,11 +74,13 @@ bool BackendController::initialize() {
         mpris_manager_.reset();
     }
 
-    // Initialize library scanner
+    // Synchronous single-file scans (OpenUri and watcher events) use this
+    // scanner; full library scans use an isolated worker-owned instance.
     library_scanner_ = std::make_unique<LibraryScanner>();
     library_scanner_->set_track_found_callback([this](const Track& track) {
         if (track.file_path.empty()) return;
-        if (!storage_->add_track(track)) {
+        std::lock_guard<std::mutex> lock(storage_mutex_);
+        if (storage_ && !storage_->add_track(track)) {
             std::cerr << "BackendController: Failed to store track "
                       << track.file_path << std::endl;
         }
@@ -118,6 +124,8 @@ bool BackendController::initialize() {
 
 void BackendController::shutdown() {
     std::cout << "BackendController: Shutting down..." << std::endl;
+    cancel_scan_library();
+    if (scan_thread_.joinable()) scan_thread_.join();
     if (audio_engine_) {
         audio_engine_->stop();
     }
@@ -138,7 +146,9 @@ void BackendController::shutdown() {
     if (file_watcher_) {
         file_watcher_.reset();
     }
+    active_scan_scanner_.reset();
     library_scanner_.reset();
+    scan_dispatcher_.reset();
     storage_.reset();
     audio_engine_.reset();
 }
@@ -266,20 +276,107 @@ void BackendController::setup_audio_callbacks() {
 }
 
 void BackendController::scan_library(const std::string& path) {
-    std::cout << "BackendController: Scanning library at " << path << std::endl;
-    if (!library_scanner_) {
-        std::cerr << "BackendController: Library scanner not initialized" << std::endl;
-        return;
-    }
-    // One transaction for the whole scan: hundreds of individual inserts are
-    // otherwise flushed to disk one by one.
-    const bool in_transaction = storage_->begin_transaction();
-    library_scanner_->scan_directory(path, true);
-    if (in_transaction) storage_->commit_transaction();
+    // Keep source compatibility while making the default scan nonblocking.
+    start_scan_library(path);
+}
 
-    // New/changed files should be tracked from now on.
-    add_watch_directory(path);
-    emit_library_changed();
+bool BackendController::start_scan_library(const std::string& path) {
+    if (!library_scanner_ || !storage_ || path.empty() ||
+        scan_running_.exchange(true)) return false;
+    if (scan_thread_.joinable()) scan_thread_.join();
+    {
+        std::lock_guard<std::mutex> lock(scan_mutex_);
+        scan_tracks_.clear();
+        pending_scan_tracks_.clear();
+        pending_scan_path_.clear();
+        pending_scan_result_.reset();
+        scan_progress_ = ScanProgress{};
+    }
+    scan_cancel_requested_ = false;
+    active_scan_scanner_ = std::make_unique<LibraryScanner>();
+    active_scan_scanner_->set_track_found_callback([this](const Track& track) {
+        if (track.file_path.empty()) return;
+        std::lock_guard<std::mutex> lock(scan_mutex_);
+        scan_tracks_.push_back(track);
+    });
+    active_scan_scanner_->set_error_callback([](const std::string& file, const std::string& error) {
+        std::cerr << "LibraryScanner: error on " << file << ": " << error << std::endl;
+    });
+    active_scan_scanner_->set_progress_callback([this](const ScanProgress& progress) {
+        {
+            std::lock_guard<std::mutex> lock(scan_mutex_);
+            scan_progress_ = progress;
+        }
+        if (scan_dispatcher_) scan_dispatcher_->emit();
+    });
+    LibraryScanner* scanner = active_scan_scanner_.get();
+
+    scan_thread_ = std::thread([this, path, scanner] {
+        scanner->scan_directory(path, true);
+        const bool cancelled = scan_cancel_requested_.load() || scanner->is_cancelled();
+        {
+            std::lock_guard<std::mutex> lock(scan_mutex_);
+            pending_scan_tracks_.clear();
+            if (!cancelled) pending_scan_tracks_.swap(scan_tracks_);
+            else scan_tracks_.clear();
+            pending_scan_path_ = path;
+            scan_progress_.cancelled = cancelled;
+            pending_scan_result_ = ScanResult{!cancelled, cancelled};
+        }
+        scan_running_ = false;
+        if (scan_dispatcher_) scan_dispatcher_->emit();
+    });
+    return true;
+}
+
+void BackendController::cancel_scan_library() {
+    if (active_scan_scanner_ && scan_running_) {
+        scan_cancel_requested_ = true;
+        active_scan_scanner_->cancel();
+    }
+}
+
+bool BackendController::is_scan_running() const {
+    return scan_running_.load();
+}
+
+void BackendController::dispatch_scan_updates() {
+    ScanProgress progress;
+    std::optional<ScanResult> result;
+    std::vector<Track> tracks;
+    std::string path;
+    {
+        std::lock_guard<std::mutex> lock(scan_mutex_);
+        progress = scan_progress_;
+        result.swap(pending_scan_result_);
+        if (result && result->success) tracks.swap(pending_scan_tracks_);
+        path.swap(pending_scan_path_);
+    }
+    if (scan_progress_cb_) scan_progress_cb_(progress);
+    if (result && result->success) {
+        bool success = false;
+        {
+            std::lock_guard<std::mutex> lock(storage_mutex_);
+            const bool transaction = storage_ && storage_->begin_transaction();
+            success = transaction;
+            for (const auto& track : tracks) {
+                if (!storage_->add_track(track)) {
+                    success = false;
+                    break;
+                }
+            }
+            if (transaction) {
+                if (success) success = storage_->commit_transaction();
+                else storage_->rollback_transaction();
+            }
+        }
+        result->success = success;
+    }
+    if (result) {
+        if (result->success) add_watch_directory(path);
+        if (result->success || result->cancelled) emit_library_changed();
+        if (scan_finished_cb_) scan_finished_cb_(result->success, result->cancelled);
+    }
 }
 
 void BackendController::add_watch_directory(const std::string& path) {
@@ -313,9 +410,14 @@ void BackendController::open_uri(const std::string& uri) {
     }
     if (path.empty() || !LibraryScanner::is_audio_file(path)) return;
 
-    Track track = storage_->get_track_by_path(path);
+    Track track;
+    {
+        std::lock_guard<std::mutex> lock(storage_mutex_);
+        track = storage_->get_track_by_path(path);
+    }
     if (track.id.empty()) {
         library_scanner_->scan_file(path);
+        std::lock_guard<std::mutex> lock(storage_mutex_);
         track = storage_->get_track_by_path(path);
     }
     if (!track.id.empty()) {
@@ -385,10 +487,10 @@ void BackendController::process_file_event(const FileEvent& event) {
             break;
         case FileEventType::Deleted:
             std::cout << "BackendController: File deleted: " << event.path << std::endl;
-            if (event.is_dir) {
-                storage_->delete_tracks_under_path(event.path);
-            } else {
-                storage_->delete_track_by_path(event.path);
+            {
+                std::lock_guard<std::mutex> lock(storage_mutex_);
+                if (event.is_dir) storage_->delete_tracks_under_path(event.path);
+                else storage_->delete_track_by_path(event.path);
             }
             if (current_is_under(event.path)) {
                 stop();
@@ -398,10 +500,10 @@ void BackendController::process_file_event(const FileEvent& event) {
         case FileEventType::Moved:
             std::cout << "BackendController: File moved: " << event.path
                       << " -> " << event.dest_path << std::endl;
-            if (event.is_dir) {
-                storage_->delete_tracks_under_path(event.path);
-            } else {
-                storage_->delete_track_by_path(event.path);
+            {
+                std::lock_guard<std::mutex> lock(storage_mutex_);
+                if (event.is_dir) storage_->delete_tracks_under_path(event.path);
+                else storage_->delete_track_by_path(event.path);
             }
             if (current_is_under(event.path)) {
                 stop();
@@ -491,6 +593,32 @@ void BackendController::remove_track_from_playlist(const std::string& playlist_i
     storage_->remove_track_from_playlist(playlist_id, track_id);
 }
 
+std::vector<Track> BackendController::get_smart_playlist_tracks(
+    const std::string& playlist_id) {
+    return storage_->get_smart_playlist_tracks(playlist_id);
+}
+
+void BackendController::create_smart_playlist(const std::string& name,
+                                               const std::string& criteria) {
+    if (storage_->create_smart_playlist(name, criteria)) emit_library_changed();
+}
+
+void BackendController::update_smart_playlist(const std::string& id,
+                                               const std::string& name,
+                                               const std::string& criteria) {
+    if (storage_->update_smart_playlist(id, name, criteria)) emit_library_changed();
+}
+
+std::optional<Lyrics> BackendController::get_lyrics(const std::string& track_id) {
+    return storage_->get_lyrics(track_id);
+}
+
+void BackendController::set_lyrics(const std::string& track_id,
+                                   const std::string& text, bool synced,
+                                   const std::string& source) {
+    if (storage_->set_lyrics(track_id, text, synced, source)) emit_library_changed();
+}
+
 void BackendController::play_track(const std::string& track_id) {
     play_tracks({track_id}, 0);
 }
@@ -500,6 +628,7 @@ void BackendController::play_tracks(const std::vector<std::string>& track_ids, s
 
     queue_ = track_ids;
     queue_index_ = std::min(start_index, queue_.size() - 1);
+    persist_queue();
     start_queue_index(queue_index_);
 }
 
@@ -507,7 +636,10 @@ bool BackendController::start_queue_index(size_t index) {
     if (queue_.empty() || index >= queue_.size()) return false;
     queue_index_ = index;
 
-    current_track_ = get_track(queue_[queue_index_]);
+    {
+        std::lock_guard<std::mutex> lock(storage_mutex_);
+        current_track_ = storage_->get_track(queue_[queue_index_]);
+    }
     duration_ = current_track_.duration;
     position_ = 0.0;
     playing_ = false;
@@ -548,8 +680,11 @@ bool BackendController::start_queue_index(size_t index) {
 
 void BackendController::update_play_statistics() {
     if (current_track_.id.empty()) return;
-    storage_->update_play_count(current_track_.id);
-    storage_->update_last_played(current_track_.id);
+    {
+        std::lock_guard<std::mutex> lock(storage_mutex_);
+        storage_->update_play_count(current_track_.id);
+        storage_->update_last_played(current_track_.id);
+    }
     current_track_.play_count++;
     current_track_.last_played = static_cast<int64_t>(std::time(nullptr));
 }
@@ -669,7 +804,10 @@ void BackendController::seek(double position_seconds) {
 void BackendController::set_volume(double volume) {
     volume_ = std::clamp(volume, 0.0, 1.0);
     audio_engine_->set_volume(volume_);
-    if (storage_) storage_->set_preference("player.volume", std::to_string(volume_));
+    if (storage_) {
+        std::lock_guard<std::mutex> lock(storage_mutex_);
+        storage_->set_preference("player.volume", std::to_string(volume_));
+    }
     if (mpris_server_) {
         mpris_server_->update_volume(volume_);
     }
@@ -703,9 +841,92 @@ size_t BackendController::get_queue_index() const {
     return queue_index_;
 }
 
+void BackendController::persist_queue() {
+    if (!storage_) return;
+    std::string encoded;
+    for (const auto& id : queue_) {
+        if (id.find_first_of("\n\r") != std::string::npos) continue;
+        if (!encoded.empty()) encoded += '\n';
+        encoded += id;
+    }
+    std::lock_guard<std::mutex> lock(storage_mutex_);
+    storage_->set_preference("player.queue", encoded);
+    storage_->set_preference("player.queue_index", std::to_string(queue_index_));
+}
+
+bool BackendController::enqueue_track(const std::string& track_id, bool next) {
+    if (track_id.empty()) return false;
+    Track track;
+    {
+        std::lock_guard<std::mutex> lock(storage_mutex_);
+        track = storage_->get_track(track_id);
+    }
+    if (track.id.empty()) return false;
+    if (next && !queue_.empty()) {
+        const size_t insert_at = std::min(queue_index_ + 1, queue_.size());
+        queue_.insert(queue_.begin() + static_cast<std::ptrdiff_t>(insert_at), track_id);
+    } else {
+        queue_.push_back(track_id);
+    }
+    if (queue_.size() == 1) queue_index_ = 0;
+    persist_queue();
+    emit_queue_changed();
+    return true;
+}
+
+bool BackendController::remove_from_queue(size_t index) {
+    if (index >= queue_.size()) return false;
+    const bool removing_current = index == queue_index_;
+    queue_.erase(queue_.begin() + static_cast<std::ptrdiff_t>(index));
+    if (queue_.empty()) {
+        queue_index_ = 0;
+        stop();
+    } else if (index < queue_index_) {
+        --queue_index_;
+    } else if (removing_current) {
+        queue_index_ = std::min(index, queue_.size() - 1);
+        start_queue_index(queue_index_);
+    }
+    persist_queue();
+    emit_queue_changed();
+    sync_mpris_capabilities();
+    return true;
+}
+
+bool BackendController::move_queue_item(size_t from, size_t to) {
+    if (from >= queue_.size() || to >= queue_.size()) return false;
+    if (from == to) return true;
+    const std::string item = queue_[from];
+    queue_.erase(queue_.begin() + static_cast<std::ptrdiff_t>(from));
+    queue_.insert(queue_.begin() + static_cast<std::ptrdiff_t>(to), item);
+    if (queue_index_ == from) queue_index_ = to;
+    else if (from < queue_index_ && to >= queue_index_) --queue_index_;
+    else if (from > queue_index_ && to <= queue_index_) ++queue_index_;
+    persist_queue();
+    emit_queue_changed();
+    sync_mpris_capabilities();
+    return true;
+}
+
+bool BackendController::play_queue_index(size_t index) {
+    return start_queue_index(index);
+}
+
+void BackendController::clear_queue() {
+    queue_.clear();
+    queue_index_ = 0;
+    persist_queue();
+    stop();
+    emit_queue_changed();
+}
+
+
 void BackendController::set_shuffle(bool enabled) {
     shuffle_ = enabled;
-    if (storage_) storage_->set_preference("player.shuffle", enabled ? "1" : "0");
+    if (storage_) {
+        std::lock_guard<std::mutex> lock(storage_mutex_);
+        storage_->set_preference("player.shuffle", enabled ? "1" : "0");
+    }
     if (mpris_server_) {
         mpris_server_->update_shuffle(enabled);
     }
@@ -715,8 +936,11 @@ void BackendController::set_shuffle(bool enabled) {
 void BackendController::set_repeat(bool enabled) {
     repeat_ = enabled;
     if (enabled) repeat_one_ = false;
-    if (storage_) storage_->set_preference("player.repeat", enabled ? "1" : "0");
-    if (storage_) storage_->set_preference("player.repeat_one", repeat_one_ ? "1" : "0");
+    if (storage_) {
+        std::lock_guard<std::mutex> lock(storage_mutex_);
+        storage_->set_preference("player.repeat", enabled ? "1" : "0");
+        storage_->set_preference("player.repeat_one", repeat_one_ ? "1" : "0");
+    }
     if (mpris_server_) {
         mpris_server_->update_loop_state(enabled ? 1 : 0);
     }
@@ -726,8 +950,11 @@ void BackendController::set_repeat(bool enabled) {
 void BackendController::set_repeat_one(bool enabled) {
     repeat_one_ = enabled;
     if (enabled) repeat_ = false;
-    if (storage_) storage_->set_preference("player.repeat", repeat_ ? "1" : "0");
-    if (storage_) storage_->set_preference("player.repeat_one", repeat_one_ ? "1" : "0");
+    if (storage_) {
+        std::lock_guard<std::mutex> lock(storage_mutex_);
+        storage_->set_preference("player.repeat", repeat_ ? "1" : "0");
+        storage_->set_preference("player.repeat_one", repeat_one_ ? "1" : "0");
+    }
     if (mpris_server_) {
         mpris_server_->update_loop_state(enabled ? 2 : 0);
     }
@@ -747,10 +974,12 @@ bool BackendController::get_repeat_one() const {
 }
 
 void BackendController::toggle_like(const std::string& track_id) {
+    std::lock_guard<std::mutex> lock(storage_mutex_);
     storage_->toggle_like(track_id);
 }
 
 void BackendController::toggle_favorite_album(const std::string& album_id) {
+    std::lock_guard<std::mutex> lock(storage_mutex_);
     storage_->toggle_favorite_album(album_id);
 }
 

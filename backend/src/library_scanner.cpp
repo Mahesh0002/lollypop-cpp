@@ -182,6 +182,7 @@ struct LibraryScanner::Impl {
     std::atomic<bool> cancelled{false};
 
     void scan_recursive(const std::filesystem::path& path) {
+        if (cancelled.load()) return;
         try {
             std::error_code ec;
             std::filesystem::directory_iterator it(path, ec);
@@ -191,7 +192,7 @@ struct LibraryScanner::Impl {
             }
 
             for (; it != std::filesystem::directory_iterator(); it.increment(ec)) {
-                if (cancelled) break;
+                if (cancelled.load()) break;
                 if (ec) {
                     if (error_cb) error_cb(it->path().string(), ec.message());
                     continue;
@@ -302,7 +303,6 @@ LibraryScanner::LibraryScanner() : impl_(std::make_unique<Impl>()) {}
 LibraryScanner::~LibraryScanner() = default;
 
 void LibraryScanner::scan_directory(const std::string& path, bool recursive) {
-    impl_->cancelled = false;
     impl_->progress = ScanProgress{};
     if (recursive) {
         impl_->scan_recursive(path);
@@ -351,6 +351,14 @@ void LibraryScanner::scan_file(const std::string& path) {
 
 void LibraryScanner::cancel() {
     impl_->cancelled = true;
+}
+
+void LibraryScanner::reset_cancellation() {
+    impl_->cancelled = false;
+}
+
+bool LibraryScanner::is_cancelled() const {
+    return impl_->cancelled.load();
 }
 
 void LibraryScanner::set_progress_callback(ProgressCallback cb) {

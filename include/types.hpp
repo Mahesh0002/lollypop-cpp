@@ -59,4 +59,12 @@ struct Playlist {
     std::vector<std::string> track_ids;
 };
 
+struct Lyrics {
+    std::string track_id;
+    std::string text;
+    bool synced = false;
+    std::string source;
+    int64_t updated_at = 0;
+};
+
 } // namespace lollypop
