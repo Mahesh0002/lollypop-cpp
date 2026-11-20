@@ -5,7 +5,6 @@
 #include "application.hpp"
 #include "main_window.hpp"
 #include "controller.hpp"
-#include "manager.hpp"
 
 #include <gtk/gtk.h>
 #include <iostream>
@@ -34,19 +33,11 @@ int Application::run(int argc, char** argv) {
 }
 
 void Application::on_activate() {
-    // Initialize backend and storage
+    // Initialize backend (owns storage, audio engine and MPRIS)
     backend_ = std::make_unique<BackendController>();
-    storage_ = std::make_unique<StorageManager>();
 
-    // Initialize backend
     if (!backend_->initialize()) {
         std::cerr << "Failed to initialize backend" << std::endl;
-        return;
-    }
-
-    // Initialize storage
-    if (!storage_->initialize()) {
-        std::cerr << "Failed to initialize storage" << std::endl;
         return;
     }
 
@@ -96,7 +87,6 @@ void Application::on_shutdown() {
     // Cleanup
     main_window_.reset();
     backend_.reset();
-    storage_.reset();
 }
 
 void Application::on_activate_static(GtkApplication* app, gpointer user_data) {

@@ -36,6 +36,15 @@ bool BackendController::initialize() {
     }
     setup_audio_callbacks();
 
+    // Initialize MPRIS (external player discovery/control). Non-fatal when
+    // there is no session bus (e.g. headless test runs).
+    mpris_manager_ = std::make_unique<MprisManager>();
+    if (!mpris_manager_->initialize()) {
+        std::cerr << "BackendController: MPRIS unavailable, continuing without it"
+                  << std::endl;
+        mpris_manager_.reset();
+    }
+
     std::cout << "BackendController: Initialized successfully" << std::endl;
     return true;
 }
@@ -44,6 +53,10 @@ void BackendController::shutdown() {
     std::cout << "BackendController: Shutting down..." << std::endl;
     if (audio_engine_) {
         audio_engine_->stop();
+    }
+    if (mpris_manager_) {
+        mpris_manager_->shutdown();
+        mpris_manager_.reset();
     }
     storage_.reset();
     audio_engine_.reset();

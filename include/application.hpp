@@ -13,7 +13,6 @@ namespace lollypop {
 
 class MainWindow;
 class BackendController;
-class StorageManager;
 
 class Application {
 public:
@@ -28,7 +27,6 @@ public:
     GtkApplication* get_gtk_application() const { return app_.get(); }
     MainWindow* get_main_window() const { return main_window_.get(); }
     BackendController* get_backend() const { return backend_.get(); }
-    StorageManager* get_storage() const { return storage_.get(); }
 
 protected:
     Application(const std::string& application_id);
@@ -43,7 +41,6 @@ private:
     std::unique_ptr<GtkApplication, void(*)(GtkApplication*)> app_;
     std::unique_ptr<MainWindow> main_window_;
     std::unique_ptr<BackendController> backend_;
-    std::unique_ptr<StorageManager> storage_;
 
     // Static callbacks for GTK
     static void on_activate_static(GtkApplication* app, gpointer user_data);
