@@ -14,13 +14,15 @@ namespace lollypop {
 // Reuse the WaveformWidget from right_now_playing
 class WaveformWidget {
 public:
-    explicit WaveformWidget(GtkWidget* parent) {
+    explicit WaveformWidget(GtkWidget* parent = nullptr) {
         drawing_area_ = gtk_drawing_area_new();
         gtk_widget_add_css_class(drawing_area_, "waveform-widget");
         gtk_widget_set_size_request(drawing_area_, -1, 40);
         gtk_widget_set_hexpand(drawing_area_, TRUE);
         gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(drawing_area_), draw_callback, this, nullptr);
-        gtk_box_append(GTK_BOX(parent), drawing_area_);
+        if (parent) {
+            gtk_box_append(GTK_BOX(parent), drawing_area_);
+        }
     }
 
     GtkWidget* get_widget() const { return drawing_area_; }
@@ -111,15 +113,6 @@ void BottomPlayback::setup_ui() {
     // Top separator
     separator_ = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_widget_add_css_class(separator_, "bottom-playback-separator");
-
-    GtkWidget* vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_box_append(GTK_BOX(vbox), separator_);
-    gtk_box_append(GTK_BOX(vbox), main_box_);
-    gtk_widget_set_parent(vbox, gtk_widget_get_parent(main_box_));  // Will be reparented by main window
-
-    // Actually, main_box_ is added directly to grid, so we need to handle separator differently
-    // For now, add separator as first child of main_box_ with full width
-    // Better approach: main window adds separator above bottom panel
 
     create_left_section();
     create_center_section();
@@ -221,16 +214,10 @@ void BottomPlayback::create_progress_section() {
     gtk_widget_set_margin_start(progress_box_, 48);
     gtk_widget_set_margin_end(progress_box_, 48);
 
-    // Time label
-    time_label_ = gtk_label_new("0:00 / 0:00");
-    gtk_widget_add_css_class(time_label_, "bottom-playback-time");
-    gtk_widget_set_size_request(time_label_, 100, -1);
+    // Create waveform widget WITHOUT parent (we'll add it manually)
+    waveform_widget_ = new WaveformWidget(nullptr);
 
-    // Waveform
-    waveform_widget_ = new WaveformWidget(progress_box_);
-
-    // We need to add time label and waveform to a container
-    // Let me restructure: progress_box_ contains time | waveform | time
+    // Progress container: time_left | waveform | time_right
     GtkWidget* progress_container = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_widget_set_hexpand(progress_container, TRUE);
 
@@ -259,13 +246,13 @@ void BottomPlayback::create_right_section() {
     gtk_widget_set_valign(right_box_, GTK_ALIGN_CENTER);
     gtk_widget_set_halign(right_box_, GTK_ALIGN_END);
 
-    // Volume button with popover
-    volume_button_ = gtk_button_new();
-    gtk_button_set_has_frame(GTK_BUTTON(volume_button_), FALSE);
+    // Volume button with popover - use GtkMenuButton for popover support
+    volume_button_ = gtk_menu_button_new();
+    gtk_menu_button_set_has_frame(GTK_MENU_BUTTON(volume_button_), FALSE);
     gtk_widget_add_css_class(volume_button_, "bottom-playback-volume-button");
     GtkWidget* volume_icon = gtk_image_new_from_icon_name("audio-volume-high-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(volume_icon), 22);
-    gtk_button_set_child(GTK_BUTTON(volume_button_), volume_icon);
+    gtk_menu_button_set_child(GTK_MENU_BUTTON(volume_button_), volume_icon);
 
     volume_popover_ = gtk_popover_new();
     gtk_popover_set_has_arrow(GTK_POPOVER(volume_popover_), FALSE);
@@ -284,7 +271,7 @@ void BottomPlayback::create_right_section() {
 
     gtk_box_append(GTK_BOX(volume_box), volume_scale_);
     gtk_popover_set_child(GTK_POPOVER(volume_popover_), volume_box);
-    gtk_menu_button_set_popover(GTK_MENU_BUTTON(volume_button_), GTK_WIDGET(volume_popover_));
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(volume_button_), volume_popover_);
 
     // PiP button
     pip_button_ = gtk_button_new();

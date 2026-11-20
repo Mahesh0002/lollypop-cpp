@@ -108,11 +108,14 @@ void MainWindow::setup_css() {
 
 void MainWindow::connect_signals() {
     g_signal_connect(window_, "close-request", G_CALLBACK(on_window_close), this);
-    g_signal_connect(main_grid_, "size-allocate", G_CALLBACK(on_size_allocate), this);
+    // Note: size-allocate signal not available on GtkApplicationWindow in GTK4
+    // Use GtkWidget::size-allocate if needed on a child widget
 }
 
 void MainWindow::present() {
-    gtk_window_present(GTK_WINDOW(window_));
+    if (window_) {
+        gtk_window_present(GTK_WINDOW(window_));
+    }
 }
 
 void MainWindow::on_window_close(GtkWindow* window, gpointer user_data) {
