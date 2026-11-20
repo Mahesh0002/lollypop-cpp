@@ -22,6 +22,8 @@ pkg_check_modules(GTK4 REQUIRED gtk4)
 pkg_check_modules(SQLITE3 REQUIRED sqlite3)
 pkg_check_modules(GLIB REQUIRED glib-2.0 gio-2.0 gobject-2.0)
 pkg_check_modules(GIO REQUIRED gio-2.0)
+# GStreamer for audio playback
+pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0 gstreamer-audio-1.0 gstreamer-pbutils-1.0)
 # CAVA is optional - for audio visualization
 pkg_check_modules(CAVA QUIET cava)
 if(CAVA_FOUND)
@@ -42,6 +44,7 @@ include_directories(
     ${SQLITE3_INCLUDE_DIRS}
     ${GLIB_INCLUDE_DIRS}
     ${GIO_INCLUDE_DIRS}
+    ${GSTREAMER_INCLUDE_DIRS}
 )
 
 # Link libraries
@@ -50,6 +53,7 @@ set(LIBRARIES
     ${SQLITE3_LIBRARIES}
     ${GLIB_LIBRARIES}
     ${GIO_LIBRARIES}
+    ${GSTREAMER_LIBRARIES}
 )
 
 # Add subdirectories

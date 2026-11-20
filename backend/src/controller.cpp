@@ -28,8 +28,13 @@ bool BackendController::initialize() {
         return false;
     }
 
-    // Load library from storage
-    // TODO: Implement actual library loading
+    // Initialize audio engine
+    audio_engine_ = std::make_unique<AudioEngine>();
+    if (!audio_engine_->initialize()) {
+        std::cerr << "BackendController: Failed to initialize audio engine" << std::endl;
+        return false;
+    }
+    setup_audio_callbacks();
 
     std::cout << "BackendController: Initialized successfully" << std::endl;
     return true;
@@ -37,7 +42,43 @@ bool BackendController::initialize() {
 
 void BackendController::shutdown() {
     std::cout << "BackendController: Shutting down..." << std::endl;
+    if (audio_engine_) {
+        audio_engine_->stop();
+    }
     storage_.reset();
+    audio_engine_.reset();
+}
+
+void BackendController::setup_audio_callbacks() {
+    // Position updates flow to UI
+    audio_engine_->set_position_callback([this](double position, double duration) {
+        position_ = position;
+        duration_ = duration;
+        emit_position_changed(position, duration);
+    });
+
+    // Playback state changes flow to UI
+    audio_engine_->set_state_callback([this](AudioEngine::PlaybackState state) {
+        playing_ = (state == AudioEngine::PlaybackState::Playing);
+        emit_playback_state_changed(playing_);
+    });
+
+    // End of stream - advance to next track
+    audio_engine_->set_eos_callback([this]() {
+        std::cout << "BackendController: End of stream reached" << std::endl;
+        if (repeat_one_) {
+            // Replay current track
+            audio_engine_->seek(0.0);
+            audio_engine_->play();
+        } else {
+            next_track();
+        }
+    });
+
+    // Audio engine errors
+    audio_engine_->set_error_callback([this](const std::string& error) {
+        std::cerr << "BackendController: Audio engine error: " << error << std::endl;
+    });
 }
 
 void BackendController::scan_library(const std::string& path) {
@@ -131,16 +172,28 @@ void BackendController::play_tracks(const std::vector<std::string>& track_ids, s
     queue_ = track_ids;
     queue_index_ = std::min(start_index, queue_.size() - 1);
 
-    // Load track metadata
+    // Load track metadata from storage
     current_track_ = get_track(queue_[queue_index_]);
     duration_ = current_track_.duration;
     position_ = 0.0;
-    playing_ = true;
 
-    // TODO: Actually start audio playback (GStreamer/PipeWire)
+    // Load and play via audio engine
+    if (!current_track_.file_path.empty()) {
+        if (audio_engine_->load_track(current_track_.file_path)) {
+            audio_engine_->set_volume(volume_);
+            audio_engine_->play();
+            playing_ = true;
+        } else {
+            std::cerr << "BackendController: Failed to load track: " << current_track_.file_path << std::endl;
+            playing_ = false;
+        }
+    } else {
+        std::cerr << "BackendController: Track has no file path: " << current_track_.title << std::endl;
+        playing_ = false;
+    }
 
     emit_track_changed(current_track_);
-    emit_playback_state_changed(true);
+    emit_playback_state_changed(playing_);
     emit_queue_changed();
 }
 
@@ -149,25 +202,25 @@ void BackendController::toggle_play_pause() {
         pause();
     } else {
         playing_ = true;
+        audio_engine_->play();
         emit_playback_state_changed(true);
-        // TODO: Resume audio
     }
 }
 
 void BackendController::pause() {
     playing_ = false;
+    audio_engine_->pause();
     emit_playback_state_changed(false);
-    // TODO: Pause audio
 }
 
 void BackendController::stop() {
     playing_ = false;
     position_ = 0.0;
     current_track_ = Track{};
+    audio_engine_->stop();
     emit_playback_state_changed(false);
     emit_track_changed(current_track_);
     emit_position_changed(0, 0);
-    // TODO: Stop audio
 }
 
 void BackendController::next_track() {
@@ -187,7 +240,12 @@ void BackendController::next_track() {
     position_ = 0.0;
     playing_ = true;
 
-    // TODO: Start playback of new track
+    // Load and play via audio engine
+    if (!current_track_.file_path.empty()) {
+        audio_engine_->load_track(current_track_.file_path);
+        audio_engine_->set_volume(volume_);
+        audio_engine_->play();
+    }
 
     emit_track_changed(current_track_);
     emit_position_changed(0, duration_);
@@ -200,8 +258,8 @@ void BackendController::previous_track() {
     if (position_ > 3.0) {
         // Restart current track if more than 3 seconds in
         position_ = 0.0;
+        audio_engine_->seek(0.0);
         emit_position_changed(0, duration_);
-        // TODO: Seek to start
         return;
     }
 
@@ -223,7 +281,12 @@ void BackendController::previous_track() {
     position_ = 0.0;
     playing_ = true;
 
-    // TODO: Start playback of new track
+    // Load and play via audio engine
+    if (!current_track_.file_path.empty()) {
+        audio_engine_->load_track(current_track_.file_path);
+        audio_engine_->set_volume(volume_);
+        audio_engine_->play();
+    }
 
     emit_track_changed(current_track_);
     emit_position_changed(0, duration_);
@@ -232,13 +295,13 @@ void BackendController::previous_track() {
 
 void BackendController::seek(double position_seconds) {
     position_ = std::clamp(position_seconds, 0.0, duration_);
+    audio_engine_->seek(position_);
     emit_position_changed(position_, duration_);
-    // TODO: Seek audio
 }
 
 void BackendController::set_volume(double volume) {
     volume_ = std::clamp(volume, 0.0, 1.0);
-    // TODO: Set audio volume
+    audio_engine_->set_volume(volume_);
 }
 
 double BackendController::get_volume() const {

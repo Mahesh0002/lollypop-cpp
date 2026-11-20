@@ -11,12 +11,11 @@
 #include <memory>
 
 #include "types.hpp"
+#include "audio_engine.hpp"
 
 namespace lollypop {
 
 class StorageManager;  // Forward declaration
-
-class StorageManager;
 
 class BackendController {
 public:
@@ -88,6 +87,9 @@ public:
     void toggle_like(const std::string& track_id);
     void toggle_favorite_album(const std::string& album_id);
 
+    // Audio engine access
+    AudioEngine* get_audio_engine() const { return audio_engine_.get(); }
+
     // Callbacks for UI updates
     using TrackChangedCallback = std::function<void(const Track&)>;
     using PositionChangedCallback = std::function<void(double position, double duration)>;
@@ -101,7 +103,7 @@ public:
 
 private:
     std::unique_ptr<StorageManager> storage_;
-    // Audio engine would go here (GStreamer, PipeWire, etc.)
+    std::unique_ptr<AudioEngine> audio_engine_;
 
     TrackChangedCallback track_changed_cb_;
     PositionChangedCallback position_changed_cb_;
@@ -119,6 +121,8 @@ private:
     Track current_track_;
     double position_ = 0.0;
     double duration_ = 0.0;
+
+    void setup_audio_callbacks();
 
     void emit_track_changed(const Track& track);
     void emit_position_changed(double position, double duration);
