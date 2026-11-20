@@ -3,6 +3,7 @@
  */
 
 #include "panels/bottom_playback.hpp"
+#include "panels/waveform_widget.hpp"
 #include "main_window.hpp"
 #include "controller.hpp"
 
@@ -11,74 +12,9 @@
 
 namespace lollypop {
 
-// Reuse the WaveformWidget from right_now_playing
-class WaveformWidget {
-public:
-    explicit WaveformWidget(GtkWidget* parent = nullptr) {
-        drawing_area_ = gtk_drawing_area_new();
-        gtk_widget_add_css_class(drawing_area_, "waveform-widget");
-        gtk_widget_set_size_request(drawing_area_, -1, 40);
-        gtk_widget_set_hexpand(drawing_area_, TRUE);
-        gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(drawing_area_), draw_callback, this, nullptr);
-        if (parent) {
-            gtk_box_append(GTK_BOX(parent), drawing_area_);
-        }
-    }
-
-    GtkWidget* get_widget() const { return drawing_area_; }
-
-    void set_progress(double progress) {
-        progress_ = progress;
-        gtk_widget_queue_draw(drawing_area_);
-    }
-
-private:
-    GtkWidget* drawing_area_;
-    double progress_ = 0.0;
-
-    static void draw_callback(GtkDrawingArea* area, cairo_t* cr, int width, int height, gpointer user_data) {
-        WaveformWidget* self = static_cast<WaveformWidget*>(user_data);
-        double progress = self->progress_;
-
-        // Background
-        cairo_set_source_rgba(cr, 0.2, 0.2, 0.2, 0.3);
-        cairo_rectangle(cr, 0, 0, width, height);
-        cairo_fill(cr);
-
-        // Waveform bars
-        int bar_count = 80;
-        int bar_width = width / (bar_count * 2);
-        int spacing = bar_width;
-
-        for (int i = 0; i < bar_count; ++i) {
-            double x = i * (bar_width + spacing) + spacing / 2;
-            double bar_height = (sin(i * 0.3 + progress * 10) * 0.5 + 0.5) * height * 0.8;
-            double y = (height - bar_height) / 2;
-
-            if (i < progress * bar_count) {
-                cairo_set_source_rgb(cr, 0.2, 0.7, 1.0);
-            } else {
-                cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.4);
-            }
-
-            cairo_rectangle(cr, x, y, bar_width, bar_height);
-            cairo_fill(cr);
-        }
-
-        // Progress indicator
-        double progress_x = progress * width;
-        cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-        cairo_set_line_width(cr, 2);
-        cairo_move_to(cr, progress_x, 0);
-        cairo_line_to(cr, progress_x, height);
-        cairo_stroke(cr);
-    }
-};
-
 BottomPlayback::BottomPlayback(MainWindow* main_window)
     : main_window_(main_window),
       main_box_(nullptr),
-      separator_(nullptr),
       left_box_(nullptr),
       artwork_image_(nullptr),
       track_title_label_(nullptr),
@@ -109,10 +45,6 @@ void BottomPlayback::setup_ui() {
     gtk_widget_add_css_class(main_box_, "bottom-playback");
     gtk_widget_set_hexpand(main_box_, TRUE);
     gtk_widget_set_vexpand(main_box_, FALSE);
-
-    // Top separator
-    separator_ = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
-    gtk_widget_add_css_class(separator_, "bottom-playback-separator");
 
     create_left_section();
     create_center_section();
@@ -214,12 +146,14 @@ void BottomPlayback::create_progress_section() {
     gtk_widget_set_margin_start(progress_box_, 48);
     gtk_widget_set_margin_end(progress_box_, 48);
 
-    // Create waveform widget WITHOUT parent (we'll add it manually)
-    waveform_widget_ = new WaveformWidget(nullptr);
-
     // Progress container: time_left | waveform | time_right
     GtkWidget* progress_container = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_widget_set_hexpand(progress_container, TRUE);
+    gtk_widget_set_halign(progress_container, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(progress_container, GTK_ALIGN_CENTER);
+
+    // Create waveform widget (constructor appends drawing_area_ to parent)
+    waveform_widget_ = new WaveformWidget(progress_container);
 
     GtkWidget* time_left = gtk_label_new("0:00");
     gtk_widget_add_css_class(time_left, "bottom-playback-time");
@@ -231,7 +165,6 @@ void BottomPlayback::create_progress_section() {
     gtk_label_set_xalign(GTK_LABEL(time_right), 1.0);
 
     gtk_box_append(GTK_BOX(progress_container), time_left);
-    gtk_box_append(GTK_BOX(progress_container), waveform_widget_->get_widget());
     gtk_box_append(GTK_BOX(progress_container), time_right);
 
     gtk_box_append(GTK_BOX(center_box_), progress_container);
@@ -318,10 +251,19 @@ void BottomPlayback::set_playing(bool playing) {
     is_playing_ = playing;
     const char* icon_name = playing ? "media-playback-pause-symbolic" : "media-playback-start-symbolic";
     gtk_image_set_from_icon_name(GTK_IMAGE(play_icon_), icon_name);
+    if (waveform_widget_) {
+        waveform_widget_->set_playing(playing);
+    }
 }
 
 void BottomPlayback::set_volume(double volume) {
     gtk_range_set_value(GTK_RANGE(volume_scale_), volume * 100);
+}
+
+void BottomPlayback::set_points(const std::vector<float>& points) {
+    if (waveform_widget_) {
+        waveform_widget_->set_points(points);
+    }
 }
 
 void BottomPlayback::on_prev_clicked(GtkButton* button, gpointer user_data) {

@@ -8,6 +8,7 @@
 #include <gtk/gtk.h>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace lollypop {
 
@@ -25,6 +26,7 @@ public:
     void update_playback_position(double position, double duration);
     void set_playing(bool playing);
     void set_volume(double volume);
+    void set_points(const std::vector<float>& points);
 
 private:
     MainWindow* main_window_;

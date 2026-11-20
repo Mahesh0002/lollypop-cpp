@@ -27,6 +27,10 @@ public:
     void set_playing(bool playing);
     void set_queue(const std::vector<std::string>& queue);
     void set_lyrics(const std::string& lyrics);
+    void set_points(const std::vector<float>& points);
+    void set_shuffle(bool enabled);
+    void set_repeat(bool enabled);
+    void set_loop(bool enabled);
 
 private:
     MainWindow* main_window_;

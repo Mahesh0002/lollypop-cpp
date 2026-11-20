@@ -3,6 +3,7 @@
  */
 
 #include "panels/right_now_playing.hpp"
+#include "panels/waveform_widget.hpp"
 #include "main_window.hpp"
 #include "controller.hpp"
 
@@ -10,70 +11,6 @@
 #include <iostream>
 
 namespace lollypop {
-
-// Simple waveform widget placeholder - will be replaced with actual CAVA-based implementation
-class WaveformWidget {
-public:
-    explicit WaveformWidget(GtkWidget* parent) {
-        drawing_area_ = gtk_drawing_area_new();
-        gtk_widget_add_css_class(drawing_area_, "waveform-widget");
-        gtk_widget_set_size_request(drawing_area_, -1, 70);
-        gtk_widget_set_hexpand(drawing_area_, TRUE);
-        gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(drawing_area_), draw_callback, this, nullptr);
-        gtk_box_append(GTK_BOX(parent), drawing_area_);
-    }
-
-    GtkWidget* get_widget() const { return drawing_area_; }
-
-    void set_progress(double progress) {
-        progress_ = progress;
-        gtk_widget_queue_draw(drawing_area_);
-    }
-
-private:
-    GtkWidget* drawing_area_;
-    double progress_ = 0.0;
-
-    static void draw_callback(GtkDrawingArea* area, cairo_t* cr, int width, int height, gpointer user_data) {
-        WaveformWidget* self = static_cast<WaveformWidget*>(user_data);
-        double progress = self->progress_;
-
-        // Background
-        cairo_set_source_rgba(cr, 0.2, 0.2, 0.2, 0.3);
-        cairo_rectangle(cr, 0, 0, width, height);
-        cairo_fill(cr);
-
-        // Waveform bars (placeholder - will be replaced with CAVA data)
-        int bar_count = 60;
-        int bar_width = width / (bar_count * 2);
-        int spacing = bar_width;
-
-        for (int i = 0; i < bar_count; ++i) {
-            double x = i * (bar_width + spacing) + spacing / 2;
-            // Simulate waveform with sine wave
-            double bar_height = (sin(i * 0.3 + progress * 10) * 0.5 + 0.5) * height * 0.8;
-            double y = (height - bar_height) / 2;
-
-            // Color based on progress
-            if (i < progress * bar_count) {
-                cairo_set_source_rgb(cr, 0.2, 0.7, 1.0);  // Played portion - accent color
-            } else {
-                cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.4);  // Unplayed portion
-            }
-
-            cairo_rectangle(cr, x, y, bar_width, bar_height);
-            cairo_fill(cr);
-        }
-
-        // Progress indicator line
-        double progress_x = progress * width;
-        cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-        cairo_set_line_width(cr, 2);
-        cairo_move_to(cr, progress_x, 0);
-        cairo_line_to(cr, progress_x, height);
-        cairo_stroke(cr);
-    }
-};
 
 RightNowPlaying::RightNowPlaying(MainWindow* main_window)
     : main_window_(main_window),
@@ -354,6 +291,9 @@ void RightNowPlaying::set_playing(bool playing) {
             bottom->set_playing(playing);
         }
     }
+    if (waveform_widget_) {
+        waveform_widget_->set_playing(playing);
+    }
 }
 
 void RightNowPlaying::set_queue(const std::vector<std::string>& queue) {
@@ -399,6 +339,24 @@ void RightNowPlaying::set_lyrics(const std::string& lyrics) {
     gtk_text_buffer_set_text(buffer, lyrics.c_str(), -1);
 }
 
+void RightNowPlaying::set_points(const std::vector<float>& points) {
+    if (waveform_widget_) {
+        waveform_widget_->set_points(points);
+    }
+}
+
+void RightNowPlaying::set_shuffle(bool enabled) {
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(shuffle_button_), enabled);
+}
+
+void RightNowPlaying::set_repeat(bool enabled) {
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(repeat_button_), enabled);
+}
+
+void RightNowPlaying::set_loop(bool enabled) {
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(loop_button_), enabled);
+}
+
 void RightNowPlaying::on_prev_clicked(GtkButton* button, gpointer user_data) {
     RightNowPlaying* self = static_cast<RightNowPlaying*>(user_data);
     if (self->main_window_) {
@@ -420,15 +378,33 @@ void RightNowPlaying::on_next_clicked(GtkButton* button, gpointer user_data) {
 }
 
 void RightNowPlaying::on_shuffle_toggled(GtkToggleButton* button, gpointer user_data) {
-    // TODO: Implement shuffle toggle
+    RightNowPlaying* self = static_cast<RightNowPlaying*>(user_data);
+    if (self->main_window_) {
+        BackendController* backend = self->main_window_->get_backend();
+        if (backend) {
+            backend->set_shuffle(gtk_toggle_button_get_active(button));
+        }
+    }
 }
 
 void RightNowPlaying::on_repeat_toggled(GtkToggleButton* button, gpointer user_data) {
-    // TODO: Implement repeat toggle
+    RightNowPlaying* self = static_cast<RightNowPlaying*>(user_data);
+    if (self->main_window_) {
+        BackendController* backend = self->main_window_->get_backend();
+        if (backend) {
+            backend->set_repeat(gtk_toggle_button_get_active(button));
+        }
+    }
 }
 
 void RightNowPlaying::on_loop_toggled(GtkToggleButton* button, gpointer user_data) {
-    // TODO: Implement loop toggle
+    RightNowPlaying* self = static_cast<RightNowPlaying*>(user_data);
+    if (self->main_window_) {
+        BackendController* backend = self->main_window_->get_backend();
+        if (backend) {
+            backend->set_repeat_one(gtk_toggle_button_get_active(button));
+        }
+    }
 }
 
 void RightNowPlaying::on_lyrics_tab_clicked(GtkButton* button, gpointer user_data) {

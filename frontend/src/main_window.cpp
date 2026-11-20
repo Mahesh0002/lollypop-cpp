@@ -8,10 +8,13 @@
 #include "panels/middle_library.hpp"
 #include "panels/right_now_playing.hpp"
 #include "panels/bottom_playback.hpp"
+#include "panels/waveform_widget.hpp"
 #include "application.hpp"
+#include "controller.hpp"
 
 #include <gtk/gtk.h>
 #include <iostream>
+#include <vector>
 
 namespace lollypop {
 
@@ -23,6 +26,7 @@ MainWindow::MainWindow(Application* app)
     setup_layout();
     setup_css();
     connect_signals();
+    connect_backend();
 }
 
 MainWindow::~MainWindow() {
@@ -110,6 +114,42 @@ void MainWindow::connect_signals() {
     g_signal_connect(window_, "close-request", G_CALLBACK(on_window_close), this);
     // Note: size-allocate signal not available on GtkApplicationWindow in GTK4
     // Use GtkWidget::size-allocate if needed on a child widget
+}
+
+void MainWindow::connect_backend() {
+    BackendController* backend = app_->get_backend();
+    if (!backend) return;
+
+    // Track changed → update both playback panels
+    backend->set_track_changed_callback([this](const Track& track) {
+        bottom_playback_->update_track_info(track.title, track.artist, track.artwork_path);
+        right_now_playing_->update_track_info(track.title, track.artist, track.artwork_path);
+    });
+
+    // Position changed → update both playback panels
+    backend->set_position_changed_callback([this](double position, double duration) {
+        bottom_playback_->update_playback_position(position, duration);
+        right_now_playing_->update_playback_position(position, duration);
+    });
+
+    // Playback state changed → update both panels
+    backend->set_playback_state_changed_callback([this](bool playing) {
+        bottom_playback_->set_playing(playing);
+        right_now_playing_->set_playing(playing);
+    });
+
+    // Queue changed → update right panel
+    backend->set_queue_changed_callback([this](const std::vector<std::string>& queue) {
+        right_now_playing_->set_queue(queue);
+    });
+
+    // Visualization changed (CAVA) → update waveform widgets in both panels
+    backend->set_visualization_changed_callback([this](const std::vector<float>& points) {
+        bottom_playback_->set_points(points);
+        right_now_playing_->set_points(points);
+    });
+
+    std::cout << "MainWindow: Backend callbacks connected" << std::endl;
 }
 
 void MainWindow::present() {

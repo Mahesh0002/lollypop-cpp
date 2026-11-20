@@ -51,6 +51,7 @@ private:
     void setup_layout();
     void setup_css();
     void connect_signals();
+    void connect_backend();
 
     // Callbacks
     static void on_window_close(GtkWindow* window, gpointer user_data);
