@@ -212,7 +212,6 @@ void LibraryScanner::scan_directory(const std::string& path, bool recursive) {
     if (recursive) {
         impl_->scan_recursive(path);
     } else {
-        // Non-recursive: only top-level files
         std::error_code ec;
         std::filesystem::directory_iterator it(path, ec);
         if (ec) {
@@ -233,6 +232,26 @@ void LibraryScanner::scan_directory(const std::string& path, bool recursive) {
             if (impl_->progress_cb) impl_->progress_cb(impl_->progress);
         }
     }
+}
+
+void LibraryScanner::scan_file(const std::string& path) {
+    impl_->cancelled = false;
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(path, ec)) {
+        if (impl_->error_cb) impl_->error_cb(path, "Not a regular file");
+        return;
+    }
+    std::string ext = lower_ext(path);
+    if (!is_audio_file(ext)) {
+        if (impl_->error_cb) impl_->error_cb(path, "Not an audio file");
+        return;
+    }
+    impl_->progress.files_found++;
+    impl_->progress.current_file = path;
+    if (impl_->progress_cb) impl_->progress_cb(impl_->progress);
+    impl_->process_file(path);
+    impl_->progress.files_processed++;
+    if (impl_->progress_cb) impl_->progress_cb(impl_->progress);
 }
 
 void LibraryScanner::cancel() {

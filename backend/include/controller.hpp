@@ -14,6 +14,7 @@
 #include "audio_engine.hpp"
 #include "mpris_manager.hpp"
 #include "library_scanner.hpp"
+#include "file_watcher.hpp"
 
 namespace lollypop {
 
@@ -93,6 +94,7 @@ public:
     AudioEngine* get_audio_engine() const { return audio_engine_.get(); }
     MprisManager* get_mpris_manager() const { return mpris_manager_.get(); }
     LibraryScanner* get_library_scanner() const { return library_scanner_.get(); }
+    FileWatcher* get_file_watcher() const { return file_watcher_.get(); }
 
     // Callbacks for UI updates
     using TrackChangedCallback = std::function<void(const Track&)>;
@@ -110,6 +112,7 @@ private:
     std::unique_ptr<AudioEngine> audio_engine_;
     std::unique_ptr<MprisManager> mpris_manager_;
     std::unique_ptr<LibraryScanner> library_scanner_;
+    std::unique_ptr<FileWatcher> file_watcher_;
 
     TrackChangedCallback track_changed_cb_;
     PositionChangedCallback position_changed_cb_;
@@ -129,6 +132,8 @@ private:
     double duration_ = 0.0;
 
     void setup_audio_callbacks();
+
+    void handle_file_event(const FileEvent& event);
 
     void emit_track_changed(const Track& track);
     void emit_position_changed(double position, double duration);

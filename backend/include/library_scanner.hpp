@@ -34,6 +34,7 @@ public:
     LibraryScanner& operator=(const LibraryScanner&) = delete;
 
     void scan_directory(const std::string& path, bool recursive = true);
+    void scan_file(const std::string& path);
     void cancel();
 
     void set_progress_callback(ProgressCallback cb);

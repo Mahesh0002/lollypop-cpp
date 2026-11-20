@@ -55,6 +55,12 @@ bool BackendController::initialize() {
         std::cerr << "LibraryScanner: error on " << file << ": " << error << std::endl;
     });
 
+    // Initialize file watcher
+    file_watcher_ = std::make_unique<FileWatcher>();
+    file_watcher_->set_event_callback([this](const FileEvent& event) {
+        handle_file_event(event);
+    });
+
     std::cout << "BackendController: Initialized successfully" << std::endl;
     return true;
 }
@@ -114,11 +120,38 @@ void BackendController::scan_library(const std::string& path) {
 }
 
 void BackendController::add_watch_directory(const std::string& path) {
-    // TODO: Implement directory watching (inotify)
+    std::cout << "BackendController: Watching directory " << path << std::endl;
+    if (!file_watcher_) {
+        std::cerr << "BackendController: File watcher not initialized" << std::endl;
+        return;
+    }
+    file_watcher_->add_watch(path, true);
 }
 
 void BackendController::remove_watch_directory(const std::string& path) {
-    // TODO: Implement
+    if (!file_watcher_) return;
+    file_watcher_->remove_watch(path);
+}
+
+void BackendController::handle_file_event(const FileEvent& event) {
+    switch (event.type) {
+        case FileEventType::Created:
+            std::cout << "BackendController: File created: " << event.path << std::endl;
+            if (LibraryScanner::is_audio_file(event.path)) {
+                library_scanner_->scan_file(event.path);
+            }
+            break;
+        case FileEventType::Deleted:
+            std::cout << "BackendController: File deleted: " << event.path << std::endl;
+            // TODO: remove from storage once StorageManager::remove_track_by_path exists
+            break;
+        case FileEventType::Modified:
+            std::cout << "BackendController: File modified: " << event.path << std::endl;
+            break;
+        case FileEventType::Moved:
+            std::cout << "BackendController: File moved: " << event.path << std::endl;
+            break;
+    }
 }
 
 std::vector<Track> BackendController::get_all_tracks() {
