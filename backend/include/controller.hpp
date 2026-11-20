@@ -13,6 +13,7 @@
 #include "types.hpp"
 #include "audio_engine.hpp"
 #include "mpris_manager.hpp"
+#include "library_scanner.hpp"
 
 namespace lollypop {
 
@@ -91,6 +92,7 @@ public:
     // Subsystem access
     AudioEngine* get_audio_engine() const { return audio_engine_.get(); }
     MprisManager* get_mpris_manager() const { return mpris_manager_.get(); }
+    LibraryScanner* get_library_scanner() const { return library_scanner_.get(); }
 
     // Callbacks for UI updates
     using TrackChangedCallback = std::function<void(const Track&)>;
@@ -107,6 +109,7 @@ private:
     std::unique_ptr<StorageManager> storage_;
     std::unique_ptr<AudioEngine> audio_engine_;
     std::unique_ptr<MprisManager> mpris_manager_;
+    std::unique_ptr<LibraryScanner> library_scanner_;
 
     TrackChangedCallback track_changed_cb_;
     PositionChangedCallback position_changed_cb_;

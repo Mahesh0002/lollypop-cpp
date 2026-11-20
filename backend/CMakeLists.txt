@@ -22,18 +22,21 @@ target_include_directories(lollypop-backend PUBLIC
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0 gstreamer-audio-1.0 gstreamer-pbutils-1.0)
 pkg_check_modules(GIOMM REQUIRED giomm-2.68)
+pkg_check_modules(TAGLIB REQUIRED taglib)
 
 target_link_libraries(lollypop-backend PUBLIC
     ${GLIB_LIBRARIES}
     ${GIO_LIBRARIES}
     ${GIOMM_LIBRARIES}
     ${GSTREAMER_LIBRARIES}
+    ${TAGLIB_LIBRARIES}
     lollypop-storage
 )
 
 target_include_directories(lollypop-backend PUBLIC
     ${GSTREAMER_INCLUDE_DIRS}
     ${GIOMM_INCLUDE_DIRS}
+    ${TAGLIB_INCLUDE_DIRS}
 )
 
 target_compile_features(lollypop-backend PUBLIC cxx_std_20)

@@ -45,6 +45,16 @@ bool BackendController::initialize() {
         mpris_manager_.reset();
     }
 
+    // Initialize library scanner
+    library_scanner_ = std::make_unique<LibraryScanner>();
+    library_scanner_->set_track_found_callback([this](const Track& track) {
+        if (track.file_path.empty()) return;
+        storage_->add_track(track);
+    });
+    library_scanner_->set_error_callback([](const std::string& file, const std::string& error) {
+        std::cerr << "LibraryScanner: error on " << file << ": " << error << std::endl;
+    });
+
     std::cout << "BackendController: Initialized successfully" << std::endl;
     return true;
 }
@@ -96,7 +106,11 @@ void BackendController::setup_audio_callbacks() {
 
 void BackendController::scan_library(const std::string& path) {
     std::cout << "BackendController: Scanning library at " << path << std::endl;
-    // TODO: Implement file scanning with metadata extraction (taglib)
+    if (!library_scanner_) {
+        std::cerr << "BackendController: Library scanner not initialized" << std::endl;
+        return;
+    }
+    library_scanner_->scan_directory(path, true);
 }
 
 void BackendController::add_watch_directory(const std::string& path) {
