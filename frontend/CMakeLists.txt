@@ -1,0 +1,30 @@
+# Frontend - GTK4 Presentation Layer
+
+file(GLOB_RECURSE FRONTEND_SOURCES
+    src/*.cpp
+    src/**/*.cpp
+)
+
+file(GLOB_RECURSE FRONTEND_HEADERS
+    include/*.hpp
+    include/**/*.hpp
+)
+
+add_library(lollypop-frontend STATIC ${FRONTEND_SOURCES} ${FRONTEND_HEADERS})
+
+target_include_directories(lollypop-frontend PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/backend/include
+    ${CMAKE_SOURCE_DIR}/storage/include
+    ${CMAKE_SOURCE_DIR}/include
+)
+
+target_link_libraries(lollypop-frontend PUBLIC
+    ${GTK4_LIBRARIES}
+    ${GLIB_LIBRARIES}
+    ${GIO_LIBRARIES}
+    lollypop-backend
+    lollypop-storage
+)
+
+target_compile_features(lollypop-frontend PUBLIC cxx_std_20)

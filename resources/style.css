@@ -1,0 +1,767 @@
+/**
+ * Lollypop C++ - GTK4 CSS Stylesheet
+ * Apple Music-inspired design with custom playback areas
+ */
+
+/* ============================================================================
+ * Color Palette & Variables
+ * ============================================================================ */
+
+@define-color bg_primary #1a1a1a;
+@define-color bg_secondary #232323;
+@define-color bg_tertiary #2d2d2d;
+@define-color bg_hover #333333;
+@define-color bg_active #3a3a3a;
+@define-color bg_selected #404040;
+
+@define-color fg_primary #ffffff;
+@define-color fg_secondary #b3b3b3;
+@define-color fg_tertiary #808080;
+@define-color fg_disabled #555555;
+
+@define-color accent_blue #007aff;
+@define-color accent_blue_hover #0056cc;
+@define-color accent_green #34c759;
+@define-color accent_red #ff3b30;
+@define-color accent_orange #ff9f0a;
+
+@define-color border_subtle #333333;
+@define-color border_focus #007aff;
+
+@define-color shadow_strong rgba(0, 0, 0, 0.5);
+@define-color shadow_subtle rgba(0, 0, 0, 0.2);
+
+/* ============================================================================
+ * Base Styles
+ * ============================================================================ */
+
+* {
+    font-family: "SF Pro Display", "Inter", "Noto Sans", sans-serif;
+    font-size: 13px;
+    color: @fg_primary;
+}
+
+window {
+    background-color: @bg_primary;
+}
+
+button {
+    border: none;
+    border-radius: 8px;
+    padding: 6px 12px;
+    background-color: transparent;
+    color: @fg_primary;
+    transition: all 150ms ease;
+}
+
+button:hover {
+    background-color: @bg_hover;
+}
+
+button:active {
+    background-color: @bg_active;
+}
+
+button:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px @border_focus;
+}
+
+label {
+    color: @fg_primary;
+}
+
+entry, searchentry {
+    border: 1px solid @border_subtle;
+    border-radius: 20px;
+    padding: 8px 16px;
+    background-color: @bg_secondary;
+    color: @fg_primary;
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+entry:focus, searchentry:focus {
+    border-color: @border_focus;
+    box-shadow: 0 0 0 2px alpha(@border_focus, 0.3);
+}
+
+entry:placeholder, searchentry:placeholder {
+    color: @fg_tertiary;
+}
+
+scrolledwindow {
+    background-color: transparent;
+}
+
+separator {
+    background-color: @border_subtle;
+    min-height: 1px;
+    min-width: 1px;
+}
+
+popover {
+    background-color: @bg_secondary;
+    border: 1px solid @border_subtle;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px @shadow_strong;
+}
+
+popover button {
+    border-radius: 6px;
+    padding: 8px 16px;
+}
+
+popover button:hover {
+    background-color: @bg_hover;
+}
+
+listbox {
+    background-color: transparent;
+}
+
+listboxrow {
+    background-color: transparent;
+}
+
+listboxrow:selected {
+    background-color: transparent;
+}
+
+/* ============================================================================
+ * Typography Scale
+ * ============================================================================ */
+
+.title-1 { font-size: 28px; font-weight: 600; letter-spacing: -0.5px; }
+.title-2 { font-size: 22px; font-weight: 600; letter-spacing: -0.3px; }
+.title-3 { font-size: 17px; font-weight: 600; letter-spacing: -0.2px; }
+.headline { font-size: 15px; font-weight: 600; }
+.body { font-size: 13px; font-weight: 400; }
+.body-strong { font-size: 13px; font-weight: 500; }
+.caption { font-size: 11px; font-weight: 400; color: @fg_tertiary; }
+.caption-strong { font-size: 11px; font-weight: 500; color: @fg_secondary; }
+
+/* ============================================================================
+ * Sidebar Styles
+ * ============================================================================ */
+
+.sidebar {
+    background-color: @bg_secondary;
+    border-right: 1px solid @border_subtle;
+    min-width: 64px;
+    max-width: 220px;
+}
+
+.sidebar-header {
+    background-color: transparent;
+}
+
+.sidebar-menu-button,
+.sidebar-action-button {
+    min-width: 40px;
+    min-height: 40px;
+    border-radius: 10px;
+    padding: 8px;
+}
+
+.sidebar-menu-button:hover,
+.sidebar-action-button:hover {
+    background-color: @bg_hover;
+}
+
+.sidebar-nav {
+    margin-top: 8px;
+}
+
+.sidebar-nav-item {
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin: 2px 8px;
+    transition: all 150ms ease;
+}
+
+.sidebar-nav-item:hover {
+    background-color: @bg_hover;
+}
+
+.sidebar-nav-item.active {
+    background-color: @bg_selected;
+}
+
+.sidebar-nav-item.active .sidebar-nav-icon {
+    color: @accent_blue;
+}
+
+.sidebar-nav-item.active .sidebar-nav-label {
+    color: @fg_primary;
+    font-weight: 500;
+}
+
+.sidebar-nav-icon {
+    color: @fg_secondary;
+    min-width: 22px;
+    min-height: 22px;
+}
+
+.sidebar-nav-label {
+    color: @fg_secondary;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+/* ============================================================================
+ * Middle Library Styles
+ * ============================================================================ */
+
+.middle-library {
+    background-color: @bg_primary;
+    overflow: hidden;
+}
+
+.library-header {
+    background-color: transparent;
+}
+
+.library-greeting {
+    font-size: 28px;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+    color: @fg_primary;
+}
+
+.library-search {
+    min-width: 300px;
+    max-width: 500px;
+}
+
+.library-menu-button {
+    min-width: 40px;
+    min-height: 40px;
+    border-radius: 10px;
+    padding: 8px;
+}
+
+.library-menu-button:hover {
+    background-color: @bg_hover;
+}
+
+.library-page {
+    background-color: transparent;
+}
+
+.library-page-title {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+    margin-bottom: 16px;
+}
+
+.library-placeholder {
+    color: @fg_tertiary;
+    font-size: 13px;
+}
+
+.library-scrolled {
+    background-color: transparent;
+}
+
+/* Album/Artist Cards */
+.album-card, .artist-card {
+    background-color: @bg_secondary;
+    border-radius: 12px;
+    padding: 12px;
+    transition: all 200ms ease;
+}
+
+.album-card:hover, .artist-card:hover {
+    background-color: @bg_hover;
+    transform: translateY(-2px);
+}
+
+.album-card:selected, .artist-card:selected {
+    background-color: @bg_selected;
+    box-shadow: 0 0 0 2px @border_focus;
+}
+
+.album-artwork, .artist-artwork {
+    border-radius: 8px;
+    min-width: 140px;
+    min-height: 140px;
+    max-width: 140px;
+    max-height: 140px;
+}
+
+.album-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: @fg_primary;
+    margin-top: 8px;
+}
+
+.album-artist {
+    font-size: 12px;
+    font-weight: 400;
+    color: @fg_tertiary;
+    margin-top: 2px;
+}
+
+/* Horizontal scrolling sections */
+.horizontal-section {
+    margin-bottom: 32px;
+}
+
+.section-title {
+    font-size: 17px;
+    font-weight: 600;
+    margin-bottom: 16px;
+}
+
+.horizontal-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: @bg_tertiary transparent;
+}
+
+.horizontal-scroll::-webkit-scrollbar {
+    height: 6px;
+}
+
+.horizontal-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.horizontal-scroll::-webkit-scrollbar-thumb {
+    background-color: @bg_tertiary;
+    border-radius: 3px;
+}
+
+/* ============================================================================
+ * Right Now Playing Styles
+ * ============================================================================ */
+
+.right-now-playing {
+    background-color: @bg_secondary;
+    border-left: 1px solid @border_subtle;
+}
+
+.now-playing-scrolled {
+    background-color: transparent;
+}
+
+.now-playing-content {
+    background-color: transparent;
+}
+
+.now-playing-artwork {
+    margin-bottom: 24px;
+}
+
+.now-playing-artwork-image {
+    border-radius: 12px;
+    box-shadow: 0 16px 48px @shadow_strong;
+    min-width: 280px;
+    min-height: 280px;
+    max-width: 100%;
+    max-height: 100%;
+}
+
+.now-playing-track-info {
+    text-align: center;
+    margin-bottom: 16px;
+}
+
+.now-playing-title {
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.2px;
+    color: @fg_primary;
+    max-width: 100%;
+}
+
+.now-playing-artist {
+    font-size: 15px;
+    font-weight: 400;
+    color: @fg_secondary;
+    margin-top: 4px;
+}
+
+.now-playing-waveform {
+    margin-top: 8px;
+}
+
+.now-playing-time {
+    font-size: 12px;
+    font-weight: 500;
+    color: @fg_tertiary;
+    font-variant-numeric: tabular-nums;
+}
+
+.waveform-widget {
+    background-color: transparent;
+    border-radius: 8px;
+}
+
+.now-playing-control-button {
+    min-width: 44px;
+    min-height: 44px;
+    border-radius: 22px;
+    padding: 10px;
+}
+
+.now-playing-control-button:hover {
+    background-color: @bg_hover;
+    transform: scale(1.05);
+}
+
+.now-playing-modes {
+    margin-top: 8px;
+}
+
+.now-playing-mode-button {
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 18px;
+    padding: 8px;
+    color: @fg_tertiary;
+}
+
+.now-playing-mode-button:hover {
+    background-color: @bg_hover;
+    color: @fg_secondary;
+}
+
+.now-playing-mode-button:checked {
+    color: @accent_blue;
+    background-color: alpha(@accent_blue, 0.15);
+}
+
+.now-playing-tabs {
+    margin-top: 16px;
+}
+
+.now-playing-tab-buttons {
+    background-color: @bg_tertiary;
+    border-radius: 10px;
+    padding: 4px;
+}
+
+.now-playing-tab-button {
+    border-radius: 8px;
+    padding: 8px 20px;
+    font-size: 13px;
+    font-weight: 500;
+    color: @fg_tertiary;
+    background-color: transparent;
+}
+
+.now-playing-tab-button:hover {
+    color: @fg_secondary;
+    background-color: transparent;
+}
+
+.now-playing-tab-button.active {
+    color: @fg_primary;
+    background-color: @bg_secondary;
+    box-shadow: 0 2px 8px @shadow_subtle;
+}
+
+.now-playing-lyrics {
+    background-color: transparent;
+    font-size: 14px;
+    line-height: 1.6;
+    color: @fg_secondary;
+}
+
+.now-playing-lyrics .current-line {
+    color: @fg_primary;
+    font-weight: 500;
+}
+
+.now-playing-queue {
+    background-color: transparent;
+}
+
+.queue-item-art {
+    border-radius: 6px;
+    min-width: 40px;
+    min-height: 40px;
+    max-width: 40px;
+    max-height: 40px;
+}
+
+.queue-item-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: @fg_primary;
+}
+
+.queue-item-artist {
+    font-size: 11px;
+    font-weight: 400;
+    color: @fg_tertiary;
+}
+
+/* ============================================================================
+ * Bottom Playback Styles
+ * ============================================================================ */
+
+.bottom-playback {
+    background-color: @bg_secondary;
+    border-top: 1px solid @border_subtle;
+    min-height: 80px;
+    max-height: 250px;
+}
+
+.bottom-playback-separator {
+    background-color: @border_subtle;
+    min-height: 1px;
+}
+
+.bottom-playback-left {
+    min-width: 300px;
+}
+
+.bottom-playback-artwork {
+    border-radius: 6px;
+    min-width: 56px;
+    min-height: 56px;
+    max-width: 56px;
+    max-height: 56px;
+    box-shadow: 0 4px 16px @shadow_subtle;
+}
+
+.bottom-playback-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: @fg_primary;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.bottom-playback-artist {
+    font-size: 12px;
+    font-weight: 400;
+    color: @fg_tertiary;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.bottom-playback-center {
+    flex-grow: 1;
+}
+
+.bottom-playback-control-button {
+    min-width: 44px;
+    min-height: 44px;
+    border-radius: 22px;
+    padding: 10px;
+    color: @fg_primary;
+}
+
+.bottom-playback-control-button:hover {
+    background-color: @bg_hover;
+    transform: scale(1.05);
+}
+
+.bottom-playback-play-button {
+    min-width: 56px;
+    min-height: 56px;
+    border-radius: 28px;
+    padding: 14px;
+    background-color: @fg_primary;
+    color: @bg_primary;
+    box-shadow: 0 4px 16px @shadow_subtle;
+}
+
+.bottom-playback-play-button:hover {
+    background-color: @fg_primary;
+    transform: scale(1.05);
+    box-shadow: 0 6px 24px @shadow_strong;
+}
+
+.bottom-playback-play-button:active {
+    transform: scale(0.95);
+}
+
+.bottom-playback-progress {
+    margin-top: 8px;
+}
+
+.bottom-playback-time {
+    font-size: 11px;
+    font-weight: 500;
+    color: @fg_tertiary;
+    font-variant-numeric: tabular-nums;
+    min-width: 50px;
+}
+
+.bottom-playback-right {
+    min-width: 100px;
+}
+
+.bottom-playback-volume-button {
+    min-width: 40px;
+    min-height: 40px;
+    border-radius: 20px;
+    padding: 9px;
+}
+
+.bottom-playback-volume-button:hover {
+    background-color: @bg_hover;
+}
+
+.bottom-playback-volume-scale {
+    min-width: 24px;
+    min-height: 120px;
+}
+
+.bottom-playback-volume-scale slider {
+    min-width: 24px;
+    min-height: 120px;
+}
+
+.bottom-playback-volume-scale trough {
+    min-width: 4px;
+    border-radius: 2px;
+    background-color: @bg_tertiary;
+}
+
+.bottom-playback-volume-scale highlight {
+    background-color: @accent_blue;
+    border-radius: 2px;
+}
+
+.bottom-playback-volume-scale slider {
+    min-width: 14px;
+    min-height: 14px;
+    border-radius: 7px;
+    background-color: @fg_primary;
+    border: none;
+    box-shadow: 0 2px 8px @shadow_subtle;
+}
+
+.bottom-playback-volume-scale slider:hover {
+    background-color: @fg_primary;
+    transform: scale(1.2);
+}
+
+.bottom-playback-pip-button {
+    min-width: 40px;
+    min-height: 40px;
+    border-radius: 20px;
+    padding: 9px;
+}
+
+.bottom-playback-pip-button:hover {
+    background-color: @bg_hover;
+}
+
+/* ============================================================================
+ * Scrollbar Styles
+ * ============================================================================ */
+
+scrollbar {
+    background-color: transparent;
+}
+
+scrollbar slider {
+    background-color: @bg_tertiary;
+    border-radius: 4px;
+    min-width: 8px;
+    min-height: 8px;
+    margin: 2px;
+}
+
+scrollbar slider:hover {
+    background-color: @fg_tertiary;
+}
+
+scrollbar slider:active {
+    background-color: @fg_secondary;
+}
+
+scrollbar button {
+    display: none;
+}
+
+/* ============================================================================
+ * Animations & Transitions
+ * ============================================================================ */
+
+* {
+    transition-property: background-color, color, border-color, box-shadow, transform;
+    transition-duration: 150ms;
+    transition-timing-function: ease-out;
+}
+
+/* Disable transitions for specific elements that need instant feedback */
+button:active,
+.toggle-button:active {
+    transition-duration: 50ms;
+}
+
+/* ============================================================================
+ * Responsive Adjustments
+ * ============================================================================ */
+
+/* Compact sidebar */
+.sidebar:compact .sidebar-nav-label {
+    display: none;
+}
+
+.sidebar:compact {
+    min-width: 64px;
+    max-width: 64px;
+}
+
+/* Small window adjustments */
+@media (max-width: 900px) {
+    .now-playing-artwork-image {
+        min-width: 200px;
+        min-height: 200px;
+    }
+
+    .library-greeting {
+        font-size: 22px;
+    }
+}
+
+@media (max-width: 700px) {
+    .bottom-playback-left {
+        min-width: 200px;
+    }
+
+    .bottom-playback-title {
+        font-size: 13px;
+    }
+
+    .library-search {
+        min-width: 200px;
+    }
+}
+
+/* ============================================================================
+ * Accessibility
+ * ============================================================================ */
+
+*:focus-visible {
+    outline: 2px solid @border_focus;
+    outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    * {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+    }
+}
+
+/* High contrast mode adjustments */
+@media (prefers-contrast: high) {
+    :root {
+        @define-color border_subtle #555555;
+        @define-color fg_tertiary #cccccc;
+    }
+}
