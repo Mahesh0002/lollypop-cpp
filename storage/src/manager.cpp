@@ -479,6 +479,20 @@ bool StorageManager::delete_track(const std::string& track_id) {
     return success;
 }
 
+bool StorageManager::delete_track_by_path(const std::string& file_path) {
+    const char* sql = "DELETE FROM tracks WHERE file_path = ?;";
+
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        return false;
+    }
+
+    sqlite3_bind_text(stmt, 1, file_path.c_str(), -1, SQLITE_TRANSIENT);
+    bool success = sqlite3_step(stmt) == SQLITE_DONE;
+    sqlite3_finalize(stmt);
+    return success;
+}
+
 bool StorageManager::toggle_like(const std::string& track_id) {
     const char* sql = "UPDATE tracks SET liked = NOT liked WHERE id = ?;";
 

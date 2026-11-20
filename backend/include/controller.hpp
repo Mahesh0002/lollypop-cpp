@@ -13,6 +13,7 @@
 #include "types.hpp"
 #include "audio_engine.hpp"
 #include "mpris_manager.hpp"
+#include "mpris_server.hpp"
 #include "library_scanner.hpp"
 #include "file_watcher.hpp"
 #include "cava_visualizer.hpp"
@@ -94,6 +95,7 @@ public:
     // Subsystem access
     AudioEngine* get_audio_engine() const { return audio_engine_.get(); }
     MprisManager* get_mpris_manager() const { return mpris_manager_.get(); }
+    MprisServer* get_mpris_server() const { return mpris_server_.get(); }
     LibraryScanner* get_library_scanner() const { return library_scanner_.get(); }
     FileWatcher* get_file_watcher() const { return file_watcher_.get(); }
     CavaVisualizer* get_cava_visualizer() const { return cava_visualizer_.get(); }
@@ -115,6 +117,7 @@ private:
     std::unique_ptr<StorageManager> storage_;
     std::unique_ptr<AudioEngine> audio_engine_;
     std::unique_ptr<MprisManager> mpris_manager_;
+    std::unique_ptr<MprisServer> mpris_server_;
     std::unique_ptr<LibraryScanner> library_scanner_;
     std::unique_ptr<FileWatcher> file_watcher_;
     std::unique_ptr<CavaVisualizer> cava_visualizer_;
@@ -142,6 +145,8 @@ private:
     void handle_file_event(const FileEvent& event);
 
     void setup_cava_callbacks();
+
+    void setup_mpris_server_callbacks();
 
     void emit_track_changed(const Track& track);
     void emit_position_changed(double position, double duration);

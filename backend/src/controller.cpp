@@ -71,6 +71,15 @@ bool BackendController::initialize() {
                   << std::endl;
     }
 
+    // Initialize MPRIS server (Lollypop as an MPRIS player)
+    mpris_server_ = std::make_unique<MprisServer>();
+    if (!mpris_server_->initialize()) {
+        std::cerr << "BackendController: MPRIS server unavailable" << std::endl;
+        mpris_server_.reset();
+    } else {
+        setup_mpris_server_callbacks();
+    }
+
     std::cout << "BackendController: Initialized successfully" << std::endl;
     return true;
 }
@@ -83,6 +92,10 @@ void BackendController::shutdown() {
     if (cava_visualizer_) {
         cava_visualizer_->stop();
         cava_visualizer_.reset();
+    }
+    if (mpris_server_) {
+        mpris_server_->shutdown();
+        mpris_server_.reset();
     }
     if (mpris_manager_) {
         mpris_manager_->shutdown();
@@ -98,18 +111,64 @@ void BackendController::setup_cava_callbacks() {
     });
 }
 
+void BackendController::setup_mpris_server_callbacks() {
+    // Remote MPRIS client (media keys, sound menu) wants to play/pause
+    mpris_server_->set_playback_state_changed_callback([this](bool playing) {
+        if (playing) {
+            audio_engine_->play();
+            playing_ = true;
+        } else {
+            audio_engine_->pause();
+            playing_ = false;
+        }
+        emit_playback_state_changed(playing_);
+    });
+
+    // Remote client requests volume change
+    mpris_server_->set_volume_changed_callback([this](double volume) {
+        set_volume(volume);
+    });
+
+    // Remote client requests seek
+    mpris_server_->set_seek_callback([this](double position_seconds) {
+        seek(position_seconds);
+    });
+
+    // Remote client requests SetPosition (track_id + position)
+    mpris_server_->set_set_position_callback([this](const std::string& track_id, double position_seconds) {
+        (void)track_id;
+        seek(position_seconds);
+    });
+
+    // Remote client requests loop/shuffle change
+    mpris_server_->set_loop_state_changed_callback([this](int loop_state) {
+        set_repeat(loop_state == 1);     // Playlist -> repeat
+        set_repeat_one(loop_state == 2); // Track -> repeat-one
+    });
+    mpris_server_->set_shuffle_changed_callback([this](bool shuffle) {
+        set_shuffle(shuffle);
+    });
+}
+
 void BackendController::setup_audio_callbacks() {
-    // Position updates flow to UI
+    // Position updates flow to UI and MPRIS server
     audio_engine_->set_position_callback([this](double position, double duration) {
         position_ = position;
         duration_ = duration;
         emit_position_changed(position, duration);
+        if (mpris_server_) {
+            mpris_server_->update_position(position);
+            mpris_server_->update_duration(duration);
+        }
     });
 
-    // Playback state changes flow to UI
+    // Playback state changes flow to UI and MPRIS server
     audio_engine_->set_state_callback([this](AudioEngine::PlaybackState state) {
         playing_ = (state == AudioEngine::PlaybackState::Playing);
         emit_playback_state_changed(playing_);
+        if (mpris_server_) {
+            mpris_server_->update_playback_status(playing_);
+        }
     });
 
     // End of stream - advance to next track
@@ -163,7 +222,7 @@ void BackendController::handle_file_event(const FileEvent& event) {
             break;
         case FileEventType::Deleted:
             std::cout << "BackendController: File deleted: " << event.path << std::endl;
-            // TODO: remove from storage once StorageManager::remove_track_by_path exists
+            storage_->delete_track_by_path(event.path);
             break;
         case FileEventType::Modified:
             std::cout << "BackendController: File modified: " << event.path << std::endl;
@@ -275,6 +334,14 @@ void BackendController::play_tracks(const std::vector<std::string>& track_ids, s
     emit_track_changed(current_track_);
     emit_playback_state_changed(playing_);
     emit_queue_changed();
+
+    // Update MPRIS server with new track and playback status
+    if (mpris_server_) {
+        mpris_server_->update_track(current_track_);
+        mpris_server_->update_playback_status(playing_);
+        mpris_server_->update_position(0.0);
+        mpris_server_->update_duration(current_track_.duration);
+    }
 }
 
 void BackendController::toggle_play_pause() {
@@ -284,6 +351,9 @@ void BackendController::toggle_play_pause() {
         playing_ = true;
         audio_engine_->play();
         emit_playback_state_changed(true);
+        if (mpris_server_) {
+            mpris_server_->update_playback_status(true);
+        }
     }
 }
 
@@ -291,6 +361,9 @@ void BackendController::pause() {
     playing_ = false;
     audio_engine_->pause();
     emit_playback_state_changed(false);
+    if (mpris_server_) {
+        mpris_server_->update_playback_status(false);
+    }
 }
 
 void BackendController::stop() {
@@ -301,6 +374,11 @@ void BackendController::stop() {
     emit_playback_state_changed(false);
     emit_track_changed(current_track_);
     emit_position_changed(0, 0);
+    if (mpris_server_) {
+        mpris_server_->update_playback_status(false);
+        mpris_server_->update_track(Track{});
+        mpris_server_->update_position(0.0);
+    }
 }
 
 void BackendController::next_track() {
@@ -330,6 +408,13 @@ void BackendController::next_track() {
     emit_track_changed(current_track_);
     emit_position_changed(0, duration_);
     emit_queue_changed();
+
+    if (mpris_server_) {
+        mpris_server_->update_track(current_track_);
+        mpris_server_->update_playback_status(true);
+        mpris_server_->update_position(0.0);
+        mpris_server_->update_duration(current_track_.duration);
+    }
 }
 
 void BackendController::previous_track() {
@@ -340,6 +425,9 @@ void BackendController::previous_track() {
         position_ = 0.0;
         audio_engine_->seek(0.0);
         emit_position_changed(0, duration_);
+        if (mpris_server_) {
+            mpris_server_->update_position(0.0);
+        }
         return;
     }
 
@@ -371,6 +459,13 @@ void BackendController::previous_track() {
     emit_track_changed(current_track_);
     emit_position_changed(0, duration_);
     emit_queue_changed();
+
+    if (mpris_server_) {
+        mpris_server_->update_track(current_track_);
+        mpris_server_->update_playback_status(true);
+        mpris_server_->update_position(0.0);
+        mpris_server_->update_duration(current_track_.duration);
+    }
 }
 
 void BackendController::seek(double position_seconds) {
@@ -382,6 +477,9 @@ void BackendController::seek(double position_seconds) {
 void BackendController::set_volume(double volume) {
     volume_ = std::clamp(volume, 0.0, 1.0);
     audio_engine_->set_volume(volume_);
+    if (mpris_server_) {
+        mpris_server_->update_volume(volume_);
+    }
 }
 
 double BackendController::get_volume() const {
@@ -414,16 +512,25 @@ size_t BackendController::get_queue_index() const {
 
 void BackendController::set_shuffle(bool enabled) {
     shuffle_ = enabled;
+    if (mpris_server_) {
+        mpris_server_->update_shuffle(enabled);
+    }
 }
 
 void BackendController::set_repeat(bool enabled) {
     repeat_ = enabled;
     if (enabled) repeat_one_ = false;
+    if (mpris_server_) {
+        mpris_server_->update_loop_state(enabled ? 1 : 0);
+    }
 }
 
 void BackendController::set_repeat_one(bool enabled) {
     repeat_one_ = enabled;
     if (enabled) repeat_ = false;
+    if (mpris_server_) {
+        mpris_server_->update_loop_state(enabled ? 2 : 0);
+    }
 }
 
 bool BackendController::get_shuffle() const {

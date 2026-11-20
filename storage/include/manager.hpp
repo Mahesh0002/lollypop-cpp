@@ -38,6 +38,7 @@ public:
     bool add_track(const Track& track);
     bool update_track(const Track& track);
     bool delete_track(const std::string& track_id);
+    bool delete_track_by_path(const std::string& file_path);
     bool toggle_like(const std::string& track_id);
     void update_play_count(const std::string& track_id);
     void update_last_played(const std::string& track_id);
