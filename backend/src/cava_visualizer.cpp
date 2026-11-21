@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -52,7 +53,12 @@ struct CavaVisualizer::Impl {
 
     void read_output() {
         try {
-            auto stdout_pipe = cava_process->get_stdout_pipe();
+            // Take a reference to the subprocess so it stays alive for the
+            // duration of this call, even if stop() nulls impl_->cava_process.
+            Glib::RefPtr<Gio::Subprocess> proc = cava_process;
+            if (!proc) return;
+
+            auto stdout_pipe = proc->get_stdout_pipe();
             auto input_stream = Gio::DataInputStream::create(stdout_pipe);
 
             while (running) {
@@ -68,7 +74,11 @@ struct CavaVisualizer::Impl {
                 while (std::getline(ss, token, ';')) {
                     if (!token.empty()) {
                         try {
-                            points.push_back(std::stof(token));
+                            float v = std::stof(token);
+                            // Validate/normalize: clamp to [0, 1000] and reject NaN.
+                            if (v < 0.0f) v = 0.0f;
+                            if (v > 1000.0f) v = 1000.0f;
+                            points.push_back(v);
                         } catch (...) {
                             // Skip non-numeric tokens
                         }
@@ -84,6 +94,8 @@ struct CavaVisualizer::Impl {
                 }
             }
         } catch (const Glib::Error& e) {
+            std::cerr << "CAVA reader error: " << e.what() << std::endl;
+        } catch (const std::exception& e) {
             std::cerr << "CAVA reader error: " << e.what() << std::endl;
         }
     }
@@ -105,23 +117,36 @@ bool CavaVisualizer::start(const std::string& config_path) {
 
     impl_->owns_config = config_path.empty();
     if (impl_->owns_config) {
-        impl_->config_path = generate_default_config();
+        // Validate default config parameters before writing the file.
+        impl_->config_path = generate_default_config(50, 60);
     } else {
         impl_->config_path = config_path;
+        // Validate the user-provided config file exists.
+        if (access(config_path.c_str(), F_OK) != 0) {
+            std::cerr << "CAVA: config file not found: " << config_path << std::endl;
+            return false;
+        }
     }
 
     try {
-        // CAVA writes diagnostics to stderr. Leaving that pipe unread would
-        // eventually fill the pipe buffer and block CAVA, so discard it.
+        // CAVA writes diagnostics to stderr. Silence it so the pipe cannot
+        // fill and block CAVA.
         impl_->cava_process = Gio::Subprocess::create(
             {"cava", "-p", impl_->config_path},
             Gio::Subprocess::Flags::STDOUT_PIPE |
                 Gio::Subprocess::Flags::STDERR_SILENCE);
 
-        impl_->running = true;
         impl_->reader_thread = std::thread(&Impl::read_output, impl_.get());
+        impl_->running = true;
         return true;
     } catch (const Glib::Error& e) {
+        std::cerr << "Failed to start CAVA: " << e.what() << std::endl;
+        if (impl_->owns_config && !impl_->config_path.empty()) {
+            std::remove(impl_->config_path.c_str());
+            impl_->config_path.clear();
+        }
+        return false;
+    } catch (const std::exception& e) {
         std::cerr << "Failed to start CAVA: " << e.what() << std::endl;
         if (impl_->owns_config && !impl_->config_path.empty()) {
             std::remove(impl_->config_path.c_str());
@@ -133,17 +158,42 @@ bool CavaVisualizer::start(const std::string& config_path) {
 
 void CavaVisualizer::stop() {
     impl_->running = false;
+
+    // Force-exit the CAVA process so its stdout pipe is closed and the
+    // reader's read_line() unblocks with EOF. Do not null cava_process
+    // before joining: the reader may still be about to call
+    // get_stdout_pipe() and would crash on a null RefPtr.
     if (impl_->cava_process) {
         try {
             impl_->cava_process->force_exit();
         } catch (...) {
             // Ignore errors during forced exit
         }
-        impl_->cava_process = nullptr;
     }
+
+    // Close the stdout pipe to guarantee read_line() unblocks even if
+    // force_exit does not immediately EOF the pipe.
+    {
+        auto pipe = impl_->cava_process;
+        if (pipe) {
+            try {
+                if (auto stdout_pipe = pipe->get_stdout_pipe()) {
+                    stdout_pipe->close();
+                }
+            } catch (...) {
+                // Ignore errors during close
+            }
+        }
+    }
+
+    // Join the reader thread (now unblocked by the closed pipe).
     if (impl_->reader_thread.joinable()) {
         impl_->reader_thread.join();
     }
+
+    // Only now is it safe to drop our reference to the subprocess.
+    impl_->cava_process = nullptr;
+
     if (impl_->owns_config && !impl_->config_path.empty()) {
         std::remove(impl_->config_path.c_str());
         impl_->config_path.clear();
@@ -155,6 +205,10 @@ bool CavaVisualizer::is_running() const {
     return impl_->running;
 }
 
+bool CavaVisualizer::is_available() const {
+    return is_cava_available();
+}
+
 void CavaVisualizer::set_points_callback(PointsCallback cb) {
     impl_->points_cb = std::move(cb);
 }
@@ -164,6 +218,12 @@ bool CavaVisualizer::is_cava_available() {
 }
 
 std::string CavaVisualizer::generate_default_config(int bars, int framerate) {
+    // Validate configuration parameters.
+    if (bars < 1) bars = 1;
+    if (bars > 512) bars = 512;
+    if (framerate < 1) framerate = 1;
+    if (framerate > 240) framerate = 240;
+
     std::string config =
         "[general]\n"
         "mode = waves\n"
@@ -179,9 +239,30 @@ std::string CavaVisualizer::generate_default_config(int bars, int framerate) {
         "[smoothing]\n"
         "noise_reduction = 20\n";
 
-    // Write to temp file in /tmp
-    std::string path = "/tmp/lollypop-cava-config-" +
-                       std::to_string(getpid()) + ".txt";
+    // Use a secure temporary file (mkstemp-style) in the user's runtime dir
+    // instead of a predictable /tmp path.
+    std::string path;
+    if (const char* xdg_runtime = std::getenv("XDG_RUNTIME_DIR")) {
+        path = xdg_runtime;
+    } else if (const char* home = std::getenv("HOME")) {
+        path = home + std::string("/.cache/lollypop-cpp");
+    } else {
+        path = "/tmp";
+    }
+    path += "/lollypop-cava-config-XXXXXX";
+
+    // Create the temp file securely.
+    std::vector<char> buf(path.begin(), path.end());
+    buf.push_back('\0');
+    int fd = mkstemp(buf.data());
+    if (fd < 0) {
+        // Fall back to a simple pid-based name.
+        path = "/tmp/lollypop-cava-config-" + std::to_string(getpid()) + ".txt";
+    } else {
+        ::close(fd);
+        path = buf.data();
+    }
+
     std::ofstream file(path);
     if (file) {
         file << config;

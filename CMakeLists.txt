@@ -19,6 +19,7 @@ endif()
 # Find packages
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK4 REQUIRED gtk4)
+pkg_check_modules(LIBADWAITA REQUIRED libadwaita-1)
 pkg_check_modules(SQLITE3 REQUIRED sqlite3)
 pkg_check_modules(GLIB REQUIRED glib-2.0 gio-2.0 gobject-2.0)
 pkg_check_modules(GIO REQUIRED gio-2.0)
@@ -41,6 +42,7 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/backend/include
     ${CMAKE_CURRENT_SOURCE_DIR}/storage/include
     ${GTK4_INCLUDE_DIRS}
+    ${LIBADWAITA_INCLUDE_DIRS}
     ${SQLITE3_INCLUDE_DIRS}
     ${GLIB_INCLUDE_DIRS}
     ${GIO_INCLUDE_DIRS}
@@ -50,6 +52,7 @@ include_directories(
 # Link libraries
 set(LIBRARIES
     ${GTK4_LIBRARIES}
+    ${LIBADWAITA_LIBRARIES}
     ${SQLITE3_LIBRARIES}
     ${GLIB_LIBRARIES}
     ${GIO_LIBRARIES}

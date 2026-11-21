@@ -4,7 +4,10 @@
 
 #include "application.hpp"
 #include "main_window.hpp"
+#include "panels/pip_window.hpp"
 #include "controller.hpp"
+#include "services/IPlayerService.hpp"
+#include "ui/theme/ThemeManager.hpp"
 
 #include <gtk/gtk.h>
 #include <iostream>
@@ -17,9 +20,13 @@ std::unique_ptr<Application> Application::create(const std::string& application_
 
 Application::Application(const std::string& application_id)
     : application_id_(application_id),
-      app_(nullptr, [](GtkApplication* app) { g_object_unref(app); }) {
-    // Create GTK application
-    GtkApplication* gtk_app = gtk_application_new(application_id_.c_str(), G_APPLICATION_DEFAULT_FLAGS);
+      app_(nullptr, [](AdwApplication* app) { g_object_unref(app); }) {
+    // Initialize libadwaita before creating the AdwApplication
+    adw_init();
+
+    // Create AdwApplication (libadwaita application base)
+    AdwApplication* gtk_app = adw_application_new(application_id_.c_str(),
+                                                  G_APPLICATION_DEFAULT_FLAGS);
     app_.reset(gtk_app);
 
     // Connect signals
@@ -28,8 +35,35 @@ Application::Application(const std::string& application_id)
     g_signal_connect(gtk_app, "shutdown", G_CALLBACK(on_shutdown_static), this);
 }
 
+Application::~Application() {
+    // pip_window_ needs complete type for destruction
+    pip_window_.reset();
+    main_window_.reset();
+    backend_.reset();
+    theme_manager_.reset();
+}
+
 int Application::run(int argc, char** argv) {
     return g_application_run(G_APPLICATION(app_.get()), argc, argv);
+}
+
+IPlayerService* Application::get_backend() const {
+    return backend_.get();
+}
+
+void Application::show_pip() {
+    if (!pip_window_) {
+        pip_window_ = std::make_unique<PiPWindow>(this);
+        pip_window_->set_backend(backend_.get());
+    }
+    pip_window_->present();
+}
+
+void Application::hide_pip() {
+    if (pip_window_) {
+        // Hide the window but keep it alive for reuse
+        gtk_widget_set_visible(pip_window_->get_widget(), FALSE);
+    }
 }
 
 void Application::on_activate() {
@@ -44,60 +78,38 @@ void Application::on_activate() {
     // Create main window
     main_window_ = std::make_unique<MainWindow>(this);
     main_window_->present();
+
+    // Scan the user's Music folder after the UI is connected, so the
+    // library-changed callback refreshes the visible page when it finishes.
+    backend_->scan_default_music_library();
 }
 
 void Application::on_startup() {
-    // Set up CSS provider for styling
-    GtkCssProvider* provider = gtk_css_provider_new();
+    // Create and initialize theme manager
+    theme_manager_ = std::make_unique<ThemeManager>();
+    theme_manager_->load_stylesheet("resources/style.css");
 
-    // Try to load CSS from multiple locations
-    const char* css_paths[] = {
-        "resources/style.css",                          // Build directory (when run from build dir)
-        "../resources/style.css",                       // Build directory (when run from build/bin)
-        "/usr/local/share/lollypop-cpp/style.css",      // Installed location
-        "/usr/share/lollypop-cpp/style.css",            // Alternative installed location
-        nullptr
-    };
-
-    gboolean loaded = FALSE;
-    for (int i = 0; css_paths[i] != nullptr; ++i) {
-        GFile* file = g_file_new_for_path(css_paths[i]);
-        if (g_file_query_exists(file, nullptr)) {
-            gtk_css_provider_load_from_file(provider, file);
-            loaded = TRUE;
-            g_object_unref(file);
-            break;
-        }
-        g_object_unref(file);
-    }
-
-    if (!loaded) {
-        std::cerr << "Warning: Could not find style.css in any known location" << std::endl;
-    }
-
-    gtk_style_context_add_provider_for_display(
-        gdk_display_get_default(),
-        GTK_STYLE_PROVIDER(provider),
-        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION
-    );
-    g_object_unref(provider);
+    // Apply development default accent color
+    auto accent_r = 0.65, accent_g = 0.45, accent_b = 1.0;
+    theme_manager_->set_accent_color(accent_r, accent_g, accent_b);
 }
 
 void Application::on_shutdown() {
-    // Cleanup
+    // Cleanup - destructor handles remaining cleanup
     main_window_.reset();
     backend_.reset();
+    theme_manager_.reset();
 }
 
-void Application::on_activate_static(GtkApplication* app, gpointer user_data) {
+void Application::on_activate_static(AdwApplication* app, gpointer user_data) {
     static_cast<Application*>(user_data)->on_activate();
 }
 
-void Application::on_startup_static(GtkApplication* app, gpointer user_data) {
+void Application::on_startup_static(AdwApplication* app, gpointer user_data) {
     static_cast<Application*>(user_data)->on_startup();
 }
 
-void Application::on_shutdown_static(GtkApplication* app, gpointer user_data) {
+void Application::on_shutdown_static(AdwApplication* app, gpointer user_data) {
     static_cast<Application*>(user_data)->on_shutdown();
 }
 

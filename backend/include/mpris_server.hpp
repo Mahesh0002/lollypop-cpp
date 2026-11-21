@@ -46,7 +46,7 @@ public:
 
     void update_playback_status(bool playing);
     void update_stopped();
-    void update_track(const Track& track);
+    void update_track(const Track& track, const std::string& entry_id = {});
     void update_position(double position_seconds);
     void update_duration(double duration_seconds);
     void update_volume(double volume);

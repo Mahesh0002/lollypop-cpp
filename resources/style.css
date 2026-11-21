@@ -1,49 +1,52 @@
 /**
  * Lollypop C++ - GTK4 CSS Stylesheet
  * Apple Music-inspired design with custom playback areas
- * GTK4 compatible - only uses supported CSS properties
+ * GTK4 compatible - uses CSS custom properties (GTK 4.16+)
+ *
+ * NOTE: @define-color and alpha() are deprecated in GTK 4.
+ * Custom properties set by ThemeManager at runtime override --accent-color.
  */
 
+* {
+    font-family: "Inter", "Noto Sans", "Liberation Sans", sans-serif;
+    font-size: 13px;
+    color: var(--text-primary, #f5f5f7);
+}
+
 /* ============================================================================
- * Color Palette & Variables
+ * Color Variables (defaults; overridden by ThemeManager at runtime)
  * ============================================================================ */
 
-@define-color bg_primary #1a1a1a;
-@define-color bg_secondary #232323;
-@define-color bg_tertiary #2d2d2d;
-@define-color bg_hover #333333;
-@define-color bg_active #3a3a3a;
-@define-color bg_selected #404040;
+:root {
+    --bg-primary: #111116;
+    --bg-secondary: #1a1a22;
+    --bg-tertiary: #22222c;
+    --bg-hover: #2a2a36;
+    --bg-active: #333340;
+    --bg-selected: #3a3a4a;
 
-@define-color fg_primary #ffffff;
-@define-color fg_secondary #b3b3b3;
-@define-color fg_tertiary #808080;
-@define-color fg_disabled #555555;
+    --text-primary: #f5f5f7;
+    --text-secondary: #a3a3ad;
+    --text-tertiary: #7a7a8a;
+    --text-disabled: #555565;
 
-@define-color accent_blue #007aff;
-@define-color accent_blue_hover #0056cc;
-@define-color accent_green #34c759;
-@define-color accent_red #ff3b30;
-@define-color accent_orange #ff9f0a;
+    --accent-color: #a78bfa;          /* Overridden by ThemeManager */
+    --accent-soft: rgba(167, 139, 250, 0.18);
+    --accent-hover: #8b5cf6;
 
-@define-color border_subtle #333333;
-@define-color border_focus #007aff;
+    --border-subtle: #2a2a36;
+    --border-focus: var(--accent-color);
 
-@define-color shadow_strong rgba(0, 0, 0, 0.5);
-@define-color shadow_subtle rgba(0, 0, 0, 0.2);
+    --shadow-strong: rgba(0, 0, 0, 0.5);
+    --shadow-subtle: rgba(0, 0, 0, 0.2);
+}
 
 /* ============================================================================
  * Base Styles
  * ============================================================================ */
 
-* {
-    font-family: "SF Pro Display", "Inter", "Noto Sans", sans-serif;
-    font-size: 13px;
-    color: @fg_primary;
-}
-
 window {
-    background-color: @bg_primary;
+    background-color: var(--bg-primary);
 }
 
 button {
@@ -51,37 +54,42 @@ button {
     border-radius: 8px;
     padding: 6px 12px;
     background-color: transparent;
-    color: @fg_primary;
+    color: var(--text-primary);
 }
 
 button:hover {
-    background-color: @bg_hover;
+    background-color: var(--bg-hover);
 }
 
 button:active {
-    background-color: @bg_active;
+    background-color: var(--bg-active);
 }
 
 button:focus {
     outline: none;
-    box-shadow: 0 0 0 2px @border_focus;
+    box-shadow: 0 0 0 2px var(--border-focus);
+}
+
+button:disabled {
+    color: var(--text-disabled);
+    background-color: transparent;
 }
 
 label {
-    color: @fg_primary;
+    color: var(--text-primary);
 }
 
 entry, searchentry {
-    border: 1px solid @border_subtle;
+    border: 1px solid var(--border-subtle);
     border-radius: 20px;
     padding: 8px 16px;
-    background-color: @bg_secondary;
-    color: @fg_primary;
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
 }
 
 entry:focus, searchentry:focus {
-    border-color: @border_focus;
-    box-shadow: 0 0 0 2px alpha(@border_focus, 0.3);
+    border-color: var(--border-focus);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--border-focus), transparent 70%);
 }
 
 scrolledwindow {
@@ -89,16 +97,16 @@ scrolledwindow {
 }
 
 separator {
-    background-color: @border_subtle;
+    background-color: var(--border-subtle);
     min-height: 1px;
     min-width: 1px;
 }
 
 popover {
-    background-color: @bg_secondary;
-    border: 1px solid @border_subtle;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-subtle);
     border-radius: 12px;
-    box-shadow: 0 8px 32px @shadow_strong;
+    box-shadow: 0 8px 32px var(--shadow-strong);
 }
 
 popover button {
@@ -107,7 +115,7 @@ popover button {
 }
 
 popover button:hover {
-    background-color: @bg_hover;
+    background-color: var(--bg-hover);
 }
 
 listbox {
@@ -132,16 +140,16 @@ listboxrow:selected {
 .headline { font-size: 15px; font-weight: 600; }
 .body { font-size: 13px; font-weight: 400; }
 .body-strong { font-size: 13px; font-weight: 500; }
-.caption { font-size: 11px; font-weight: 400; color: @fg_tertiary; }
-.caption-strong { font-size: 11px; font-weight: 500; color: @fg_secondary; }
+.caption { font-size: 11px; font-weight: 400; color: var(--text-tertiary); }
+.caption-strong { font-size: 11px; font-weight: 500; color: var(--text-secondary); }
 
 /* ============================================================================
  * Sidebar Styles
  * ============================================================================ */
 
 .sidebar {
-    background-color: @bg_secondary;
-    border-right: 1px solid @border_subtle;
+    background-color: var(--bg-secondary);
+    border-right: 1px solid var(--border-subtle);
     min-width: 64px;
 }
 
@@ -159,7 +167,7 @@ listboxrow:selected {
 
 .sidebar-menu-button:hover,
 .sidebar-action-button:hover {
-    background-color: @bg_hover;
+    background-color: var(--bg-hover);
 }
 
 .sidebar-nav {
@@ -173,41 +181,61 @@ listboxrow:selected {
 }
 
 .sidebar-nav-item:hover {
-    background-color: @bg_hover;
+    background-color: var(--bg-hover);
 }
 
 .sidebar-nav-item.active {
-    background-color: @bg_selected;
+    background-color: var(--bg-selected);
 }
 
 .sidebar-nav-item.active .sidebar-nav-icon {
-    color: @accent_blue;
+    color: var(--accent-color);
 }
 
 .sidebar-nav-item.active .sidebar-nav-label {
-    color: @fg_primary;
+    color: var(--text-primary);
     font-weight: 500;
 }
 
 .sidebar-nav-icon {
-    color: @fg_secondary;
+    color: var(--text-secondary);
     min-width: 22px;
     min-height: 22px;
 }
 
 .sidebar-nav-label {
-    color: @fg_secondary;
+    color: var(--text-secondary);
     font-size: 13px;
     font-weight: 400;
 }
 
-/* Compact sidebar mode - controlled via CSS class */
-.sidebar.compact {
-    min-width: 64px;
+/* Collapse button (chevron) */
+.sidebar-collapse-button {
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 18px;
+    padding: 8px;
 }
 
-.sidebar.compact .sidebar-nav-label {
-    /* GTK will hide via widget visibility in code */
+.sidebar-collapse-button:hover {
+    background-color: var(--bg-hover);
+}
+
+/* Menu button (hamburger) */
+.sidebar-menu-button {
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 18px;
+    padding: 8px;
+}
+
+.sidebar-menu-button:hover {
+    background-color: var(--bg-hover);
+}
+
+/* Compact sidebar mode */
+.sidebar.compact {
+    min-width: 64px;
 }
 
 /* ============================================================================
@@ -215,7 +243,7 @@ listboxrow:selected {
  * ============================================================================ */
 
 .middle-library {
-    background-color: @bg_primary;
+    background-color: var(--bg-primary);
 }
 
 .library-header {
@@ -226,7 +254,7 @@ listboxrow:selected {
     font-size: 28px;
     font-weight: 600;
     letter-spacing: -0.5px;
-    color: @fg_primary;
+    color: var(--text-primary);
 }
 
 .library-search {
@@ -241,7 +269,7 @@ listboxrow:selected {
 }
 
 .library-menu-button:hover {
-    background-color: @bg_hover;
+    background-color: var(--bg-hover);
 }
 
 .library-page {
@@ -256,7 +284,7 @@ listboxrow:selected {
 }
 
 .library-placeholder {
-    color: @fg_tertiary;
+    color: var(--text-tertiary);
     font-size: 13px;
 }
 
@@ -266,18 +294,18 @@ listboxrow:selected {
 
 /* Album/Artist Cards */
 .album-card, .artist-card {
-    background-color: @bg_secondary;
+    background-color: var(--bg-secondary);
     border-radius: 12px;
     padding: 12px;
 }
 
 .album-card:hover, .artist-card:hover {
-    background-color: @bg_hover;
+    background-color: var(--bg-hover);
 }
 
 .album-card:selected, .artist-card:selected {
-    background-color: @bg_selected;
-    box-shadow: 0 0 0 2px @border_focus;
+    background-color: var(--bg-selected);
+    box-shadow: 0 0 0 2px var(--border-focus);
 }
 
 .album-artwork, .artist-artwork {
@@ -289,14 +317,14 @@ listboxrow:selected {
 .album-title {
     font-size: 14px;
     font-weight: 600;
-    color: @fg_primary;
+    color: var(--text-primary);
     margin-top: 8px;
 }
 
 .album-artist {
     font-size: 12px;
     font-weight: 400;
-    color: @fg_tertiary;
+    color: var(--text-tertiary);
     margin-top: 2px;
 }
 
@@ -312,12 +340,70 @@ listboxrow:selected {
 }
 
 /* ============================================================================
+ * ArtworkView Component
+ * ============================================================================ */
+
+.artwork-view {
+    background-color: transparent;
+}
+
+.artwork-view-image {
+    border-radius: 12px;
+    box-shadow: 0 16px 48px var(--shadow-strong);
+}
+
+.artwork-view-fallback {
+    color: var(--text-secondary);
+}
+
+/* ============================================================================
+ * Empty / Loading / Error States
+ * ============================================================================ */
+
+.empty-state,
+.loading-state,
+.error-state {
+    background-color: transparent;
+}
+
+.empty-state-icon,
+.error-state-icon {
+    color: var(--text-tertiary);
+}
+
+.empty-state-title,
+.error-state-title {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.empty-state-description,
+.error-state-description {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.loading-state-spinner {
+    color: var(--accent-color);
+}
+
+.loading-state-message {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.error-state-retry {
+    margin-top: 12px;
+}
+
+/* ============================================================================
  * Right Now Playing Styles
  * ============================================================================ */
 
 .right-now-playing {
-    background-color: @bg_secondary;
-    border-left: 1px solid @border_subtle;
+    background-color: var(--bg-secondary);
+    border-left: 1px solid var(--border-subtle);
 }
 
 .now-playing-scrolled {
@@ -334,7 +420,7 @@ listboxrow:selected {
 
 .now-playing-artwork-image {
     border-radius: 12px;
-    box-shadow: 0 16px 48px @shadow_strong;
+    box-shadow: 0 16px 48px var(--shadow-strong);
     min-width: 280px;
     min-height: 280px;
 }
@@ -347,13 +433,13 @@ listboxrow:selected {
     font-size: 20px;
     font-weight: 600;
     letter-spacing: -0.2px;
-    color: @fg_primary;
+    color: var(--text-primary);
 }
 
 .now-playing-artist {
     font-size: 15px;
     font-weight: 400;
-    color: @fg_secondary;
+    color: var(--text-secondary);
     margin-top: 4px;
 }
 
@@ -364,13 +450,19 @@ listboxrow:selected {
 .now-playing-time {
     font-size: 12px;
     font-weight: 500;
-    color: @fg_tertiary;
+    color: var(--text-tertiary);
     font-variant-numeric: tabular-nums;
 }
 
-.waveform-widget {
+.waveform-view,
+.waveform-stub {
     background-color: transparent;
     border-radius: 8px;
+    transition: height 200ms ease-out, min-height 200ms ease-out;
+}
+
+.waveform-playing {
+    /* Animation state handled by renderer */
 }
 
 .now-playing-control-button {
@@ -381,7 +473,12 @@ listboxrow:selected {
 }
 
 .now-playing-control-button:hover {
-    background-color: @bg_hover;
+    background-color: var(--bg-hover);
+}
+
+.now-playing-control-button:disabled {
+    opacity: 0.4;
+    color: var(--text-disabled);
 }
 
 .now-playing-modes {
@@ -393,17 +490,17 @@ listboxrow:selected {
     min-height: 36px;
     border-radius: 18px;
     padding: 8px;
-    color: @fg_tertiary;
+    color: var(--text-tertiary);
 }
 
 .now-playing-mode-button:hover {
-    background-color: @bg_hover;
-    color: @fg_secondary;
+    background-color: var(--bg-hover);
+    color: var(--text-secondary);
 }
 
 .now-playing-mode-button:checked {
-    color: @accent_blue;
-    background-color: alpha(@accent_blue, 0.15);
+    color: var(--accent-color);
+    background-color: var(--accent-soft);
 }
 
 .now-playing-tabs {
@@ -411,7 +508,7 @@ listboxrow:selected {
 }
 
 .now-playing-tab-buttons {
-    background-color: @bg_tertiary;
+    background-color: var(--bg-tertiary);
     border-radius: 10px;
     padding: 4px;
 }
@@ -421,30 +518,30 @@ listboxrow:selected {
     padding: 8px 20px;
     font-size: 13px;
     font-weight: 500;
-    color: @fg_tertiary;
+    color: var(--text-tertiary);
     background-color: transparent;
 }
 
 .now-playing-tab-button:hover {
-    color: @fg_secondary;
+    color: var(--text-secondary);
     background-color: transparent;
 }
 
 .now-playing-tab-button.active {
-    color: @fg_primary;
-    background-color: @bg_secondary;
-    box-shadow: 0 2px 8px @shadow_subtle;
+    color: var(--text-primary);
+    background-color: var(--bg-secondary);
+    box-shadow: 0 2px 8px var(--shadow-subtle);
 }
 
 .now-playing-lyrics {
     background-color: transparent;
     font-size: 14px;
     line-height: 1.6;
-    color: @fg_secondary;
+    color: var(--text-secondary);
 }
 
 .now-playing-lyrics .current-line {
-    color: @fg_primary;
+    color: var(--text-primary);
     font-weight: 500;
 }
 
@@ -461,13 +558,13 @@ listboxrow:selected {
 .queue-item-title {
     font-size: 13px;
     font-weight: 500;
-    color: @fg_primary;
+    color: var(--text-primary);
 }
 
 .queue-item-artist {
     font-size: 11px;
     font-weight: 400;
-    color: @fg_tertiary;
+    color: var(--text-tertiary);
 }
 
 /* ============================================================================
@@ -475,13 +572,13 @@ listboxrow:selected {
  * ============================================================================ */
 
 .bottom-playback {
-    background-color: @bg_secondary;
-    border-top: 1px solid @border_subtle;
+    background-color: var(--bg-secondary);
+    border-top: 1px solid var(--border-subtle);
     min-height: 80px;
 }
 
 .bottom-playback-separator {
-    background-color: @border_subtle;
+    background-color: var(--border-subtle);
     min-height: 1px;
 }
 
@@ -493,19 +590,19 @@ listboxrow:selected {
     border-radius: 6px;
     min-width: 56px;
     min-height: 56px;
-    box-shadow: 0 4px 16px @shadow_subtle;
+    box-shadow: 0 4px 16px var(--shadow-subtle);
 }
 
 .bottom-playback-title {
     font-size: 14px;
     font-weight: 500;
-    color: @fg_primary;
+    color: var(--text-primary);
 }
 
 .bottom-playback-artist {
     font-size: 12px;
     font-weight: 400;
-    color: @fg_tertiary;
+    color: var(--text-tertiary);
 }
 
 .bottom-playback-center {
@@ -517,11 +614,16 @@ listboxrow:selected {
     min-height: 44px;
     border-radius: 22px;
     padding: 10px;
-    color: @fg_primary;
+    color: var(--text-primary);
 }
 
 .bottom-playback-control-button:hover {
-    background-color: @bg_hover;
+    background-color: var(--bg-hover);
+}
+
+.bottom-playback-control-button:disabled {
+    opacity: 0.4;
+    color: var(--text-disabled);
 }
 
 .bottom-playback-play-button {
@@ -529,18 +631,22 @@ listboxrow:selected {
     min-height: 56px;
     border-radius: 28px;
     padding: 14px;
-    background-color: @fg_primary;
-    color: @bg_primary;
-    box-shadow: 0 4px 16px @shadow_subtle;
+    background-color: var(--text-primary);
+    color: var(--bg-primary);
+    box-shadow: 0 4px 16px var(--shadow-subtle);
 }
 
 .bottom-playback-play-button:hover {
-    background-color: @fg_primary;
-    box-shadow: 0 6px 24px @shadow_strong;
+    background-color: var(--text-primary);
+    box-shadow: 0 6px 24px var(--shadow-strong);
 }
 
 .bottom-playback-play-button:active {
-    background-color: @fg_primary;
+    background-color: var(--text-primary);
+}
+
+.bottom-playback-play-button:disabled {
+    opacity: 0.4;
 }
 
 .bottom-playback-progress {
@@ -550,7 +656,7 @@ listboxrow:selected {
 .bottom-playback-time {
     font-size: 11px;
     font-weight: 500;
-    color: @fg_tertiary;
+    color: var(--text-tertiary);
     font-variant-numeric: tabular-nums;
     min-width: 50px;
 }
@@ -567,7 +673,12 @@ listboxrow:selected {
 }
 
 .bottom-playback-volume-button:hover {
-    background-color: @bg_hover;
+    background-color: var(--bg-hover);
+}
+
+.bottom-playback-volume-button:disabled {
+    opacity: 0.4;
+    color: var(--text-disabled);
 }
 
 .bottom-playback-volume-scale {
@@ -576,32 +687,27 @@ listboxrow:selected {
 }
 
 .bottom-playback-volume-scale slider {
-    min-width: 24px;
-    min-height: 120px;
+    min-width: 14px;
+    min-height: 14px;
+    border-radius: 7px;
+    background-color: var(--text-primary);
+    border: none;
+    box-shadow: 0 2px 8px var(--shadow-subtle);
+}
+
+.bottom-playback-volume-scale slider:hover {
+    background-color: var(--text-primary);
 }
 
 .bottom-playback-volume-scale trough {
     min-width: 4px;
     border-radius: 2px;
-    background-color: @bg_tertiary;
+    background-color: var(--bg-tertiary);
 }
 
 .bottom-playback-volume-scale highlight {
-    background-color: @accent_blue;
+    background-color: var(--accent-color);
     border-radius: 2px;
-}
-
-.bottom-playback-volume-scale slider {
-    min-width: 14px;
-    min-height: 14px;
-    border-radius: 7px;
-    background-color: @fg_primary;
-    border: none;
-    box-shadow: 0 2px 8px @shadow_subtle;
-}
-
-.bottom-playback-volume-scale slider:hover {
-    background-color: @fg_primary;
 }
 
 .bottom-playback-pip-button {
@@ -612,7 +718,12 @@ listboxrow:selected {
 }
 
 .bottom-playback-pip-button:hover {
-    background-color: @bg_hover;
+    background-color: var(--bg-hover);
+}
+
+.bottom-playback-pip-button:disabled {
+    opacity: 0.4;
+    color: var(--text-disabled);
 }
 
 /* ============================================================================
@@ -624,7 +735,7 @@ scrollbar {
 }
 
 scrollbar slider {
-    background-color: @bg_tertiary;
+    background-color: var(--bg-tertiary);
     border-radius: 4px;
     min-width: 8px;
     min-height: 8px;
@@ -632,11 +743,11 @@ scrollbar slider {
 }
 
 scrollbar slider:hover {
-    background-color: @fg_tertiary;
+    background-color: var(--text-tertiary);
 }
 
 scrollbar slider:active {
-    background-color: @fg_secondary;
+    background-color: var(--text-secondary);
 }
 
 scrollbar button {
@@ -644,6 +755,44 @@ scrollbar button {
     min-height: 0;
     padding: 0;
     background-color: transparent;
+}
+
+/* ============================================================================
+ * PiP (Picture-in-Picture) Window Styles
+ * ============================================================================ */
+
+.pip-content {
+    background-color: var(--bg-secondary);
+    border-radius: 16px;
+}
+
+.pip-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.pip-artist {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-secondary);
+}
+
+.pip-control-button {
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 18px;
+    padding: 8px;
+    color: var(--text-primary);
+}
+
+.pip-control-button:hover {
+    background-color: var(--bg-hover);
+}
+
+.pip-control-button:disabled {
+    opacity: 0.4;
+    color: var(--text-disabled);
 }
 
 /* ============================================================================
@@ -656,7 +805,6 @@ scrollbar button {
     transition-timing-function: ease-out;
 }
 
-/* Disable transitions for specific elements that need instant feedback */
 button:active,
 .toggle-button:active {
     transition-duration: 50ms;
@@ -667,7 +815,7 @@ button:active,
  * ============================================================================ */
 
 *:focus {
-    outline: 2px solid @border_focus;
+    outline: 2px solid var(--border-focus);
     outline-offset: 2px;
 }
 

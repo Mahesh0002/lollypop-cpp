@@ -32,3 +32,37 @@ target_link_libraries(test_backend PRIVATE
 )
 
 add_test(NAME backend_tests COMMAND test_backend)
+
+# EventBus tests
+add_executable(test_eventbus
+    test_eventbus.cpp
+)
+
+target_link_libraries(test_eventbus PRIVATE
+    lollypop-backend
+    lollypop-storage
+    ${SQLITE3_LIBRARIES}
+    ${GLIB_LIBRARIES}
+    ${GIO_LIBRARIES}
+    GTest::gtest
+    GTest::gtest_main
+)
+
+add_test(NAME eventbus_tests COMMAND test_eventbus)
+
+# QueueManager tests
+add_executable(test_queue_manager
+    test_queue_manager.cpp
+)
+
+target_link_libraries(test_queue_manager PRIVATE
+    lollypop-backend
+    lollypop-storage
+    ${SQLITE3_LIBRARIES}
+    ${GLIB_LIBRARIES}
+    ${GIO_LIBRARIES}
+    GTest::gtest
+    GTest::gtest_main
+)
+
+add_test(NAME queue_manager_tests COMMAND test_queue_manager)

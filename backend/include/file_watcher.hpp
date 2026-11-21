@@ -16,7 +16,8 @@ enum class FileEventType {
     Created,
     Modified,
     Deleted,
-    Moved
+    Moved,
+    Rescan,  // Full rescan needed (e.g. after inotify queue overflow)
 };
 
 struct FileEvent {

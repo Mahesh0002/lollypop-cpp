@@ -97,6 +97,12 @@ void parse_metadata(const Glib::VariantBase& value, MprisPlayerInfo& info) {
             info.track_artist = join_artists(artists);
         }
 
+        // Album artist is a separate MPRIS property.
+        Glib::ustring album_artist;
+        if (dict->lookup_value("xesam:albumArtist", album_artist)) {
+            info.track_album_artist = album_artist.raw();
+        }
+
         if (dict->lookup_value("xesam:album", text)) {
             info.track_album = text.raw();
         }
@@ -138,6 +144,8 @@ const char* loop_state_to_string(int state) {
 struct MprisManager::Impl {
     struct PlayerEntry {
         MprisPlayerInfo info;
+        // Separate proxies: root proxy for Identity/DesktopEntry, player proxy
+        // for playback control and properties.
         Glib::RefPtr<Gio::DBus::Proxy> base;
         Glib::RefPtr<Gio::DBus::Proxy> player;
         Glib::RefPtr<Gio::DBus::Proxy> properties;
@@ -152,10 +160,20 @@ struct MprisManager::Impl {
     std::string manual_name;
     std::string preferred_name;  // stored lowercase
     std::string tracked_name;    // last player seen playing
+    std::vector<std::string> mru_;  // most-recently-used player names (front = most recent)
     bool filter_duplicates = true;
 
+    // Single subscription to NameOwnerChanged (well-known names only).
     guint name_subscription = 0;
     guint position_timer = 0;
+
+    // Generation counter for async D-Bus replies. Each request is tagged with
+    // a generation; stale replies (from a previous active player or a
+    // superseded request) are dropped. (plan.md §14.6)
+    std::atomic<uint64_t> request_generation_{0};
+    // Outstanding position poll: one per active player at a time.
+    std::atomic<uint64_t> position_poll_generation_{0};
+    std::atomic<bool> position_poll_outstanding_{false};
 
     PlayerListChangedCallback player_list_cb;
     ActivePlayerChangedCallback active_player_cb;
@@ -184,6 +202,23 @@ struct MprisManager::Impl {
 
     PlayerEntry* active_entry() { return find(active_name); }
     const PlayerEntry* active_entry() const { return find(active_name); }
+
+    // MRU management (plan.md §14.3): move a player to the front of the
+    // most-recently-used list when it starts playing.
+    void touch_mru(const std::string& name) {
+        auto it = std::find(mru_.begin(), mru_.end(), name);
+        if (it != mru_.end()) {
+            mru_.erase(it);
+        }
+        mru_.insert(mru_.begin(), name);
+        // Cap the MRU list to avoid unbounded growth.
+        if (mru_.size() > 16) mru_.pop_back();
+    }
+
+    void remove_from_mru(const std::string& name) {
+        auto it = std::find(mru_.begin(), mru_.end(), name);
+        if (it != mru_.end()) mru_.erase(it);
+    }
 
     bool is_filtered(const std::string& name,
                      const std::vector<std::string>& all_names) const {
@@ -244,41 +279,75 @@ struct MprisManager::Impl {
         }
     }
 
-    double query_position(const std::string& name) {
+    // Asynchronously query the Position property; invokes cb with the
+    // position in seconds (or 0.0 on failure). Stale replies are dropped by
+    // comparing against @p gen.
+    void query_position_async(const std::string& name,
+                              uint64_t gen,
+                              std::function<void(double)> cb) {
         PlayerEntry* entry = find(name);
-        if (!entry || !entry->properties) return 0.0;
-
-        try {
-            auto reply = entry->properties->call_sync(
-                "Get",
-                Glib::VariantContainerBase::create_tuple({
-                    Glib::Variant<Glib::ustring>::create(kPlayerInterface),
-                    Glib::Variant<Glib::ustring>::create("Position"),
-                }));
-            auto boxed = Glib::VariantBase::cast_dynamic<
-                Glib::Variant<Glib::Variant<gint64>>>(reply.get_child(0));
-            const gint64 position_us = boxed.get().get();
-            return static_cast<double>(position_us) / 1'000'000.0;
-        } catch (...) {
-            return 0.0;
+        if (!entry || !entry->properties) {
+            if (cb) cb(0.0);
+            return;
         }
+
+        Glib::VariantContainerBase params =
+            Glib::VariantContainerBase::create_tuple({
+                Glib::Variant<Glib::ustring>::create(kPlayerInterface),
+                Glib::Variant<Glib::ustring>::create("Position"),
+            });
+        auto props = entry->properties;
+        auto cb_self = std::move(cb);
+        props->call("Get",
+            sigc::slot<void(const Glib::RefPtr<Gio::AsyncResult>&)>([this, gen, props, cb_self = std::move(cb_self)](
+                const Glib::RefPtr<Gio::AsyncResult>& result) {
+                if (position_poll_generation_.load() != gen) {
+                    if (cb_self) cb_self(0.0);
+                    return;
+                }
+                try {
+                    auto reply = props->call_finish(result);
+                    auto boxed = Glib::VariantBase::cast_dynamic<
+                        Glib::Variant<Glib::Variant<gint64>>>(
+                            reply.get_child(0));
+                    const gint64 position_us = boxed.get().get();
+                    if (cb_self)
+                        cb_self(static_cast<double>(position_us) /
+                                1'000'000.0);
+                } catch (...) {
+                    if (cb_self) cb_self(0.0);
+                }
+            }),
+            params,
+            -1);
     }
 
-    void set_property(PlayerEntry& entry, const char* name,
-                      const Glib::VariantBase& boxed_value) {
+    void set_property_async(PlayerEntry& entry, const char* name,
+                            const Glib::VariantBase& boxed_value) {
         if (!entry.properties) return;
-        try {
-            entry.properties->call_sync(
-                "Set",
-                Glib::VariantContainerBase::create_tuple({
-                    Glib::Variant<Glib::ustring>::create(kPlayerInterface),
-                    Glib::Variant<Glib::ustring>::create(name),
-                    boxed_value,
-                }));
-        } catch (const Glib::Error& error) {
-            std::cerr << "MprisManager: Failed to set " << name << ": "
-                      << error.what() << std::endl;
-        }
+
+        uint64_t gen = ++request_generation_;
+        Glib::VariantContainerBase params =
+            Glib::VariantContainerBase::create_tuple({
+                Glib::Variant<Glib::ustring>::create(kPlayerInterface),
+                Glib::Variant<Glib::ustring>::create(name),
+                boxed_value,
+            });
+        auto props = entry.properties;
+        // Fire-and-forget async Set; stale replies are dropped by generation.
+        props->call("Set",
+            sigc::slot<void(const Glib::RefPtr<Gio::AsyncResult>&)>([this, gen, props](const Glib::RefPtr<Gio::AsyncResult>& result) {
+                if (request_generation_.load() != gen) return;
+                try {
+                    props->call_finish(result);
+                } catch (const Glib::Error& error) {
+                    std::cerr << "MprisManager: async Set failed: "
+                              << error.what() << std::endl;
+                } catch (...) {
+                }
+            }),
+            params,
+            -1);
     }
 
     bool add_player(const std::string& name) {
@@ -300,6 +369,7 @@ struct MprisManager::Impl {
 
             PlayerEntry entry;
             entry.info.dbus_name = name;
+            // Root proxy provides Identity and DesktopEntry.
             entry.info.identity = cached_string(base, "Identity");
             entry.info.desktop_entry = cached_string(base, "DesktopEntry");
             entry.base = base;
@@ -337,25 +407,34 @@ struct MprisManager::Impl {
     void refresh_players() {
         if (!bus) return;
 
-        std::vector<std::string> names;
-        try {
-            auto reply = bus->call_sync(
-                kBusPath, kBusService, "ListNames",
-                Glib::VariantContainerBase::create_tuple(
-                    std::vector<Glib::VariantBase>{}),
-                kBusService, -1, Gio::DBus::CallFlags::NONE,
-                Glib::VariantType("(as)"));
-            auto list = Glib::VariantBase::cast_dynamic<
-                Glib::Variant<std::vector<Glib::ustring>>>(reply.get_child(0));
-            for (const auto& name : list.get()) {
-                names.push_back(name.raw());
-            }
-        } catch (const Glib::Error& error) {
-            std::cerr << "MprisManager: Failed to list bus names: "
-                      << error.what() << std::endl;
-            return;
-        }
+        Glib::VariantContainerBase params =
+            Glib::VariantContainerBase::create_tuple(
+                std::vector<Glib::VariantBase>{});
+        auto bus_ref = bus;
+        bus->call(kBusPath, kBusService, "ListNames", params,
+            sigc::slot<void(const Glib::RefPtr<Gio::AsyncResult>&)>([this, bus_ref](const Glib::RefPtr<Gio::AsyncResult>& result) {
+                if (!bus_ref) return;
+                try {
+                    auto reply = bus_ref->call_finish(result);
+                    auto list = Glib::VariantBase::cast_dynamic<
+                        Glib::Variant<std::vector<Glib::ustring>>>(
+                            reply.get_child(0));
+                    std::vector<std::string> names;
+                    for (const auto& name : list.get()) {
+                        names.push_back(name.raw());
+                    }
+                    apply_player_list(names);
+                } catch (const Glib::Error& error) {
+                    std::cerr << "MprisManager: Failed to list bus names: "
+                              << error.what() << std::endl;
+                } catch (...) {
+                }
+            }),
+            kBusService, -1, Gio::DBus::CallFlags::NONE,
+            Glib::VariantType("(as)"));
+    }
 
+    void apply_player_list(const std::vector<std::string>& names) {
         bool changed = false;
 
         // Drop players that vanished or are now considered duplicates.
@@ -364,6 +443,13 @@ struct MprisManager::Impl {
             const bool present =
                 std::find(names.begin(), names.end(), name) != names.end();
             if (!present || is_filtered(name, names)) {
+                // Disconnect signal handlers before removing the player.
+                it->properties_conn.disconnect();
+                it->seeked_conn.disconnect();
+                remove_from_mru(name);
+                if (name == active_name) {
+                    active_name.clear();
+                }
                 it = players.erase(it);
                 changed = true;
             } else {
@@ -388,9 +474,28 @@ struct MprisManager::Impl {
     }
 
     void on_name_owner_changed(const Glib::RefPtr<Gio::DBus::Connection>&,
-                               const Glib::ustring&, const Glib::ustring&,
-                               const Glib::ustring&, const Glib::ustring&,
-                               const Glib::VariantContainerBase&) {
+                               const Glib::ustring& /*sender_name*/,
+                               const Glib::ustring& /*object_path*/,
+                               const Glib::ustring& /*interface_name*/,
+                               const Glib::ustring& /*signal_name*/,
+                               const Glib::VariantContainerBase& parameters) {
+        // NameOwnerChanged signal parameters: (name, old_owner, new_owner)
+        Glib::Variant<std::tuple<Glib::ustring, Glib::ustring, Glib::ustring>> params;
+        try {
+            params = Glib::VariantBase::cast_dynamic<
+                Glib::Variant<std::tuple<Glib::ustring, Glib::ustring, Glib::ustring>>>(
+                    parameters.get_child(0));
+        } catch (...) {
+            return;
+        }
+        auto [name, old_owner, new_owner] = params.get();
+
+        // Distinguish well-known names from unique bus names.
+        // Only react to well-known MPRIS names; ignore unique-name changes.
+        if (name.compare(0, Glib::ustring(kMprisPrefix).size(), kMprisPrefix) !=
+            0) {
+            return;
+        }
         refresh_players();
     }
 
@@ -414,6 +519,7 @@ struct MprisManager::Impl {
 
         if (entry->info.is_playing && !was_playing) {
             tracked_name = name;
+            touch_mru(name);
         }
 
         if (name == active_name) {
@@ -483,6 +589,16 @@ struct MprisManager::Impl {
             }
         }
 
+        // MRU: the most recently used player that is currently playing.
+        if (candidate.empty()) {
+            for (const auto& name : mru_) {
+                if (find(name) && find(name)->info.is_playing) {
+                    candidate = name;
+                    break;
+                }
+            }
+        }
+
         if (candidate.empty() && !tracked_name.empty() && find(tracked_name)) {
             candidate = tracked_name;
         }
@@ -519,10 +635,27 @@ struct MprisManager::Impl {
         PlayerEntry* entry = active_entry();
         if (!entry || !entry->info.is_playing) return;
 
-        entry->info.position = query_position(entry->info.dbus_name);
-        if (position_cb) {
-            position_cb(entry->info.position, entry->info.duration);
-        }
+        // One outstanding Position poll per player at a time (plan.md §14.7).
+        if (position_poll_outstanding_.exchange(true)) return;
+
+        uint64_t gen = ++position_poll_generation_;
+        auto name = entry->info.dbus_name;
+        query_position_async(name, gen,
+            [this, gen](double position) {
+                // Drop stale results if a newer poll superseded this one.
+                if (position_poll_generation_.load() != gen) {
+                    position_poll_outstanding_ = false;
+                    return;
+                }
+                position_poll_outstanding_ = false;
+                PlayerEntry* e = active_entry();
+                if (e && e->info.is_playing) {
+                    e->info.position = position;
+                    if (position_cb) {
+                        position_cb(position, e->info.duration);
+                    }
+                }
+            });
     }
 
     static gboolean position_tick(gpointer data) {
@@ -530,15 +663,27 @@ struct MprisManager::Impl {
         return G_SOURCE_CONTINUE;
     }
 
-    void call_active(const char* method) {
+    // Asynchronous playback commands to avoid blocking the UI thread.
+    void call_active_async(const char* method) {
         PlayerEntry* entry = active_entry();
         if (!entry || !entry->player) return;
-        try {
-            entry->player->call_sync(method);
-        } catch (const Glib::Error& error) {
-            std::cerr << "MprisManager: " << method << " failed: "
-                      << error.what() << std::endl;
-        }
+
+        uint64_t gen = ++request_generation_;
+        Glib::VariantContainerBase params;
+        auto player = entry->player;
+        player->call(method,
+            sigc::slot<void(const Glib::RefPtr<Gio::AsyncResult>&)>([this, gen, player](const Glib::RefPtr<Gio::AsyncResult>& result) {
+                if (request_generation_.load() != gen) return;
+                try {
+                    player->call_finish(result);
+                } catch (const Glib::Error& error) {
+                    std::cerr << "MprisManager: async command failed: "
+                              << error.what() << std::endl;
+                } catch (...) {
+                }
+            }),
+            params,
+            -1);
     }
 };
 
@@ -551,7 +696,6 @@ MprisManager::~MprisManager() {
 bool MprisManager::initialize() {
     if (impl_->bus) return true;
 
-    // Required for glibmm's GObject wrapper tables before touching Gio types.
     Gio::init();
 
     try {
@@ -562,6 +706,8 @@ bool MprisManager::initialize() {
         return false;
     }
 
+    // Single subscription to NameOwnerChanged, matching well-known MPRIS names
+    // only. The callback receives name, old_owner, new_owner.
     impl_->name_subscription = impl_->bus->signal_subscribe(
         sigc::mem_fun(*impl_, &Impl::on_name_owner_changed),
         kBusService, kBusService, "NameOwnerChanged", kBusPath, kMprisPrefix,
@@ -584,6 +730,11 @@ void MprisManager::shutdown() {
         impl_->bus->signal_unsubscribe(impl_->name_subscription);
         impl_->name_subscription = 0;
     }
+    // Disconnect all per-player signal handlers before clearing.
+    for (auto& entry : impl_->players) {
+        entry.properties_conn.disconnect();
+        entry.seeked_conn.disconnect();
+    }
     impl_->players.clear();
     impl_->active_name.clear();
     impl_->manual_name.clear();
@@ -604,8 +755,10 @@ std::vector<MprisPlayerInfo> MprisManager::get_players() const {
     return result;
 }
 
-MprisPlayerInfo MprisManager::get_active_player() const {
-    return impl_->get_active_info();
+std::optional<MprisPlayerInfo> MprisManager::get_active_player() const {
+    const auto* entry = impl_->find(impl_->active_name);
+    if (!entry) return std::nullopt;
+    return entry->info;
 }
 
 std::string MprisManager::get_active_player_name() const {
@@ -629,67 +782,89 @@ void MprisManager::set_filter_duplicates(bool enabled) {
 }
 
 void MprisManager::play_pause() {
-    impl_->call_active("PlayPause");
+    impl_->call_active_async("PlayPause");
 }
 
 void MprisManager::play() {
-    impl_->call_active("Play");
+    impl_->call_active_async("Play");
 }
 
 void MprisManager::pause() {
-    impl_->call_active("Pause");
+    impl_->call_active_async("Pause");
 }
 
 void MprisManager::stop() {
-    impl_->call_active("Stop");
+    impl_->call_active_async("Stop");
 }
 
 void MprisManager::next() {
-    impl_->call_active("Next");
+    impl_->call_active_async("Next");
 }
 
 void MprisManager::previous() {
-    impl_->call_active("Previous");
+    impl_->call_active_async("Previous");
 }
 
 void MprisManager::seek(double position_seconds) {
     Impl::PlayerEntry* entry = impl_->active_entry();
     if (!entry || !entry->player) return;
+    if (!entry->info.can_seek) return;
 
     const double clamped = std::max(0.0, position_seconds);
 
-    if (!entry->info.track_id.empty() && entry->info.track_id.front() == '/') {
-        try {
-            entry->player->call_sync(
-                "SetPosition",
-                Glib::VariantContainerBase::create_tuple({
-                    Glib::Variant<Glib::DBusObjectPathString>::create(
-                        Glib::DBusObjectPathString(entry->info.track_id)),
-                    Glib::Variant<gint64>::create(static_cast<gint64>(
-                        clamped * 1'000'000.0)),
-                }));
-            entry->info.position = clamped;
-            return;
-        } catch (const Glib::Error& error) {
-            std::cerr << "MprisManager: SetPosition failed: " << error.what()
-                      << std::endl;
-        }
+    // Absolute seek: SetPosition(track_id, position_us).
+    if (!entry->info.track_id.empty()) {
+        uint64_t gen = ++impl_->request_generation_;
+        Glib::VariantContainerBase params =
+            Glib::VariantContainerBase::create_tuple({
+                Glib::Variant<Glib::DBusObjectPathString>::create(
+                    Glib::DBusObjectPathString(entry->info.track_id)),
+                Glib::Variant<gint64>::create(
+                    static_cast<gint64>(clamped * 1'000'000.0)),
+            });
+        auto player = entry->player;
+        player->call("SetPosition",
+            sigc::slot<void(const Glib::RefPtr<Gio::AsyncResult>&)>([this, gen, player](const Glib::RefPtr<Gio::AsyncResult>& result) {
+                if (impl_->request_generation_.load() != gen) return;
+                try {
+                    player->call_finish(result);
+                } catch (const Glib::Error& error) {
+                    std::cerr << "MprisManager: async SetPosition failed: "
+                              << error.what() << std::endl;
+                } catch (...) {}
+            }),
+            params,
+            -1);
+        entry->info.position = clamped;
+        return;
     }
-
-    seek_by(clamped - entry->info.position);
 }
 
 void MprisManager::seek_by(double offset_seconds) {
     Impl::PlayerEntry* entry = impl_->active_entry();
     if (!entry || !entry->player) return;
+    if (!entry->info.can_seek) return;
 
     try {
-        entry->player->call_sync(
-            "Seek",
+        uint64_t gen = ++impl_->request_generation_;
+        Glib::VariantContainerBase params =
             Glib::VariantContainerBase::create_tuple({
                 Glib::Variant<gint64>::create(
                     static_cast<gint64>(offset_seconds * 1'000'000.0)),
-            }));
+            });
+        auto player = entry->player;
+        player->call("Seek",
+            sigc::slot<void(const Glib::RefPtr<Gio::AsyncResult>&)>([this, gen, player](const Glib::RefPtr<Gio::AsyncResult>& result) {
+                if (impl_->request_generation_.load() != gen) return;
+                try {
+                    player->call_finish(result);
+                } catch (const Glib::Error& error) {
+                    std::cerr << "MprisManager: async Seek failed: "
+                              << error.what() << std::endl;
+                } catch (...) {}
+            }),
+            params,
+            -1);
     } catch (const Glib::Error& error) {
         std::cerr << "MprisManager: Seek failed: " << error.what() << std::endl;
     }
@@ -700,7 +875,7 @@ void MprisManager::set_volume(double volume) {
     if (!entry) return;
 
     const double clamped = std::clamp(volume, 0.0, 1.0);
-    impl_->set_property(
+    impl_->set_property_async(
         *entry, "Volume",
         Glib::Variant<Glib::Variant<double>>::create(
             Glib::Variant<double>::create(clamped)));
@@ -712,7 +887,7 @@ void MprisManager::set_loop_state(int state) {
     if (!entry) return;
 
     const int clamped = std::clamp(state, 0, 2);
-    impl_->set_property(
+    impl_->set_property_async(
         *entry, "LoopStatus",
         Glib::Variant<Glib::Variant<Glib::ustring>>::create(
             Glib::Variant<Glib::ustring>::create(
@@ -724,7 +899,7 @@ void MprisManager::set_shuffle(bool shuffle) {
     Impl::PlayerEntry* entry = impl_->active_entry();
     if (!entry) return;
 
-    impl_->set_property(
+    impl_->set_property_async(
         *entry, "Shuffle",
         Glib::Variant<Glib::Variant<bool>>::create(
             Glib::Variant<bool>::create(shuffle)));
@@ -749,6 +924,21 @@ bool MprisManager::can_go_previous() const {
 bool MprisManager::can_seek() const {
     const auto* entry = impl_->active_entry();
     return entry && entry->info.can_seek;
+}
+
+double MprisManager::get_volume() const {
+    const auto* entry = impl_->active_entry();
+    return entry ? entry->info.volume : 0.0;
+}
+
+double MprisManager::get_position() const {
+    const auto* entry = impl_->active_entry();
+    return entry ? entry->info.position : 0.0;
+}
+
+double MprisManager::get_duration() const {
+    const auto* entry = impl_->active_entry();
+    return entry ? entry->info.duration : 0.0;
 }
 
 void MprisManager::set_player_list_changed_callback(PlayerListChangedCallback cb) {

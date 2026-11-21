@@ -91,6 +91,21 @@ public:
     std::vector<std::string> get_all_genres();
     std::vector<Track> get_tracks_by_genre(const std::string& genre);
 
+    // Genre hierarchy (DAG)
+    // add_genre_edge returns false if the edge would create a cycle.
+    bool add_genre_edge(const std::string& parent, const std::string& child);
+    // Returns genre and all descendants (recursive, cycle-safe via UNION).
+    std::vector<std::string> get_genre_descendants(const std::string& genre);
+    // Returns all tracks whose genre is the given genre or any descendant.
+    std::vector<Track> get_tracks_by_genre_hierarchy(const std::string& genre);
+
+    // Library root tracking (plan.md §16.7).
+    // Sorted vector + binary search is sufficient for a small number of roots.
+    bool add_library_root(const std::string& path);
+    bool remove_library_root(const std::string& path);
+    std::vector<std::string> get_library_roots() const;
+    bool is_library_root(const std::string& path) const;
+
     // User preferences
     bool set_preference(const std::string& key, const std::string& value);
     std::optional<std::string> get_preference(const std::string& key) const;
@@ -99,6 +114,29 @@ public:
     int get_track_count() const;
     int get_album_count() const;
     int get_artist_count() const;
+
+    // Read-only connections for worker threads (plan.md §16.6).
+    // open_read_only() returns a connection the caller must close with
+    // close_read_only() when finished. Allows scanner workers to read
+    // concurrently without contending with the writer connection.
+    sqlite3* open_read_only();
+    void close_read_only(sqlite3* ro_db);
+
+    // Database recovery (plan.md §16.7).
+    bool integrity_check();
+    bool quick_check();
+    bool backup_database(const std::string& backup_path);
+    bool vacuum();
+
+    // Keyset pagination (avoids OFFSET overhead on large libraries)
+    // sort_key must be one of: date_added, title, artist, album, duration,
+    // play_count, last_played, year, track_number.
+    // Optional genre_filter restricts results to tracks with the given genre.
+    std::vector<Track> get_tracks_paginated(int limit,
+                                             const std::string& sort_key = "date_added",
+                                             const std::string& last_sort_value = "",
+                                             const std::string& last_id = "",
+                                             const std::string& genre_filter = "");
 
 private:
     struct Impl;

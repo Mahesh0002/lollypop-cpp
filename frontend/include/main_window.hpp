@@ -1,6 +1,7 @@
 /**
  * Lollypop C++ - Main Window
  * Four-panel layout: Left Sidebar, Middle Library, Right Now Playing, Bottom Playback
+ * Uses AdwApplicationWindow (libadwaita) as the window base.
  */
 
 #pragma once
@@ -13,11 +14,16 @@
 #include "panels/middle_library.hpp"
 #include "panels/right_now_playing.hpp"
 #include "panels/bottom_playback.hpp"
+#include "services/MockLibraryService.hpp"
+#include "services/MockLyricsService.hpp"
 
 namespace lollypop {
 
 class Application;
-class BackendController;
+class IPlayerService;
+class ThemeManager;
+class ILibraryService;
+class ILyricsService;
 
 class MainWindow {
 public:
@@ -33,8 +39,14 @@ public:
     RightNowPlaying* get_right_now_playing() const { return right_now_playing_.get(); }
     BottomPlayback* get_bottom_playback() const { return bottom_playback_.get(); }
 
-    // Backend accessor
-    BackendController* get_backend() const;
+    // Backend accessor (returns the IPlayerService interface; shell owns playback)
+    IPlayerService* get_backend() const;
+
+    // Theme accessor
+    ThemeManager* get_theme_manager() const;
+
+    // Application accessor
+    Application* get_application() const { return app_; }
 
 private:
     Application* app_;
@@ -47,6 +59,12 @@ private:
     std::unique_ptr<RightNowPlaying> right_now_playing_;
     std::unique_ptr<BottomPlayback> bottom_playback_;
 
+    // Library service (mock for Phase 4, real implementation in Phase 10)
+    std::unique_ptr<MockLibraryService> library_service_;
+
+    // Lyrics service (mock for Phase 4, real implementation in Phase 10)
+    std::unique_ptr<MockLyricsService> lyrics_service_;
+
     void setup_window();
     void setup_layout();
     void setup_css();
@@ -55,7 +73,6 @@ private:
 
     // Callbacks
     static void on_window_close(GtkWindow* window, gpointer user_data);
-    static void on_size_allocate(GtkWidget* widget, GdkRectangle* allocation, gpointer user_data);
 };
 
 } // namespace lollypop

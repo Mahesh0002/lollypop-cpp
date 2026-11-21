@@ -1,0 +1,290 @@
+/**
+ * Lollypop C++ - Home Page Implementation
+ * Dashboard showing recently added, recently played, favourite albums.
+ */
+
+#include "ui/components/HomePage.hpp"
+#include "main_window.hpp"
+#include "ui/components/AlbumCard.hpp"
+#include "ui/components/TrackRow.hpp"
+#include "services/IPlayerService.hpp"
+
+#include <gtk/gtk.h>
+#include <iostream>
+
+namespace lollypop {
+
+HomePage::HomePage(MainWindow* main_window, ILibraryService* library_service)
+    : main_window_(main_window), library_service_(library_service) {
+    setup_ui();
+}
+
+HomePage::~HomePage() = default;
+
+void HomePage::setup_ui() {
+    widget_.reset(gtk_scrolled_window_new());
+    g_object_ref_sink(widget_.get());
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(widget_.get()),
+                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_vexpand(widget_.get(), TRUE);
+    gtk_widget_set_hexpand(widget_.get(), TRUE);
+    gtk_widget_add_css_class(widget_.get(), "library-scrolled");
+
+    main_box_.reset(gtk_box_new(GTK_ORIENTATION_VERTICAL, 24));
+    g_object_ref_sink(main_box_.get());
+    gtk_widget_add_css_class(main_box_.get(), "home-page");
+    gtk_widget_set_margin_top(main_box_.get(), 24);
+    gtk_widget_set_margin_bottom(main_box_.get(), 24);
+    gtk_widget_set_margin_start(main_box_.get(), 24);
+    gtk_widget_set_margin_end(main_box_.get(), 24);
+
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()), main_box_.get());
+
+    create_welcome_section();
+
+    // Recently Added
+    create_section("Recently Added",
+                   [this]() { return library_service_ ? library_service_->get_recently_added(8) : std::vector<Track>{}; },
+                   [this](const Track& t) { on_track_played(t); },
+                   [this](const Track& t, bool liked) { on_track_liked(t, liked); });
+
+    // Recently Played
+    create_section("Recently Played",
+                   [this]() { return library_service_ ? library_service_->get_recently_played(8) : std::vector<Track>{}; },
+                   [this](const Track& t) { on_track_played(t); },
+                   [this](const Track& t, bool liked) { on_track_liked(t, liked); });
+
+    // Favourite Albums
+    create_album_section("Favourite Albums",
+                         [this]() { return library_service_ ? library_service_->get_favourite_albums() : std::vector<Album>{}; },
+                         [this](const Album& a) { on_album_played(a); },
+                         [this](const Album& a) { on_album_clicked(a); });
+
+    initialized_ = true;
+}
+
+GtkWidget* HomePage::create_section(const std::string& title,
+                                    std::function<std::vector<Track>()> fetcher,
+                                    std::function<void(const Track&)> play_cb,
+                                    std::function<void(const Track&, bool)> like_cb) {
+    GtkWidget* section = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_hexpand(section, TRUE);
+
+    // Section header
+    GtkWidget* header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_set_hexpand(header, TRUE);
+
+    GtkWidget* label = gtk_label_new(title.c_str());
+    gtk_widget_add_css_class(label, "section-title");
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0);
+    gtk_box_append(GTK_BOX(header), label);
+
+    GtkWidget* view_all = gtk_button_new_with_label("View all");
+    gtk_button_set_has_frame(GTK_BUTTON(view_all), FALSE);
+    gtk_widget_add_css_class(view_all, "section-view-all");
+    // TODO: Navigate to full page
+    gtk_box_append(GTK_BOX(header), view_all);
+
+    gtk_box_append(GTK_BOX(section), header);
+
+    // Track list
+    GtkWidget* list_box = gtk_list_box_new();
+    g_object_ref_sink(list_box);
+    gtk_widget_add_css_class(list_box, "home-track-list");
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(list_box), GTK_SELECTION_NONE);
+    gtk_widget_set_hexpand(list_box, TRUE);
+
+    auto data = std::make_unique<SectionData>();
+    data->title = title;
+    data->fetcher = std::move(fetcher);
+    data->play_cb = std::move(play_cb);
+    data->like_cb = std::move(like_cb);
+    data->list_box = list_box;
+
+    GtkWidget* result = section;
+    sections_data_.push_back(std::move(data));
+
+    // Safe append - check if widget already has a parent
+    if (gtk_widget_get_parent(list_box) == nullptr) {
+        gtk_box_append(GTK_BOX(section), list_box);
+    }
+    if (gtk_widget_get_parent(section) == nullptr) {
+        gtk_box_append(GTK_BOX(main_box_.get()), section);
+    }
+
+    // Initial populate
+    refresh_track_section(sections_data_.back().get());
+
+    return result;
+}
+
+GtkWidget* HomePage::create_album_section(const std::string& title,
+                                          std::function<std::vector<Album>()> fetcher,
+                                          std::function<void(const Album&)> play_cb,
+                                          std::function<void(const Album&)> click_cb) {
+    GtkWidget* section = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_hexpand(section, TRUE);
+
+    GtkWidget* header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_set_hexpand(header, TRUE);
+
+    GtkWidget* label = gtk_label_new(title.c_str());
+    gtk_widget_add_css_class(label, "section-title");
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0);
+    gtk_box_append(GTK_BOX(header), label);
+
+    GtkWidget* view_all = gtk_button_new_with_label("View all");
+    gtk_button_set_has_frame(GTK_BUTTON(view_all), FALSE);
+    gtk_widget_add_css_class(view_all, "section-view-all");
+    gtk_box_append(GTK_BOX(header), view_all);
+
+    gtk_box_append(GTK_BOX(section), header);
+
+    GtkWidget* grid = gtk_flow_box_new();
+    g_object_ref_sink(grid);
+    gtk_widget_add_css_class(grid, "home-album-grid");
+    gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(grid), TRUE);
+    gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(grid), 3);
+    gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(grid), 8);
+    gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(grid), 16);
+    gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(grid), 16);
+    gtk_widget_set_hexpand(grid, TRUE);
+
+    auto data = std::make_unique<AlbumSectionData>();
+    data->title = title;
+    data->fetcher = std::move(fetcher);
+    data->play_cb = std::move(play_cb);
+    data->click_cb = std::move(click_cb);
+    data->grid = grid;
+
+    album_sections_data_.push_back(std::move(data));
+
+    // Safe append - check if widget already has a parent
+    if (gtk_widget_get_parent(grid) == nullptr) {
+        gtk_box_append(GTK_BOX(section), grid);
+    }
+    if (gtk_widget_get_parent(section) == nullptr) {
+        gtk_box_append(GTK_BOX(main_box_.get()), section);
+    }
+
+    // Initial populate
+    refresh_album_section(album_sections_data_.back().get());
+
+    return section;
+}
+
+void HomePage::refresh() {
+    if (!initialized_) return;
+    for (auto& section : sections_data_) {
+        refresh_track_section(section.get());
+    }
+    for (auto& section : album_sections_data_) {
+        refresh_album_section(section.get());
+    }
+}
+
+void HomePage::refresh_track_section(SectionData* data) {
+    if (!data || !data->list_box) return;
+
+    // Clear existing
+    GtkWidget* child = gtk_widget_get_first_child(data->list_box);
+    while (child) {
+        GtkWidget* next = gtk_widget_get_next_sibling(child);
+        gtk_widget_unparent(child);
+        child = next;
+    }
+    data->track_rows.clear();
+
+    // Fetch and populate
+    auto tracks = data->fetcher();
+    for (size_t i = 0; i < tracks.size(); ++i) {
+        auto row = std::make_unique<TrackRow>(main_window_, tracks[i], static_cast<int>(i + 1));
+        row->set_play_callback(data->play_cb);
+        row->set_like_callback(data->like_cb);
+        GtkWidget* w = row->get_widget();
+        gtk_list_box_append(GTK_LIST_BOX(data->list_box), w);
+        data->track_rows.push_back(std::move(row));
+    }
+}
+
+void HomePage::refresh_album_section(AlbumSectionData* data) {
+    if (!data || !data->grid) return;
+
+    // Clear existing - use gtk_widget_unparent to avoid flow box internal state issues
+    GtkWidget* child = gtk_widget_get_first_child(data->grid);
+    while (child) {
+        GtkWidget* next = gtk_widget_get_next_sibling(child);
+        gtk_widget_unparent(child);
+        child = next;
+    }
+    data->album_cards.clear();
+
+    // Fetch and populate
+    auto albums = data->fetcher();
+    for (const auto& album : albums) {
+        auto card = std::make_unique<AlbumCard>(main_window_, album);
+        card->set_play_callback(data->play_cb);
+        card->set_click_callback(data->click_cb);
+        GtkWidget* w = card->get_widget();
+        gtk_flow_box_append(GTK_FLOW_BOX(data->grid), w);
+        data->album_cards.push_back(std::move(card));
+    }
+}
+
+void HomePage::create_welcome_section() {
+    GtkWidget* welcome = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_add_css_class(welcome, "home-welcome");
+    gtk_widget_set_margin_bottom(welcome, 16);
+
+    GtkWidget* greeting = gtk_label_new("Good evening");
+    gtk_widget_add_css_class(greeting, "home-greeting");
+    gtk_label_set_xalign(GTK_LABEL(greeting), 0.0);
+
+    GtkWidget* subtitle = gtk_label_new("What would you like to listen to?");
+    gtk_widget_add_css_class(subtitle, "home-subtitle");
+    gtk_label_set_xalign(GTK_LABEL(subtitle), 0.0);
+
+    // Safe append - check if widget already has a parent
+    if (gtk_widget_get_parent(greeting) == nullptr) {
+        gtk_box_append(GTK_BOX(welcome), greeting);
+    }
+    if (gtk_widget_get_parent(subtitle) == nullptr) {
+        gtk_box_append(GTK_BOX(welcome), subtitle);
+    }
+    if (gtk_widget_get_parent(welcome) == nullptr) {
+        gtk_box_append(GTK_BOX(main_box_.get()), welcome);
+    }
+}
+
+void HomePage::on_track_played(const Track& track) {
+    if (auto* backend = main_window_->get_backend()) {
+        if (auto* player = dynamic_cast<IPlayerService*>(backend)) {
+            player->play_track(track.id);
+        }
+    }
+}
+
+void HomePage::on_track_liked(const Track& track, bool /*liked*/) {
+    if (library_service_) {
+        library_service_->toggle_like(track.id);
+    }
+}
+
+void HomePage::on_album_played(const Album& album) {
+    if (auto* backend = main_window_->get_backend()) {
+        if (auto* player = dynamic_cast<IPlayerService*>(backend)) {
+            player->play_tracks(album.track_ids, 0);
+        }
+    }
+}
+
+void HomePage::on_album_clicked(const Album& album) {
+    if (main_window_) {
+        MiddleLibrary* middle = main_window_->get_middle_library();
+        if (middle) {
+            middle->open_album_detail(album.id);
+        }
+    }
+}
+
+} // namespace lollypop

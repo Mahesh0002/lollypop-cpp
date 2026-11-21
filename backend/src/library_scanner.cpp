@@ -24,6 +24,7 @@
 #include <chrono>
 #include <atomic>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -87,10 +88,32 @@ std::string artwork_extension(const TagLib::ByteVector& data,
 
     // Fall back to magic bytes: FLAC/MP4 often carry an empty MIME type.
     const std::string bytes(data.data(), data.size());
-    if (bytes.starts_with("\x89PNG")) return ".png";
-    if (bytes.starts_with("GIF8")) return ".gif";
-    if (bytes.starts_with("BM")) return ".bmp";
+    if (bytes.size() >= 4 && bytes.starts_with("\x89PNG")) return ".png";
+    if (bytes.size() >= 4 && bytes.starts_with("GIF8")) return ".gif";
+    if (bytes.size() >= 2 && bytes.starts_with("BM")) return ".bmp";
     return ".jpg";
+}
+
+// Minimal Base64 decoder (RFC 4648). Returns decoded bytes.
+TagLib::ByteVector base64_decode(const std::string& input) {
+    static constexpr const char* kBase64Chars =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    TagLib::ByteVector out;
+    // TagLib::ByteVector has no reserve(); append bytes directly.
+
+    uint32_t buffer = 0;
+    int bits_collected = 0;
+    for (char c : input) {
+        const char* p = std::strchr(kBase64Chars, c);
+        if (!p) continue;  // skip whitespace / padding / invalid
+        buffer = (buffer << 6) | static_cast<uint32_t>(p - kBase64Chars);
+        bits_collected += 6;
+        if (bits_collected >= 8) {
+            bits_collected -= 8;
+            out.append(static_cast<char>((buffer >> bits_collected) & 0xFF));
+        }
+    }
+    return out;
 }
 
 std::string save_artwork(const TagLib::ByteVector& data, const std::string& mime_type,
@@ -170,6 +193,25 @@ void extract_artwork(TagLib::File* file, Track& track, const std::string& key) {
             }
         }
     }
+
+    // Ogg/Opus METADATA_BLOCK_PICTURE (VorbisComment field).
+    // The picture data is base64-encoded FLAC PICTURE binary.
+    if (auto* ogg = dynamic_cast<TagLib::Ogg::File*>(file)) {
+        const TagLib::PropertyMap properties = ogg->properties();
+        auto it = properties.find("METADATA_BLOCK_PICTURE");
+        if (it != properties.end() && !it->second.isEmpty()) {
+            const TagLib::StringList& values = it->second;
+            TagLib::ByteVector picture_data =
+                base64_decode(values.front().to8Bit(true));
+            if (!picture_data.isEmpty()) {
+                TagLib::FLAC::Picture picture(picture_data);
+                if (!picture.data().isEmpty()) {
+                    track.artwork_path = save_artwork(
+                        picture.data(), picture.mimeType().to8Bit(true), key);
+                }
+            }
+        }
+    }
 }
 
 }  // namespace
@@ -195,6 +237,7 @@ struct LibraryScanner::Impl {
                 if (cancelled.load()) break;
                 if (ec) {
                     if (error_cb) error_cb(it->path().string(), ec.message());
+                    ec.clear();
                     continue;
                 }
 
@@ -242,24 +285,39 @@ struct LibraryScanner::Impl {
         TagLib::Tag* tag = file.tag();
         TagLib::AudioProperties* props = file.audioProperties();
 
+        // Stable identity based on the canonical file path. The same file
+        // always produces the same ID across scans.
+        std::filesystem::path canonical;
+        std::error_code ec;
+        canonical = std::filesystem::canonical(file_path, ec);
+        std::string identity_source =
+            ec ? file_path : canonical.string();
+
         Track track;
-        track.id = generate_id();
+        track.id = generate_id(identity_source);
         track.title = tag->title().to8Bit(true);
         track.artist = tag->artist().to8Bit(true);
         track.album = tag->album().to8Bit(true);
         track.genre = tag->genre().to8Bit(true);
-        track.track_number = tag->track();
-        track.year = tag->year();
+        track.track_number = static_cast<int>(tag->track());
+        track.year = static_cast<int>(tag->year());
         track.duration = props ? static_cast<int>(std::round(props->lengthInSeconds())) : 0;
         track.file_path = file_path;
         track.date_added = now_epoch_seconds();
 
-        // Album artist is not exposed by TagLib::Tag; read it from the
-        // format-independent property map.
+        // Album artist: read from the format-independent property map.
         if (file.file()) {
             const TagLib::PropertyMap properties = file.file()->properties();
             if (properties.contains("ALBUMARTIST")) {
                 const TagLib::StringList values = properties.value("ALBUMARTIST");
+                if (!values.isEmpty()) {
+                    track.album_artist = values.front().to8Bit(true);
+                }
+            }
+            // Vorbis comments also expose ALBUMARTIST as a field.
+            if (track.album_artist.empty() &&
+                properties.contains("ALBUM ARTIST")) {
+                const TagLib::StringList values = properties.value("ALBUM ARTIST");
                 if (!values.isEmpty()) {
                     track.album_artist = values.front().to8Bit(true);
                 }
@@ -283,18 +341,46 @@ struct LibraryScanner::Impl {
         if (track_cb) track_cb(track);
     }
 
-    std::string generate_id() {
-        static std::random_device rd;
-        static std::mt19937 gen(rd());
-        static std::uniform_int_distribution<> dis(0, 15);
-        static std::uniform_int_distribution<> dis2(8, 11);
+    std::string generate_id(const std::string& identity_source) {
+        // Stable UUID-style ID derived from the canonical file path.
+        // Uses UUID version 4 format with the version (4) and variant
+        // (10xx) bits set per RFC 4122, but derived deterministically from
+        // the source string via FNV-1a so the same file always yields the
+        // same ID.
+        uint64_t hash1 = fnv1a(identity_source);
+        uint64_t hash2 = fnv1a(identity_source + "|lollypop");
 
         std::stringstream ss;
         const char* hex = "0123456789abcdef";
-        for (int i = 0; i < 32; ++i) {
-            if (i == 8 || i == 12 || i == 16 || i == 20) ss << '-';
-            ss << hex[dis(gen)];
-        }
+        auto write_hex = [&](uint64_t v, int nibbles) {
+            for (int i = nibbles - 1; i >= 0; --i) {
+                ss << hex[(v >> (i * 4)) & 0xF];
+            }
+        };
+
+        // time_low (8 hex)
+        write_hex(hash1, 8);
+        ss << '-';
+        // time_mid (4 hex)
+        write_hex(hash1 >> 32, 4);
+        ss << '-';
+        // time_hi_and_version: version = 4 (top nibble), time_hi = bits 48-59
+        ss << '4';  // version nibble (top 4 bits of time_hi_and_version)
+        ss << hex[(hash1 >> 48) & 0xF];              // bits 48-51
+        ss << hex[((hash1 >> 48) >> 4) & 0xF];       // bits 52-55
+        ss << hex[((hash1 >> 48) >> 8) & 0xF];       // bits 56-59
+        ss << '-';
+        // clock_seq_hi_and_reserved: variant = 10xx
+        uint8_t cs_hi = static_cast<uint8_t>((hash2 >> 56) & 0xFF);
+        cs_hi = (cs_hi & 0x3F) | 0x80;  // set variant bits to 10
+        ss << hex[cs_hi >> 4];
+        ss << hex[cs_hi & 0xF];
+        // clock_seq_low (4 hex)
+        write_hex(hash2 >> 48, 4);
+        ss << '-';
+        // node (12 hex)
+        write_hex(hash2, 12);
+
         return ss.str();
     }
 };
@@ -304,6 +390,7 @@ LibraryScanner::~LibraryScanner() = default;
 
 void LibraryScanner::scan_directory(const std::string& path, bool recursive) {
     impl_->progress = ScanProgress{};
+    impl_->cancelled = false;
     if (recursive) {
         impl_->scan_recursive(path);
     } else {
@@ -315,7 +402,10 @@ void LibraryScanner::scan_directory(const std::string& path, bool recursive) {
         }
         for (; it != std::filesystem::directory_iterator(); it.increment(ec)) {
             if (impl_->cancelled) break;
-            if (ec) continue;
+            if (ec) {
+                ec.clear();
+                continue;
+            }
             if (!it->is_regular_file()) continue;
             std::string ext = lower_ext(it->path().string());
             if (!is_audio_file(ext)) continue;

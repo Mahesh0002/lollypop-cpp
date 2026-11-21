@@ -4,7 +4,9 @@
 
 #include "controller.hpp"
 #include "manager.hpp"
+#include "event_bus.hpp"
 
+#include <glib.h>
 #include <glibmm/convert.h>
 #include <glibmm/dispatcher.h>
 
@@ -18,11 +20,30 @@
 
 namespace lollypop {
 
+namespace {
+
+std::string default_music_directory() {
+    const char* music_dir = g_get_user_special_dir(G_USER_DIRECTORY_MUSIC);
+    if (music_dir && *music_dir) return music_dir;
+
+    const char* home = g_get_home_dir();
+    if (home && *home) return std::string(home) + "/Music";
+    return {};
+}
+
+}  // namespace
+
 BackendController::BackendController() {
     scan_dispatcher_ = std::make_unique<Glib::Dispatcher>();
     scan_dispatcher_->connect([this] { dispatch_scan_updates(); });
     file_event_dispatcher_ = std::make_unique<Glib::Dispatcher>();
     file_event_dispatcher_->connect([this] { dispatch_file_events(); });
+    lyrics_dispatcher_ = std::make_unique<Glib::Dispatcher>();
+    lyrics_dispatcher_->connect([this] { dispatch_lyrics_result(); });
+
+    queue_manager_ = std::make_unique<QueueManager>();
+    playback_source_manager_ = std::make_unique<PlaybackSourceManager>(
+        audio_engine_, mpris_manager_);
 }
 
 BackendController::~BackendController() {
@@ -32,7 +53,7 @@ BackendController::~BackendController() {
 bool BackendController::initialize() {
     std::cout << "BackendController: Initializing..." << std::endl;
 
-    // Initialize storage
+    // --- Stage 1: storage ---
     storage_ = std::make_unique<StorageManager>();
     if (!storage_->initialize()) {
         std::cerr << "BackendController: Failed to initialize storage" << std::endl;
@@ -51,53 +72,76 @@ bool BackendController::initialize() {
             // Ignore corrupt preference values.
         }
     }
-    shuffle_ = load_bool("player.shuffle", shuffle_);
-    repeat_ = load_bool("player.repeat", repeat_);
-    repeat_one_ = load_bool("player.repeat_one", repeat_one_);
-    if (repeat_ && repeat_one_) repeat_one_ = false;
+    bool shuffle = load_bool("player.shuffle", false);
+    bool repeat = load_bool("player.repeat", false);
+    bool repeat_one = load_bool("player.repeat_one", false);
+    if (repeat && repeat_one) repeat_one = false;
 
-    // Initialize audio engine
-    audio_engine_ = std::make_unique<AudioEngine>();
+    // --- Stage 2: audio engine ---
+    audio_engine_ = std::make_shared<AudioEngine>();
     if (!audio_engine_->initialize()) {
         std::cerr << "BackendController: Failed to initialize audio engine" << std::endl;
+        storage_.reset();
         return false;
     }
     audio_engine_->set_volume(volume_);
     setup_audio_callbacks();
 
-    // Initialize MPRIS (external player discovery/control). Non-fatal when
-    // there is no session bus (e.g. headless test runs).
-    mpris_manager_ = std::make_unique<MprisManager>();
+    // --- Stage 3: MPRIS manager (external players) ---
+    mpris_manager_ = std::make_shared<MprisManager>();
     if (!mpris_manager_->initialize()) {
         std::cerr << "BackendController: MPRIS unavailable, continuing without it"
                   << std::endl;
         mpris_manager_.reset();
     }
+    // Rebuild source manager now that both engines are known.
+    playback_source_manager_ = std::make_unique<PlaybackSourceManager>(
+        audio_engine_, mpris_manager_);
 
-    // Synchronous single-file scans (OpenUri and watcher events) use this
-    // scanner; full library scans use an isolated worker-owned instance.
+    // --- Stage 4: library scanner ---
     library_scanner_ = std::make_unique<LibraryScanner>();
-    library_scanner_->set_track_found_callback([this](const Track& track) {
-        if (track.file_path.empty()) return;
-        std::lock_guard<std::mutex> lock(storage_mutex_);
-        if (storage_ && !storage_->add_track(track)) {
-            std::cerr << "BackendController: Failed to store track "
-                      << track.file_path << std::endl;
-        }
-    });
-    library_scanner_->set_error_callback([](const std::string& file, const std::string& error) {
-        std::cerr << "LibraryScanner: error on " << file << ": " << error << std::endl;
-    });
 
-    // Initialize file watcher
+    // --- Stage 5: file watcher ---
     file_watcher_ = std::make_unique<FileWatcher>();
     file_watcher_->set_event_callback([this](const FileEvent& event) {
         handle_file_event(event);
     });
 
-    // Initialize CAVA visualizer
+    // --- Stage 5b: LibraryManager (scan coordination + unique work queue) ---
+    library_manager_ = std::make_unique<LibraryManager>();
+    if (!library_manager_->initialize(storage_.get(), library_scanner_.get())) {
+        std::cerr << "BackendController: LibraryManager initialization failed"
+                  << std::endl;
+        library_manager_.reset();
+    } else {
+        library_manager_->set_track_found_callback([this](const Track& track) {
+            if (track.file_path.empty()) return;
+            std::lock_guard<std::mutex> lock(storage_mutex_);
+            if (storage_ && !storage_->add_track(track)) {
+                std::cerr << "BackendController: Failed to store track "
+                          << track.file_path << std::endl;
+            }
+        });
+        library_manager_->set_error_callback([](const std::string& file,
+                                                 const std::string& error) {
+            std::cerr << "LibraryScanner: error on " << file << ": "
+                      << error << std::endl;
+        });
+    }
+
+    // --- Stage 5c: LyricsManager (retrieval, parse, sync) ---
+    lyrics_manager_ = std::make_unique<LyricsManager>();
+    if (!lyrics_manager_->initialize(
+            storage_.get(), cache_manager_.get(),
+            "/tmp/lollypop-cpp-cache/lyrics")) {
+        std::cerr << "BackendController: LyricsManager initialization failed"
+                  << std::endl;
+        lyrics_manager_.reset();
+    }
+
+    // --- Stage 6: CAVA visualizer (optional, system capture for MPRIS) ---
     cava_visualizer_ = std::make_unique<CavaVisualizer>();
-    if (cava_visualizer_->is_cava_available()) {
+    if (cava_visualizer_->is_available()) {
         cava_visualizer_->start();
         setup_cava_callbacks();
     } else {
@@ -105,7 +149,41 @@ bool BackendController::initialize() {
                   << std::endl;
     }
 
-    // Initialize MPRIS server (Lollypop as an MPRIS player)
+    // --- Stage 6b: GStreamer-based visualizer (primary for internal playback) ---
+    visualizer_engine_ = std::make_unique<VisualizerEngine>();
+    visualizer_engine_->set_audio_engine(audio_engine_.get());
+    visualizer_engine_->set_band_count(64);
+    visualizer_engine_->set_enabled(true);
+    visualizer_engine_->start();
+
+    // Subscribe to spectrum events via EventBus (thread-safe main-context
+    // delivery). The visualizer worker publishes conflated spectrum frames;
+    // the UI only sees the latest frame, never a backlog.
+    spectrum_subscription_id_ = EventBus::instance().subscribe(
+        "spectrum", [this](const Event& event) {
+            if (auto* frame = std::get_if<SpectrumFrame>(&event.payload)) {
+                if (visualization_cb_) visualization_cb_(frame->magnitudes);
+            }
+        });
+
+    // --- Stage 6c: Cache + Artwork managers ---
+    cache_manager_ = std::make_unique<CacheManager>();
+    if (!cache_manager_->initialize(
+            "/tmp/lollypop-cpp-cache", 64ull * 1024 * 1024)) {
+        std::cerr << "BackendController: CacheManager initialization failed"
+                  << std::endl;
+        cache_manager_.reset();
+    }
+    artwork_manager_ = std::make_unique<ArtworkManager>();
+    if (cache_manager_ &&
+        !artwork_manager_->initialize(
+            "/tmp/lollypop-cpp-cache/artwork", 32ull * 1024 * 1024)) {
+        std::cerr << "BackendController: ArtworkManager initialization failed"
+                  << std::endl;
+        artwork_manager_.reset();
+    }
+
+    // --- Stage 7: MPRIS server (Lollypop as an MPRIS player) ---
     mpris_server_ = std::make_unique<MprisServer>();
     if (!mpris_server_->initialize()) {
         std::cerr << "BackendController: MPRIS server unavailable" << std::endl;
@@ -113,10 +191,16 @@ bool BackendController::initialize() {
     } else {
         setup_mpris_server_callbacks();
         mpris_server_->update_volume(volume_);
-        mpris_server_->update_shuffle(shuffle_);
-        mpris_server_->update_loop_state(repeat_one_ ? 2 : (repeat_ ? 1 : 0));
+        mpris_server_->update_shuffle(shuffle);
+        mpris_server_->update_loop_state(repeat_one ? 2 : (repeat ? 1 : 0));
         sync_mpris_capabilities();
     }
+
+    // Apply queue modes.
+    queue_manager_->set_shuffle(shuffle);
+    queue_manager_->set_repeat(repeat_one ? RepeatMode::Track :
+                                           (repeat ? RepeatMode::Playlist :
+                                                    RepeatMode::None));
 
     std::cout << "BackendController: Initialized successfully" << std::endl;
     return true;
@@ -124,102 +208,77 @@ bool BackendController::initialize() {
 
 void BackendController::shutdown() {
     std::cout << "BackendController: Shutting down..." << std::endl;
+
     cancel_scan_library();
     if (scan_thread_.joinable()) scan_thread_.join();
+
+    // Stop playback first.
+    if (visualizer_engine_) {
+        visualizer_engine_->stop();
+    }
+    // Unsubscribe from EventBus spectrum events before destroying subsystems.
+    if (spectrum_subscription_id_ != 0) {
+        EventBus::instance().unsubscribe(spectrum_subscription_id_);
+        spectrum_subscription_id_ = 0;
+    }
     if (audio_engine_) {
         audio_engine_->stop();
     }
     if (cava_visualizer_) {
         cava_visualizer_->stop();
-        cava_visualizer_.reset();
+    }
+    if (artwork_manager_) {
+        artwork_manager_->shutdown();
+    }
+    if (cache_manager_) {
+        cache_manager_->shutdown();
     }
     if (mpris_server_) {
         mpris_server_->shutdown();
-        mpris_server_.reset();
     }
     if (mpris_manager_) {
         mpris_manager_->shutdown();
-        mpris_manager_.reset();
     }
-    // Stop the file watcher before the dispatcher is destroyed: its thread
-    // must not emit into a partially destroyed controller.
+    // Stop the file watcher before the dispatcher is destroyed.
     if (file_watcher_) {
         file_watcher_.reset();
+    }
+    if (library_manager_) {
+        library_manager_->shutdown();
+    }
+    if (lyrics_manager_) {
+        lyrics_manager_->shutdown();
     }
     active_scan_scanner_.reset();
     library_scanner_.reset();
     scan_dispatcher_.reset();
+    file_event_dispatcher_.reset();
     storage_.reset();
     audio_engine_.reset();
 }
 
-void BackendController::setup_cava_callbacks() {
-    cava_visualizer_->set_points_callback([this](const std::vector<float>& points) {
-        if (visualization_cb_) visualization_cb_(points);
-    });
-}
-
-void BackendController::setup_mpris_server_callbacks() {
-    // Remote MPRIS client (media keys, sound menu) wants to play/pause
-    mpris_server_->set_playback_state_changed_callback([this](bool playing) {
+void BackendController::set_playing(bool playing) {
+    if (playing == playing_) return;
+    changing_playback_state_ = true;
+    playing_ = playing;
+    if (playing) just_started_ = true;
+    else just_started_ = false;
+    if (mpris_server_) {
         if (playing) {
-            if (current_track_.id.empty()) {
-                if (!queue_.empty()) start_queue_index(queue_index_);
-                return;
-            }
-            if (audio_engine_->get_state() == AudioEngine::PlaybackState::Stopped ||
-                audio_engine_->get_state() == AudioEngine::PlaybackState::Error) {
-                start_queue_index(queue_index_);
-                return;
-            }
-            audio_engine_->play();
-            playing_ = true;
-            emit_playback_state_changed(true);
-            if (mpris_server_) mpris_server_->update_playback_status(true);
+            mpris_server_->update_playback_status(true);
         } else {
-            pause();
+            mpris_server_->update_playback_status(false);
         }
-    });
-
-    // Remote client requests volume change
-    mpris_server_->set_volume_changed_callback([this](double volume) {
-        set_volume(volume);
-    });
-
-    // MPRIS Seek is a relative offset in seconds.
-    mpris_server_->set_seek_callback([this](double offset_seconds) {
-        seek(position_ + offset_seconds);
-    });
-
-    // Remote client requests SetPosition (track_id + absolute position)
-    mpris_server_->set_set_position_callback(
-        [this](const std::string& /*track_id*/, double position_seconds) {
-            seek(position_seconds);
-        });
-
-    mpris_server_->set_next_callback([this] { next_track(); });
-    mpris_server_->set_previous_callback([this] { previous_track(); });
-    mpris_server_->set_play_pause_callback([this] { toggle_play_pause(); });
-    mpris_server_->set_stop_callback([this] { stop(); });
-    mpris_server_->set_open_uri_callback(
-        [this](const std::string& uri) { open_uri(uri); });
-
-    // Remote client requests loop/shuffle change
-    mpris_server_->set_loop_state_changed_callback([this](int loop_state) {
-        set_repeat(loop_state == 1);     // Playlist -> repeat
-        set_repeat_one(loop_state == 2); // Track -> repeat-one
-    });
-    mpris_server_->set_shuffle_changed_callback([this](bool shuffle) {
-        set_shuffle(shuffle);
-    });
+    }
+    changing_playback_state_ = false;
+    sync_mpris_capabilities();
+    emit_playback_state_changed(playing);
 }
 
 void BackendController::setup_audio_callbacks() {
-    // Position updates flow to UI and MPRIS server
+    // Position updates flow to UI and MPRIS server.
     audio_engine_->set_position_callback([this](double position, double duration) {
         position_ = position;
-        // GStreamer reports duration 0 briefly after loading; keep the
-        // metadata duration until the pipeline knows better.
         if (duration > 0.0) duration_ = duration;
         emit_position_changed(position_, duration_);
         if (mpris_server_) {
@@ -228,37 +287,51 @@ void BackendController::setup_audio_callbacks() {
         }
     });
 
-    // Playback state changes flow to UI and MPRIS server. Ignore the
-    // transient PAUSED state emitted while loading a track; pause() already
-    // reports explicit pauses.
+    // Playback state changes: only PlaybackController updates playing_.
     audio_engine_->set_state_callback([this](AudioEngine::PlaybackState state) {
+        // Ignore transient states right after we just started playback;
+        // the GStreamer pipeline may report Stopped while transitioning
+        // to Playing, which would override our playing_=true.
+        if (just_started_) {
+            just_started_ = false;
+            return;
+        }
+        // Ignore transient Playing state during the PLAYING->PAUSED
+        // transition triggered by pause(). Clear the flag once we reach
+        // a terminal state (Paused/Stopped/Error).
+        if (pausing_) {
+            if (state == AudioEngine::PlaybackState::Paused ||
+                state == AudioEngine::PlaybackState::Stopped ||
+                state == AudioEngine::PlaybackState::Error) {
+                pausing_ = false;
+            }
+            return;
+        }
         if (state == AudioEngine::PlaybackState::Paused ||
             state == AudioEngine::PlaybackState::Buffering) {
             return;
         }
         const bool playing = (state == AudioEngine::PlaybackState::Playing);
-        if (playing == playing_) return;
-        playing_ = playing;
-        emit_playback_state_changed(playing_);
+        set_playing(playing);
         if (mpris_server_) {
             if (state == AudioEngine::PlaybackState::Stopped ||
                 state == AudioEngine::PlaybackState::Error) {
                 mpris_server_->update_stopped();
             } else {
-                mpris_server_->update_playback_status(playing_);
+                mpris_server_->update_playback_status(playing);
             }
         }
         sync_mpris_capabilities();
     });
 
-    // End of stream - advance to next track
+    // End of stream - advance to next track.
     audio_engine_->set_eos_callback([this]() {
         std::cout << "BackendController: End of stream reached" << std::endl;
         if (repeat_one_) {
-            // Replay current track
             position_ = 0.0;
             audio_engine_->seek(0.0);
             audio_engine_->play();
+            set_playing(true);
             emit_position_changed(0.0, duration_);
             if (mpris_server_) {
                 mpris_server_->update_position(0.0);
@@ -269,9 +342,36 @@ void BackendController::setup_audio_callbacks() {
         }
     });
 
-    // Audio engine errors
+    // Audio engine errors.
     audio_engine_->set_error_callback([this](const std::string& error) {
         std::cerr << "BackendController: Audio engine error: " << error << std::endl;
+        set_playing(false);
+        if (mpris_server_) mpris_server_->update_stopped();
+    });
+}
+
+void BackendController::setup_mpris_callbacks() {
+    if (!mpris_manager_) return;
+
+    mpris_manager_->set_playback_state_changed_callback([this](bool) {
+        // External player state is informational only; do not overwrite
+        // the authoritative internal playing_ unless we are in external mode.
+    });
+
+    mpris_manager_->set_position_changed_callback([this](double position, double duration) {
+        position_ = position;
+        duration_ = duration;
+        emit_position_changed(position_, duration_);
+        if (mpris_server_) {
+            mpris_server_->update_position(position_);
+            mpris_server_->update_duration(duration_);
+        }
+    });
+
+    mpris_manager_->set_active_player_changed_callback([this](const MprisPlayerInfo& info) {
+        if (mpris_server_) {
+            mpris_server_->update_playback_status(info.is_playing);
+        }
     });
 }
 
@@ -280,100 +380,103 @@ void BackendController::scan_library(const std::string& path) {
     start_scan_library(path);
 }
 
+bool BackendController::scan_default_music_library() {
+    const std::string path = default_music_directory();
+    if (path.empty()) {
+        std::cerr << "BackendController: Could not resolve the Music folder"
+                  << std::endl;
+        return false;
+    }
+
+    std::error_code ec;
+    if (!std::filesystem::is_directory(path, ec)) {
+        std::cerr << "BackendController: Music folder does not exist: "
+                  << path;
+        if (ec) std::cerr << " (" << ec.message() << ")";
+        std::cerr << std::endl;
+        return false;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(storage_mutex_);
+        if (!storage_) return false;
+        // Persist the root so later launches and file-watcher reconciliation
+        // know which directories make up the library.
+        storage_->add_library_root(path);
+    }
+
+    std::cout << "BackendController: Scanning Music folder " << path
+              << std::endl;
+    return start_scan_library(path);
+}
+
 bool BackendController::start_scan_library(const std::string& path) {
-    if (!library_scanner_ || !storage_ || path.empty() ||
-        scan_running_.exchange(true)) return false;
-    if (scan_thread_.joinable()) scan_thread_.join();
+    if (!library_manager_ || !storage_ || path.empty()) return false;
+
     {
         std::lock_guard<std::mutex> lock(scan_mutex_);
-        scan_tracks_.clear();
-        pending_scan_tracks_.clear();
-        pending_scan_path_.clear();
-        pending_scan_result_.reset();
         scan_progress_ = ScanProgress{};
+        pending_scan_path_ = path;
+        pending_scan_result_.reset();
     }
     scan_cancel_requested_ = false;
-    active_scan_scanner_ = std::make_unique<LibraryScanner>();
-    active_scan_scanner_->set_track_found_callback([this](const Track& track) {
-        if (track.file_path.empty()) return;
-        std::lock_guard<std::mutex> lock(scan_mutex_);
-        scan_tracks_.push_back(track);
-    });
-    active_scan_scanner_->set_error_callback([](const std::string& file, const std::string& error) {
-        std::cerr << "LibraryScanner: error on " << file << ": " << error << std::endl;
-    });
-    active_scan_scanner_->set_progress_callback([this](const ScanProgress& progress) {
+
+    // Delegate to LibraryManager which runs the scan on its worker thread
+    // with a unique work queue (no duplicate paths) and batch storage writes.
+    library_manager_->set_scan_progress_callback([this](const ScanProgress& progress) {
         {
             std::lock_guard<std::mutex> lock(scan_mutex_);
             scan_progress_ = progress;
         }
         if (scan_dispatcher_) scan_dispatcher_->emit();
     });
-    LibraryScanner* scanner = active_scan_scanner_.get();
-
-    scan_thread_ = std::thread([this, path, scanner] {
-        scanner->scan_directory(path, true);
-        const bool cancelled = scan_cancel_requested_.load() || scanner->is_cancelled();
+    library_manager_->set_scan_finished_callback([this](bool success, bool cancelled) {
         {
             std::lock_guard<std::mutex> lock(scan_mutex_);
-            pending_scan_tracks_.clear();
-            if (!cancelled) pending_scan_tracks_.swap(scan_tracks_);
-            else scan_tracks_.clear();
-            pending_scan_path_ = path;
-            scan_progress_.cancelled = cancelled;
-            pending_scan_result_ = ScanResult{!cancelled, cancelled};
+            pending_scan_result_ = ScanResult{success, cancelled};
+            pending_scan_result_->success = success;
+            pending_scan_result_->cancelled = cancelled;
         }
-        scan_running_ = false;
         if (scan_dispatcher_) scan_dispatcher_->emit();
     });
+
+    library_manager_->scan_directory(path, true);
     return true;
 }
 
 void BackendController::cancel_scan_library() {
-    if (active_scan_scanner_ && scan_running_) {
-        scan_cancel_requested_ = true;
-        active_scan_scanner_->cancel();
+    scan_cancel_requested_ = true;
+    if (library_scanner_) {
+        library_scanner_->cancel();
+    }
+    if (library_manager_) {
+        library_manager_->cancel();
     }
 }
 
 bool BackendController::is_scan_running() const {
-    return scan_running_.load();
+    return library_manager_ && library_manager_->is_scanning();
 }
 
 void BackendController::dispatch_scan_updates() {
     ScanProgress progress;
     std::optional<ScanResult> result;
-    std::vector<Track> tracks;
     std::string path;
     {
         std::lock_guard<std::mutex> lock(scan_mutex_);
         progress = scan_progress_;
         result.swap(pending_scan_result_);
-        if (result && result->success) tracks.swap(pending_scan_tracks_);
         path.swap(pending_scan_path_);
     }
     if (scan_progress_cb_) scan_progress_cb_(progress);
-    if (result && result->success) {
-        bool success = false;
-        {
-            std::lock_guard<std::mutex> lock(storage_mutex_);
-            const bool transaction = storage_ && storage_->begin_transaction();
-            success = transaction;
-            for (const auto& track : tracks) {
-                if (!storage_->add_track(track)) {
-                    success = false;
-                    break;
-                }
-            }
-            if (transaction) {
-                if (success) success = storage_->commit_transaction();
-                else storage_->rollback_transaction();
-            }
-        }
-        result->success = success;
-    }
     if (result) {
-        if (result->success) add_watch_directory(path);
+        if (result->success && !path.empty()) {
+            {
+                std::lock_guard<std::mutex> lock(storage_mutex_);
+                if (storage_) storage_->add_library_root(path);
+            }
+            add_watch_directory(path);
+        }
         if (result->success || result->cancelled) emit_library_changed();
         if (scan_finished_cb_) scan_finished_cb_(result->success, result->cancelled);
     }
@@ -445,6 +548,13 @@ void BackendController::dispatch_file_events() {
     }
 }
 
+void BackendController::dispatch_lyrics_result() {
+    if (!lyrics_callback_) return;
+    auto cb = std::move(lyrics_callback_);
+    auto result = std::move(pending_lyrics_result_);
+    if (cb) cb(std::move(result));
+}
+
 void BackendController::process_file_event(const FileEvent& event) {
     auto current_is_under = [this](const std::string& directory) {
         return !current_track_.file_path.empty() &&
@@ -455,22 +565,24 @@ void BackendController::process_file_event(const FileEvent& event) {
     switch (event.type) {
         case FileEventType::Created:
             std::cout << "BackendController: File created: " << event.path << std::endl;
-            if (library_scanner_ && event.is_dir) {
-                // Directory moved into the watched tree, or created quickly
-                // enough that its files predate the watch.
-                library_scanner_->scan_directory(event.path, true);
+            // Route through LibraryManager so scans are coordinated on its
+            // worker thread and never race the scanner directly.
+            if (library_manager_ && event.is_dir) {
+                library_manager_->scan_directory(event.path, true);
                 emit_library_changed();
-            } else if (library_scanner_ &&
+            } else if (library_manager_ &&
                        LibraryScanner::is_audio_file(event.path)) {
-                library_scanner_->scan_file(event.path);
+                library_manager_->scan_file(event.path);
                 emit_library_changed();
             }
             break;
         case FileEventType::Modified:
             std::cout << "BackendController: File modified: " << event.path << std::endl;
-            if (library_scanner_ && LibraryScanner::is_audio_file(event.path)) {
-                library_scanner_->scan_file(event.path);
+            if (library_manager_ &&
+                LibraryScanner::is_audio_file(event.path)) {
+                library_manager_->scan_file(event.path);
                 if (current_track_.file_path == event.path) {
+                    std::lock_guard<std::mutex> lock(storage_mutex_);
                     Track updated = storage_->get_track_by_path(event.path);
                     if (!updated.id.empty()) {
                         current_track_ = updated;
@@ -508,12 +620,22 @@ void BackendController::process_file_event(const FileEvent& event) {
             if (current_is_under(event.path)) {
                 stop();
             }
-            if (library_scanner_ && !event.dest_path.empty()) {
+            if (library_manager_ && !event.dest_path.empty()) {
                 if (event.is_dir) {
-                    library_scanner_->scan_directory(event.dest_path, true);
+                    library_manager_->scan_directory(event.dest_path, true);
                 } else if (LibraryScanner::is_audio_file(event.dest_path)) {
-                    library_scanner_->scan_file(event.dest_path);
+                    library_manager_->scan_file(event.dest_path);
                 }
+            }
+            emit_library_changed();
+            break;
+        case FileEventType::Rescan:
+            std::cout << "BackendController: Inotify overflow - full rescan needed"
+                      << std::endl;
+            if (library_manager_) {
+                // Trigger a full rescan through the library manager's unique
+                // work queue. We don't know the roots here, so we just signal
+                // the library changed and the UI can initiate a rescan.
             }
             emit_library_changed();
             break;
@@ -598,6 +720,11 @@ std::vector<Track> BackendController::get_smart_playlist_tracks(
     return storage_->get_smart_playlist_tracks(playlist_id);
 }
 
+std::vector<Track> BackendController::get_playlist_tracks(
+    const std::string& playlist_id) {
+    return storage_->get_smart_playlist_tracks(playlist_id);
+}
+
 void BackendController::create_smart_playlist(const std::string& name,
                                                const std::string& criteria) {
     if (storage_->create_smart_playlist(name, criteria)) emit_library_changed();
@@ -619,6 +746,111 @@ void BackendController::set_lyrics(const std::string& track_id,
     if (storage_->set_lyrics(track_id, text, synced, source)) emit_library_changed();
 }
 
+void BackendController::request_lyrics(
+    const std::string& track_id,
+    ILyricsService::LyricsCallback callback) {
+    // Store the callback; the LyricsManager will call back asynchronously.
+    lyrics_callback_ = std::move(callback);
+    pending_lyrics_track_id_ = track_id;
+
+    if (lyrics_manager_) {
+        // Look up the track for artist/title needed by the fetch function.
+        Track track = storage_->get_track(track_id);
+        std::string track_id_copy = track_id;
+        // Request lyrics asynchronously from the lyrics manager.
+        // LyricsManager::request_lyrics(track_id, artist, title, callback)
+        // where callback(track_id, Lyrics).
+        lyrics_manager_->request_lyrics(
+            track_id,
+            track.artist,
+            track.title,
+            [this, track_id_copy](const std::string& fetched_id,
+                                  const Lyrics& lyrics) {
+                if (storage_) {
+                    storage_->set_lyrics(fetched_id, lyrics.text, lyrics.synced,
+                                         lyrics.source);
+                }
+                pending_lyrics_result_ = lyrics;
+                if (lyrics_dispatcher_) lyrics_dispatcher_->emit();
+            });
+    } else {
+        // No lyrics manager - return empty result via dispatcher.
+        pending_lyrics_result_ = Lyrics{track_id, "", false, "", 0};
+        if (lyrics_dispatcher_) lyrics_dispatcher_->emit();
+    }
+}
+
+std::vector<std::string> BackendController::get_all_genres() {
+    return storage_->get_all_genres();
+}
+
+std::vector<Track> BackendController::get_tracks_by_genre(
+    const std::string& genre) {
+    return storage_->get_tracks_by_genre(genre);
+}
+
+std::string BackendController::get_artwork_path_for_track(
+    const std::string& track_id) {
+    auto track = storage_->get_track(track_id);
+    return track.artwork_path;
+}
+
+std::string BackendController::get_artwork_path_for_album(
+    const std::string& album_id) {
+    auto album = storage_->get_album(album_id);
+    return album.artwork_path;
+}
+
+std::string BackendController::get_artwork_path_for_artist(
+    const std::string& artist_id) {
+    auto artist = storage_->get_artist(artist_id);
+    return artist.artwork_path;
+}
+
+std::vector<Album> BackendController::get_favourite_albums() {
+    auto all = storage_->get_all_albums();
+    std::vector<Album> favourites;
+    for (const auto& album : all) {
+        if (album.favorite) favourites.push_back(album);
+    }
+    return favourites;
+}
+
+bool BackendController::is_track_liked(const std::string& track_id) {
+    auto track = storage_->get_track(track_id);
+    return track.liked;
+}
+
+bool BackendController::is_album_favorited(const std::string& album_id) {
+    auto album = storage_->get_album(album_id);
+    return album.favorite;
+}
+
+std::vector<std::string> BackendController::get_sorted_track_ids(
+    const std::string& sort_column, bool ascending, const std::string& genre_filter) {
+    // Use keyset pagination storage method for database-backed global sorting.
+    // We fetch a large page (all IDs) to support global sort order.
+    // For very large libraries, callers should use keyset pagination directly.
+    // If genre_filter is provided, filter by genre.
+    auto tracks = storage_->get_tracks_paginated(
+        10000, sort_column, "", "", genre_filter);
+    std::vector<std::string> ids;
+    ids.reserve(tracks.size());
+    for (const auto& t : tracks) ids.push_back(t.id);
+    return ids;
+}
+
+std::vector<Track> BackendController::get_tracks_by_ids(
+    const std::vector<std::string>& track_ids) {
+    std::vector<Track> tracks;
+    tracks.reserve(track_ids.size());
+    for (const auto& id : track_ids) {
+        auto t = storage_->get_track(id);
+        if (!t.id.empty()) tracks.push_back(std::move(t));
+    }
+    return tracks;
+}
+
 void BackendController::play_track(const std::string& track_id) {
     play_tracks({track_id}, 0);
 }
@@ -626,23 +858,25 @@ void BackendController::play_track(const std::string& track_id) {
 void BackendController::play_tracks(const std::vector<std::string>& track_ids, size_t start_index) {
     if (track_ids.empty()) return;
 
-    queue_ = track_ids;
-    queue_index_ = std::min(start_index, queue_.size() - 1);
+    queue_manager_->set_queue(track_ids, start_index);
     persist_queue();
-    start_queue_index(queue_index_);
+    // set_queue() clamps start_index into range; use the clamped cursor so
+    // start_queue_index() validates the value that was actually set.
+    start_queue_index(queue_manager_->current_index());
 }
 
 bool BackendController::start_queue_index(size_t index) {
-    if (queue_.empty() || index >= queue_.size()) return false;
-    queue_index_ = index;
+    if (!queue_manager_->validate_index(index)) return false;
+
+    // Sync the queue manager cursor to the requested index.
+    queue_manager_->set_current_index(index);
 
     {
         std::lock_guard<std::mutex> lock(storage_mutex_);
-        current_track_ = storage_->get_track(queue_[queue_index_]);
+        current_track_ = storage_->get_track(queue_manager_->queue()[index]);
     }
     duration_ = current_track_.duration;
     position_ = 0.0;
-    playing_ = false;
 
     if (current_track_.id.empty()) {
         std::cerr << "BackendController: Track not found in queue" << std::endl;
@@ -652,7 +886,7 @@ bool BackendController::start_queue_index(size_t index) {
     } else if (audio_engine_->load_track(current_track_.file_path)) {
         audio_engine_->set_volume(volume_);
         audio_engine_->play();
-        playing_ = true;
+        set_playing(true);
         update_play_statistics();
     } else {
         std::cerr << "BackendController: Failed to load track: "
@@ -661,11 +895,12 @@ bool BackendController::start_queue_index(size_t index) {
 
     emit_track_changed(current_track_);
     emit_position_changed(0.0, duration_);
-    emit_playback_state_changed(playing_);
+    // playing_ already emitted via set_playing above.
     emit_queue_changed();
 
     if (mpris_server_) {
-        mpris_server_->update_track(current_track_);
+        mpris_server_->update_track(current_track_,
+                                    std::to_string(queue_manager_->current_index()));
         if (playing_) {
             mpris_server_->update_playback_status(true);
         } else {
@@ -690,46 +925,46 @@ void BackendController::update_play_statistics() {
 }
 
 void BackendController::toggle_play_pause() {
+    if (changing_playback_state_) {
+        return;
+    }
     if (playing_) {
         pause();
         return;
     }
 
     if (current_track_.id.empty()) {
-        if (!queue_.empty()) start_queue_index(queue_index_);
+        if (!queue_manager_->queue().empty()) start_queue_index(queue_manager_->current_index());
         return;
     }
 
     const auto state = audio_engine_->get_state();
     if (state == AudioEngine::PlaybackState::Stopped ||
         state == AudioEngine::PlaybackState::Error) {
-        start_queue_index(queue_index_);
+        start_queue_index(queue_manager_->current_index());
         return;
     }
 
     audio_engine_->play();
-    playing_ = true;
-    emit_playback_state_changed(true);
+    set_playing(true);
     if (mpris_server_) mpris_server_->update_playback_status(true);
     sync_mpris_capabilities();
 }
 
 void BackendController::pause() {
-    playing_ = false;
+    pausing_ = true;
+    set_playing(false);
     audio_engine_->pause();
-    emit_playback_state_changed(false);
-    if (mpris_server_) {
-        mpris_server_->update_playback_status(false);
-    }
     sync_mpris_capabilities();
 }
 
 void BackendController::stop() {
-    playing_ = false;
     position_ = 0.0;
     current_track_ = Track{};
     audio_engine_->stop();
-    emit_playback_state_changed(false);
+    set_playing(false);
+    just_started_ = false;
+    pausing_ = false;
     emit_track_changed(current_track_);
     emit_position_changed(0, 0);
     if (mpris_server_) {
@@ -740,60 +975,34 @@ void BackendController::stop() {
 }
 
 void BackendController::next_track() {
-    if (queue_.empty()) return;
-
-    size_t next_index = queue_index_;
-    if (shuffle_ && queue_.size() > 1) {
-        std::mt19937 gen(std::random_device{}());
-        std::uniform_int_distribution<size_t> dis(0, queue_.size() - 1);
-        do {
-            next_index = dis(gen);
-        } while (next_index == queue_index_);
-    } else if (queue_index_ + 1 < queue_.size()) {
-        next_index = queue_index_ + 1;
-    } else if (repeat_) {
-        next_index = 0;
-    } else {
-        // End of the queue with repeat disabled.
+    auto next_idx = queue_manager_->next_index();
+    if (!next_idx.has_value()) {
+        // End of queue with repeat disabled.
         stop();
         return;
     }
-
-    start_queue_index(next_index);
+    start_queue_index(*next_idx);
 }
 
 void BackendController::previous_track() {
-    if (queue_.empty()) return;
-
     if (position_ > 3.0) {
         // Restart current track if more than 3 seconds in.
         seek(0.0);
         return;
     }
 
-    size_t prev_index = queue_index_;
-    if (shuffle_ && queue_.size() > 1) {
-        std::mt19937 gen(std::random_device{}());
-        std::uniform_int_distribution<size_t> dis(0, queue_.size() - 1);
-        do {
-            prev_index = dis(gen);
-        } while (prev_index == queue_index_);
-    } else if (queue_index_ > 0) {
-        prev_index = queue_index_ - 1;
-    } else if (repeat_) {
-        prev_index = queue_.size() - 1;
-    } else {
-        // Already at the first track: restart it instead of wrapping.
+    auto prev_idx = queue_manager_->previous_index();
+    if (!prev_idx.has_value()) {
+        // Already at the first track: restart it.
         seek(0.0);
         return;
     }
-
-    start_queue_index(prev_index);
+    start_queue_index(*prev_idx);
 }
 
 void BackendController::seek(double position_seconds) {
     position_ = std::clamp(position_seconds, 0.0, duration_);
-    audio_engine_->seek(position_);
+    playback_source_manager_->seek(position_);
     emit_position_changed(position_, duration_);
     if (mpris_server_) {
         mpris_server_->update_position(position_);
@@ -803,7 +1012,7 @@ void BackendController::seek(double position_seconds) {
 
 void BackendController::set_volume(double volume) {
     volume_ = std::clamp(volume, 0.0, 1.0);
-    audio_engine_->set_volume(volume_);
+    playback_source_manager_->set_volume(volume_);
     if (storage_) {
         std::lock_guard<std::mutex> lock(storage_mutex_);
         storage_->set_preference("player.volume", std::to_string(volume_));
@@ -834,24 +1043,26 @@ double BackendController::get_duration() const {
 }
 
 std::vector<std::string> BackendController::get_queue() const {
-    return queue_;
+    const auto& dq = queue_manager_->queue();
+    return std::vector<std::string>(dq.begin(), dq.end());
 }
 
 size_t BackendController::get_queue_index() const {
-    return queue_index_;
+    return queue_manager_->current_index();
 }
 
 void BackendController::persist_queue() {
     if (!storage_) return;
     std::string encoded;
-    for (const auto& id : queue_) {
+    for (const auto& id : queue_manager_->queue()) {
         if (id.find_first_of("\n\r") != std::string::npos) continue;
         if (!encoded.empty()) encoded += '\n';
         encoded += id;
     }
     std::lock_guard<std::mutex> lock(storage_mutex_);
     storage_->set_preference("player.queue", encoded);
-    storage_->set_preference("player.queue_index", std::to_string(queue_index_));
+    storage_->set_preference("player.queue_index",
+                             std::to_string(queue_manager_->current_index()));
 }
 
 bool BackendController::enqueue_track(const std::string& track_id, bool next) {
@@ -862,30 +1073,18 @@ bool BackendController::enqueue_track(const std::string& track_id, bool next) {
         track = storage_->get_track(track_id);
     }
     if (track.id.empty()) return false;
-    if (next && !queue_.empty()) {
-        const size_t insert_at = std::min(queue_index_ + 1, queue_.size());
-        queue_.insert(queue_.begin() + static_cast<std::ptrdiff_t>(insert_at), track_id);
-    } else {
-        queue_.push_back(track_id);
-    }
-    if (queue_.size() == 1) queue_index_ = 0;
+    if (!queue_manager_->enqueue(track_id, next)) return false;
     persist_queue();
     emit_queue_changed();
     return true;
 }
 
 bool BackendController::remove_from_queue(size_t index) {
-    if (index >= queue_.size()) return false;
-    const bool removing_current = index == queue_index_;
-    queue_.erase(queue_.begin() + static_cast<std::ptrdiff_t>(index));
-    if (queue_.empty()) {
-        queue_index_ = 0;
+    if (!queue_manager_->remove(index)) return false;
+    if (queue_manager_->is_empty()) {
         stop();
-    } else if (index < queue_index_) {
-        --queue_index_;
-    } else if (removing_current) {
-        queue_index_ = std::min(index, queue_.size() - 1);
-        start_queue_index(queue_index_);
+    } else if (index == queue_manager_->current_index()) {
+        start_queue_index(queue_manager_->current_index());
     }
     persist_queue();
     emit_queue_changed();
@@ -894,14 +1093,7 @@ bool BackendController::remove_from_queue(size_t index) {
 }
 
 bool BackendController::move_queue_item(size_t from, size_t to) {
-    if (from >= queue_.size() || to >= queue_.size()) return false;
-    if (from == to) return true;
-    const std::string item = queue_[from];
-    queue_.erase(queue_.begin() + static_cast<std::ptrdiff_t>(from));
-    queue_.insert(queue_.begin() + static_cast<std::ptrdiff_t>(to), item);
-    if (queue_index_ == from) queue_index_ = to;
-    else if (from < queue_index_ && to >= queue_index_) --queue_index_;
-    else if (from > queue_index_ && to <= queue_index_) ++queue_index_;
+    if (!queue_manager_->move(from, to)) return false;
     persist_queue();
     emit_queue_changed();
     sync_mpris_capabilities();
@@ -913,16 +1105,26 @@ bool BackendController::play_queue_index(size_t index) {
 }
 
 void BackendController::clear_queue() {
-    queue_.clear();
-    queue_index_ = 0;
+    queue_manager_->clear();
     persist_queue();
     stop();
     emit_queue_changed();
 }
 
+void BackendController::set_playback_source_internal() {
+    playback_source_manager_->set_source(PlaybackSource::Internal);
+}
+
+void BackendController::set_playback_source_external() {
+    playback_source_manager_->set_source(PlaybackSource::External);
+}
+
+bool BackendController::is_playback_source_internal() const {
+    return playback_source_manager_->source() == PlaybackSource::Internal;
+}
 
 void BackendController::set_shuffle(bool enabled) {
-    shuffle_ = enabled;
+    queue_manager_->set_shuffle(enabled);
     if (storage_) {
         std::lock_guard<std::mutex> lock(storage_mutex_);
         storage_->set_preference("player.shuffle", enabled ? "1" : "0");
@@ -934,12 +1136,17 @@ void BackendController::set_shuffle(bool enabled) {
 }
 
 void BackendController::set_repeat(bool enabled) {
-    repeat_ = enabled;
-    if (enabled) repeat_one_ = false;
+    queue_manager_->set_repeat(enabled ? RepeatMode::Playlist :
+                                         RepeatMode::None);
+    if (enabled) {
+        repeat_one_ = false;
+    }
     if (storage_) {
         std::lock_guard<std::mutex> lock(storage_mutex_);
         storage_->set_preference("player.repeat", enabled ? "1" : "0");
-        storage_->set_preference("player.repeat_one", repeat_one_ ? "1" : "0");
+        storage_->set_preference("player.repeat_one",
+                                 queue_manager_->repeat_mode() ==
+                                     RepeatMode::Track ? "1" : "0");
     }
     if (mpris_server_) {
         mpris_server_->update_loop_state(enabled ? 1 : 0);
@@ -948,12 +1155,15 @@ void BackendController::set_repeat(bool enabled) {
 }
 
 void BackendController::set_repeat_one(bool enabled) {
+    queue_manager_->set_repeat(enabled ? RepeatMode::Track :
+                                         RepeatMode::None);
     repeat_one_ = enabled;
-    if (enabled) repeat_ = false;
     if (storage_) {
         std::lock_guard<std::mutex> lock(storage_mutex_);
-        storage_->set_preference("player.repeat", repeat_ ? "1" : "0");
-        storage_->set_preference("player.repeat_one", repeat_one_ ? "1" : "0");
+        storage_->set_preference("player.repeat",
+                                 queue_manager_->repeat_mode() ==
+                                     RepeatMode::Playlist ? "1" : "0");
+        storage_->set_preference("player.repeat_one", enabled ? "1" : "0");
     }
     if (mpris_server_) {
         mpris_server_->update_loop_state(enabled ? 2 : 0);
@@ -962,15 +1172,15 @@ void BackendController::set_repeat_one(bool enabled) {
 }
 
 bool BackendController::get_shuffle() const {
-    return shuffle_;
+    return queue_manager_->shuffle();
 }
 
 bool BackendController::get_repeat() const {
-    return repeat_;
+    return queue_manager_->repeat_mode() == RepeatMode::Playlist;
 }
 
 bool BackendController::get_repeat_one() const {
-    return repeat_one_;
+    return queue_manager_->repeat_mode() == RepeatMode::Track;
 }
 
 void BackendController::toggle_like(const std::string& track_id) {
@@ -987,15 +1197,84 @@ void BackendController::sync_mpris_capabilities() {
     if (!mpris_server_) return;
 
     const bool has_track = !current_track_.id.empty();
-    const bool has_queue = !queue_.empty();
-    // CanPlay stays true after stop() when the queue can be restarted.
+    const bool has_queue = !queue_manager_->queue().empty();
     const bool can_play = has_track || has_queue;
     const bool can_go_next =
-        has_queue && (shuffle_ || repeat_ || queue_index_ + 1 < queue_.size());
+        has_queue && (queue_manager_->shuffle() ||
+                      queue_manager_->repeat_mode() != RepeatMode::None ||
+                      queue_manager_->current_index() + 1 < queue_manager_->queue().size());
     const bool can_go_previous =
-        has_queue && (shuffle_ || repeat_ || queue_index_ > 0);
+        has_queue && (queue_manager_->shuffle() ||
+                      queue_manager_->repeat_mode() != RepeatMode::None ||
+                      queue_manager_->current_index() > 0);
     mpris_server_->update_capabilities(can_go_next, can_go_previous, can_play,
                                        has_track, has_track && duration_ > 0);
+}
+
+void BackendController::setup_cava_callbacks() {
+    cava_visualizer_->set_points_callback([this](const std::vector<float>& points) {
+        if (visualization_cb_) visualization_cb_(points);
+    });
+}
+
+void BackendController::setup_mpris_server_callbacks() {
+    // Remote MPRIS client (media keys, sound menu) wants to play/pause
+    mpris_server_->set_playback_state_changed_callback([this](bool playing) {
+        if (playing) {
+            // MPRIS Play
+            if (playing_) {
+                // Already playing: just ensure the engine is running.
+                audio_engine_->play();
+                return;
+            }
+            if (current_track_.id.empty()) {
+                if (!queue_manager_->queue().empty()) {
+                    start_queue_index(queue_manager_->current_index());
+                }
+                return;
+            }
+            if (audio_engine_->get_state() == AudioEngine::PlaybackState::Stopped ||
+                audio_engine_->get_state() == AudioEngine::PlaybackState::Error) {
+                start_queue_index(queue_manager_->current_index());
+                return;
+            }
+            audio_engine_->play();
+            set_playing(true);
+        } else {
+            // MPRIS Pause
+            pause();
+        }
+    });
+    mpris_server_->set_play_pause_callback([this] { toggle_play_pause(); });
+    mpris_server_->set_volume_changed_callback([this](double volume) {
+        set_volume(volume);
+    });
+
+    // MPRIS Seek is a relative offset in seconds.
+    mpris_server_->set_seek_callback([this](double offset_seconds) {
+        seek(position_ + offset_seconds);
+    });
+
+    // Remote client requests SetPosition (track_id + absolute position)
+    mpris_server_->set_set_position_callback(
+        [this](const std::string& /*track_id*/, double position_seconds) {
+            seek(position_seconds);
+        });
+
+    mpris_server_->set_next_callback([this] { next_track(); });
+    mpris_server_->set_previous_callback([this] { previous_track(); });
+    mpris_server_->set_stop_callback([this] { stop(); });
+    mpris_server_->set_open_uri_callback(
+        [this](const std::string& uri) { open_uri(uri); });
+
+    // Remote client requests loop/shuffle change
+    mpris_server_->set_loop_state_changed_callback([this](int loop_state) {
+        set_repeat(loop_state == 1);     // Playlist -> repeat
+        set_repeat_one(loop_state == 2); // Track -> repeat-one
+    });
+    mpris_server_->set_shuffle_changed_callback([this](bool shuffle) {
+        set_shuffle(shuffle);
+    });
 }
 
 void BackendController::emit_track_changed(const Track& track) {
@@ -1018,7 +1297,8 @@ void BackendController::emit_playback_state_changed(bool playing) {
 
 void BackendController::emit_queue_changed() {
     if (queue_changed_cb_) {
-        queue_changed_cb_(queue_);
+        const auto& dq = queue_manager_->queue();
+        queue_changed_cb_(std::vector<std::string>(dq.begin(), dq.end()));
     }
 }
 
@@ -1029,3 +1309,4 @@ void BackendController::emit_library_changed() {
 }
 
 } // namespace lollypop
+

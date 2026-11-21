@@ -87,45 +87,44 @@ int loop_state_from_string(const std::string& status) {
 // be used directly.
 std::string track_object_path(const Track& track) {
     std::string element;
-    for (unsigned char c : track.id) {
-        element += (std::isalnum(c) || c == '_') ? static_cast<char>(c) : '_';
+    for (char c : track.id) {
+        unsigned char uc = static_cast<unsigned char>(c);
+        element += (std::isalnum(uc) || c == '_') ? static_cast<char>(c) : '_';
     }
     if (element.empty()) element = "none";
     return "/org/lollypop/track/" + element;
 }
 
 // Build MPRIS Metadata dict (a{sv})
-Glib::VariantContainerBase build_metadata(const Track& track) {
-    std::vector<Glib::VariantBase> entries;
+// If entry_id is non-empty, it is used as the queue-entry identity for the
+// mpris:trackid object path instead of track.id. This lets the same track
+// appearing multiple times in the queue have distinct MPRIS object paths
+// (plan.md §15).
+Glib::VariantContainerBase build_metadata(const Track& track,
+                                           const std::string& entry_id = {}) {
+    std::map<Glib::ustring, Glib::VariantBase> entries;
 
     if (!track.title.empty()) {
-        std::vector<Glib::VariantBase> kv = {
-            Glib::Variant<Glib::ustring>::create("xesam:title"),
-            Glib::Variant<Glib::ustring>::create(track.title),
-        };
-        entries.push_back(Glib::VariantContainerBase::create_tuple(kv));
+        entries["xesam:title"] = Glib::Variant<Glib::ustring>::create(track.title);
     }
     if (!track.artist.empty()) {
-        std::vector<Glib::VariantBase> kv = {
-            Glib::Variant<Glib::ustring>::create("xesam:artist"),
-            Glib::Variant<std::vector<Glib::ustring>>::create({track.artist}),
-        };
-        entries.push_back(Glib::VariantContainerBase::create_tuple(kv));
+        entries["xesam:artist"] =
+            Glib::Variant<std::vector<Glib::ustring>>::create({track.artist});
     }
     if (!track.album.empty()) {
-        std::vector<Glib::VariantBase> kv = {
-            Glib::Variant<Glib::ustring>::create("xesam:album"),
-            Glib::Variant<Glib::ustring>::create(track.album),
-        };
-        entries.push_back(Glib::VariantContainerBase::create_tuple(kv));
+        entries["xesam:album"] = Glib::Variant<Glib::ustring>::create(track.album);
     }
-    if (!track.id.empty()) {
-        std::vector<Glib::VariantBase> kv = {
-            Glib::Variant<Glib::ustring>::create("mpris:trackid"),
+    // Use entry_id (queue entry identity) when available, otherwise fall back
+    // to the database track id.
+    std::string object_path_source =
+        !entry_id.empty() ? entry_id : track.id;
+    if (!object_path_source.empty()) {
+        entries["mpris:trackid"] =
             Glib::Variant<Glib::DBusObjectPathString>::create(
-                Glib::DBusObjectPathString(track_object_path(track))),
-        };
-        entries.push_back(Glib::VariantContainerBase::create_tuple(kv));
+                Glib::DBusObjectPathString(
+                    !entry_id.empty()
+                        ? ("/org/lollypop/entry/" + entry_id)
+                        : track_object_path(track)));
     }
     if (!track.artwork_path.empty()) {
         std::string art_url = track.artwork_path;
@@ -136,25 +135,16 @@ Glib::VariantContainerBase build_metadata(const Track& track) {
                 // Keep the plain path if it cannot be converted.
             }
         }
-        std::vector<Glib::VariantBase> kv = {
-            Glib::Variant<Glib::ustring>::create("mpris:artUrl"),
-            Glib::Variant<Glib::ustring>::create(art_url),
-        };
-        entries.push_back(Glib::VariantContainerBase::create_tuple(kv));
+        entries["mpris:artUrl"] = Glib::Variant<Glib::ustring>::create(art_url);
     }
     if (track.duration > 0) {
-        std::vector<Glib::VariantBase> kv = {
-            Glib::Variant<Glib::ustring>::create("mpris:length"),
+        entries["mpris:length"] =
             Glib::Variant<gint64>::create(
-                static_cast<gint64>(track.duration * 1'000'000.0)),
-        };
-        entries.push_back(Glib::VariantContainerBase::create_tuple(kv));
+                static_cast<gint64>(track.duration * 1'000'000.0));
     }
 
-    return Glib::VariantContainerBase::create_tuple(
-        std::vector<Glib::VariantBase>{
-            Glib::Variant<std::vector<Glib::VariantBase>>::create(entries),
-        });
+    return Glib::Variant<std::map<Glib::ustring, Glib::VariantBase>>::create(
+        entries);
 }
 
 }  // namespace
@@ -188,6 +178,7 @@ struct MprisServer::Impl {
     double position_sec = 0.0;
     double duration_sec = 0.0;
     Track current_track;
+    std::string entry_id;  // queue entry identity for MPRIS track object path
 
     bool can_control = true;
     bool can_seek = true;
@@ -211,15 +202,12 @@ struct MprisServer::Impl {
     OpenUriCallback open_uri_cb;
 
     void emit_properties_changed(const char* interface_name,
-                                 const std::vector<Glib::VariantBase>& changed_entries) {
+                                  const std::map<Glib::ustring, Glib::VariantBase>& changed_entries) {
         if (!bus) return;
 
-        std::vector<Glib::VariantBase> changed_dict_entries = changed_entries;
         Glib::VariantContainerBase changed_dict =
-            Glib::VariantContainerBase::create_tuple(
-                std::vector<Glib::VariantBase>{
-                    Glib::Variant<std::vector<Glib::VariantBase>>::create(changed_dict_entries),
-                });
+            Glib::Variant<std::map<Glib::ustring, Glib::VariantBase>>::create(
+                changed_entries);
 
         Glib::VariantContainerBase invalidated =
             Glib::VariantContainerBase::create_tuple(std::vector<Glib::VariantBase>{});
@@ -243,23 +231,19 @@ struct MprisServer::Impl {
     void emit_properties_changed_simple(const char* interface_name,
                                         const char* property_name,
                                         const Glib::VariantBase& value) {
-        std::vector<Glib::VariantBase> entries = {
-            Glib::VariantContainerBase::create_tuple(
-                std::vector<Glib::VariantBase>{
-                    Glib::Variant<Glib::ustring>::create(property_name),
-                    value,
-                }),
+        std::map<Glib::ustring, Glib::VariantBase> entries = {
+            {property_name, value},
         };
         emit_properties_changed(interface_name, entries);
     }
 
-    void emit_seeked(double position_sec) {
+    void emit_seeked(double position_seconds) {
         if (!bus) return;
 
         Glib::VariantContainerBase params = Glib::VariantContainerBase::create_tuple(
             std::vector<Glib::VariantBase>{
                 Glib::Variant<gint64>::create(
-                    static_cast<gint64>(position_sec * 1'000'000.0)),
+                    static_cast<gint64>(position_seconds * 1'000'000.0)),
             });
 
         try {
@@ -316,8 +300,16 @@ struct MprisServer::Impl {
                     Glib::VariantBase::cast_dynamic<Glib::Variant<gint64>>(
                         parameters.get_child(1)).get();
                 // Ignore SetPosition for a track that is no longer current.
+                // Validate against either the entry_id-based object path or
+                // the track.id-based fallback path.
+                std::string expected_path;
+                if (!entry_id.empty()) {
+                    expected_path = "/org/lollypop/entry/" + entry_id;
+                } else {
+                    expected_path = track_object_path(current_track);
+                }
                 if (set_position_cb && !current_track.id.empty() &&
-                    track_id.raw() == track_object_path(current_track)) {
+                    track_id.raw() == expected_path) {
                     set_position_cb(track_id.raw(),
                                     static_cast<double>(us) / 1'000'000.0);
                 }
@@ -540,16 +532,14 @@ void MprisServer::update_stopped() {
         Glib::Variant<Glib::ustring>::create(impl_->playback_status));
 }
 
-void MprisServer::update_track(const Track& track) {
+void MprisServer::update_track(const Track& track,
+                                const std::string& entry_id) {
     impl_->current_track = track;
+    impl_->entry_id = entry_id;
 
     // Emit Metadata changed
-    std::vector<Glib::VariantBase> entries = {
-        Glib::VariantContainerBase::create_tuple(
-            std::vector<Glib::VariantBase>{
-                Glib::Variant<Glib::ustring>::create("Metadata"),
-                build_metadata(track),
-            }),
+    std::map<Glib::ustring, Glib::VariantBase> entries = {
+        {"Metadata", build_metadata(track, impl_->entry_id)},
     };
     impl_->emit_properties_changed(kPlayerInterface, entries);
 
@@ -602,13 +592,9 @@ void MprisServer::update_capabilities(bool can_go_next, bool can_go_previous,
     impl_->can_pause = can_pause;
     impl_->can_seek = can_seek;
 
-    std::vector<Glib::VariantBase> entries;
+    std::map<Glib::ustring, Glib::VariantBase> entries;
     auto add = [&entries](const char* name, bool value) {
-        entries.push_back(Glib::VariantContainerBase::create_tuple(
-            std::vector<Glib::VariantBase>{
-                Glib::Variant<Glib::ustring>::create(name),
-                Glib::Variant<bool>::create(value),
-            }));
+        entries[name] = Glib::Variant<bool>::create(value);
     };
     add("CanGoNext", can_go_next);
     add("CanGoPrevious", can_go_previous);

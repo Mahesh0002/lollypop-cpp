@@ -33,6 +33,7 @@ public:
     LibraryScanner(const LibraryScanner&) = delete;
     LibraryScanner& operator=(const LibraryScanner&) = delete;
 
+    // Scan a directory. If recursive is false, only the top-level directory is scanned.
     void scan_directory(const std::string& path, bool recursive = true);
     void scan_file(const std::string& path);
     void cancel();

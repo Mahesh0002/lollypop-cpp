@@ -8,6 +8,7 @@
 #include <string>
 #include <functional>
 #include <memory>
+#include <optional>
 
 namespace lollypop {
 
@@ -25,9 +26,14 @@ public:
     using StateCallback = std::function<void(PlaybackState state)>;
     using EndOfStreamCallback = std::function<void()>;
     using ErrorCallback = std::function<void(const std::string& error)>;
+    using VizSamplesCallback = std::function<void(const float* samples,
+                                                   size_t count)>;
 
     AudioEngine();
     ~AudioEngine();
+
+    AudioEngine(const AudioEngine&) = delete;
+    AudioEngine& operator=(const AudioEngine&) = delete;
 
     bool initialize();
     void shutdown();
@@ -43,14 +49,15 @@ public:
 
     // State queries
     PlaybackState get_state() const;
-    double get_position() const;
-    double get_duration() const;
+    std::optional<double> get_position() const;
+    std::optional<double> get_duration() const;
 
     // Callbacks
     void set_position_callback(PositionCallback cb);
     void set_state_callback(StateCallback cb);
     void set_eos_callback(EndOfStreamCallback cb);
     void set_error_callback(ErrorCallback cb);
+    void set_viz_samples_callback(VizSamplesCallback cb);
 
 private:
     struct Impl;

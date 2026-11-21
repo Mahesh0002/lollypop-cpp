@@ -17,10 +17,13 @@ target_include_directories(lollypop-frontend PUBLIC
     ${CMAKE_SOURCE_DIR}/backend/include
     ${CMAKE_SOURCE_DIR}/storage/include
     ${CMAKE_SOURCE_DIR}/include
+    /usr/include/libadwaita-1
+    /usr/include/gtk-4.0
 )
 
 target_link_libraries(lollypop-frontend PUBLIC
     ${GTK4_LIBRARIES}
+    ${LIBADWAITA_LIBRARIES}
     ${GLIB_LIBRARIES}
     ${GIO_LIBRARIES}
     lollypop-backend

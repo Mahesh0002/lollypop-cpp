@@ -20,16 +20,21 @@ target_include_directories(lollypop-backend PUBLIC
 
 # Find GStreamer and glibmm (for MPRIS D-Bus integration)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0 gstreamer-audio-1.0 gstreamer-pbutils-1.0)
-pkg_check_modules(GIOMM REQUIRED giomm-2.68)
-pkg_check_modules(TAGLIB REQUIRED taglib)
+pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET
+    gstreamer-1.0
+    gstreamer-audio-1.0
+    gstreamer-app-1.0
+    gstreamer-pbutils-1.0
+)
+pkg_check_modules(GIOMM REQUIRED IMPORTED_TARGET giomm-2.68)
+pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
+find_package(Threads REQUIRED)
 
 target_link_libraries(lollypop-backend PUBLIC
-    ${GLIB_LIBRARIES}
-    ${GIO_LIBRARIES}
-    ${GIOMM_LIBRARIES}
-    ${GSTREAMER_LIBRARIES}
-    ${TAGLIB_LIBRARIES}
+    PkgConfig::GSTREAMER
+    PkgConfig::GIOMM
+    PkgConfig::TAGLIB
+    Threads::Threads
     lollypop-storage
 )
 
@@ -40,3 +45,13 @@ target_include_directories(lollypop-backend PUBLIC
 )
 
 target_compile_features(lollypop-backend PUBLIC cxx_std_20)
+
+# Compiler warnings
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(lollypop-backend PRIVATE
+        -Wall -Wextra -Wpedantic -Wshadow -Wnon-virtual-dtor
+        -Wold-style-cast -Wcast-align -Wunused -Woverloaded-virtual
+        -Wconversion -Wsign-conversion -Wnull-dereference -Wdouble-promotion
+        -Wformat=2
+    )
+endif()

@@ -6,6 +6,8 @@
 #include "manager.hpp"
 #include "controller.hpp"
 
+#include <cstdio>
+
 using namespace lollypop;
 
 class StorageTest : public ::testing::Test {
@@ -257,6 +259,177 @@ TEST_F(StorageTest, AddTrackUpsertsByFilePath) {
     EXPECT_EQ(stored.title, "New Title");
     EXPECT_TRUE(stored.liked);
     EXPECT_EQ(stored.play_count, 1);
+}
+
+TEST_F(StorageTest, Fts5DiacriticsAndPrefix) {
+    Track track;
+    track.id = "fts-1";
+    track.title = "Café au Lait";
+    track.artist = "José González";
+    track.file_path = "/music/fts1.mp3";
+    ASSERT_TRUE(storage->add_track(track));
+
+    auto results = storage->search_tracks("cafe");
+    EXPECT_EQ(results.size(), 1);
+
+    results = storage->search_tracks("jos");
+    EXPECT_EQ(results.size(), 1);
+
+    results = storage->search_tracks("gonz");
+    EXPECT_EQ(results.size(), 1);
+}
+
+TEST_F(StorageTest, KeysetPagination) {
+    for (int i = 0; i < 10; ++i) {
+        Track track;
+        track.id = "page-" + std::to_string(i);
+        track.title = "Track " + std::to_string(i);
+        track.artist = "Artist";
+        track.file_path = "/music/page" + std::to_string(i) + ".mp3";
+        track.date_added = i + 1;  // Use 1-10 (0 is overridden by add_track)
+        ASSERT_TRUE(storage->add_track(track));
+    }
+
+    auto page1 = storage->get_tracks_paginated(3, "date_added", "", "");
+    ASSERT_EQ(page1.size(), 3u);
+    EXPECT_EQ(page1[0].id, "page-0");
+    EXPECT_EQ(page1[1].id, "page-1");
+    EXPECT_EQ(page1[2].id, "page-2");
+
+    auto page2 = storage->get_tracks_paginated(3, "date_added",
+                                                std::to_string(page1.back().date_added),
+                                                page1.back().id);
+    ASSERT_EQ(page2.size(), 3u);
+    EXPECT_EQ(page2[0].id, "page-3");
+    EXPECT_EQ(page2[1].id, "page-4");
+    EXPECT_EQ(page2[2].id, "page-5");
+
+    auto page3 = storage->get_tracks_paginated(3, "date_added",
+                                                std::to_string(page2.back().date_added),
+                                                page2.back().id);
+    ASSERT_EQ(page3.size(), 3u);
+    EXPECT_EQ(page3[0].id, "page-6");
+    EXPECT_EQ(page3[1].id, "page-7");
+    EXPECT_EQ(page3[2].id, "page-8");
+
+    auto page4 = storage->get_tracks_paginated(3, "date_added",
+                                                std::to_string(page3.back().date_added),
+                                                page3.back().id);
+    ASSERT_EQ(page4.size(), 1u);
+    EXPECT_EQ(page4[0].id, "page-9");
+
+    auto page5 = storage->get_tracks_paginated(3, "date_added",
+                                                std::to_string(page4.back().date_added),
+                                                page4.back().id);
+    EXPECT_EQ(page5.size(), 0u);
+}
+
+TEST_F(StorageTest, GenreDag) {
+    EXPECT_TRUE(storage->add_genre_edge("Rock", "Alternative Rock"));
+    EXPECT_TRUE(storage->add_genre_edge("Alternative Rock", "Grunge"));
+    EXPECT_TRUE(storage->add_genre_edge("Rock", "Classic Rock"));
+
+    EXPECT_FALSE(storage->add_genre_edge("Grunge", "Rock"));
+    EXPECT_FALSE(storage->add_genre_edge("Rock", "Rock"));
+
+    auto descendants = storage->get_genre_descendants("Rock");
+    EXPECT_EQ(descendants.size(), 3u);
+
+    Track track1;
+    track1.id = "genre-1";
+    track1.title = "Song 1";
+    track1.artist = "Artist";
+    track1.genre = "Grunge";
+    track1.file_path = "/music/genre1.mp3";
+    ASSERT_TRUE(storage->add_track(track1));
+
+    Track track2;
+    track2.id = "genre-2";
+    track2.title = "Song 2";
+    track2.artist = "Artist";
+    track2.genre = "Classic Rock";
+    track2.file_path = "/music/genre2.mp3";
+    ASSERT_TRUE(storage->add_track(track2));
+
+    Track track3;
+    track3.id = "genre-3";
+    track3.title = "Song 3";
+    track3.artist = "Artist";
+    track3.genre = "Jazz";
+    track3.file_path = "/music/genre3.mp3";
+    ASSERT_TRUE(storage->add_track(track3));
+
+    auto rock_tracks = storage->get_tracks_by_genre_hierarchy("Rock");
+    ASSERT_EQ(rock_tracks.size(), 2u);
+
+    auto grunge_tracks = storage->get_tracks_by_genre("Grunge");
+    ASSERT_EQ(grunge_tracks.size(), 1u);
+    EXPECT_EQ(grunge_tracks[0].id, "genre-1");
+
+    auto jazz_tracks = storage->get_tracks_by_genre_hierarchy("Jazz");
+    ASSERT_EQ(jazz_tracks.size(), 1u);
+    EXPECT_EQ(jazz_tracks[0].id, "genre-3");
+}
+
+TEST_F(StorageTest, LibraryRoots) {
+    EXPECT_TRUE(storage->add_library_root("/music"));
+    EXPECT_TRUE(storage->add_library_root("/media/music"));
+    EXPECT_FALSE(storage->add_library_root(""));
+
+    auto roots = storage->get_library_roots();
+    ASSERT_EQ(roots.size(), 2u);
+    EXPECT_EQ(roots[0], "/media/music");
+    EXPECT_EQ(roots[1], "/music");
+
+    EXPECT_TRUE(storage->is_library_root("/music"));
+    EXPECT_TRUE(storage->is_library_root("/media/music"));
+    EXPECT_FALSE(storage->is_library_root("/other"));
+
+    EXPECT_TRUE(storage->remove_library_root("/music"));
+    EXPECT_FALSE(storage->is_library_root("/music"));
+
+    roots = storage->get_library_roots();
+    ASSERT_EQ(roots.size(), 1u);
+    EXPECT_EQ(roots[0], "/media/music");
+}
+
+TEST_F(StorageTest, DatabaseRecovery) {
+    EXPECT_TRUE(storage->integrity_check());
+    EXPECT_TRUE(storage->quick_check());
+    EXPECT_TRUE(storage->vacuum());
+
+    std::string backup_path = "/tmp/lollypop-test-backup.db";
+    EXPECT_TRUE(storage->backup_database(backup_path));
+
+    Track track;
+    track.id = "backup-test";
+    track.title = "Backup Song";
+    track.artist = "Artist";
+    track.file_path = "/music/backup.mp3";
+    ASSERT_TRUE(storage->add_track(track));
+
+    EXPECT_TRUE(storage->backup_database(backup_path));
+    std::remove(backup_path.c_str());
+}
+
+TEST_F(StorageTest, StringInterning) {
+    for (int i = 0; i < 5; ++i) {
+        Track track;
+        track.id = "intern-" + std::to_string(i);
+        track.title = "Song " + std::to_string(i);
+        track.artist = "Same Artist";
+        track.album = "Same Album";
+        track.file_path = "/music/intern" + std::to_string(i) + ".mp3";
+        ASSERT_TRUE(storage->add_track(track));
+    }
+
+    auto artists = storage->get_all_artists();
+    ASSERT_EQ(artists.size(), 1u);
+    EXPECT_EQ(artists[0].name, "Same Artist");
+
+    auto albums = storage->get_all_albums();
+    ASSERT_EQ(albums.size(), 1u);
+    EXPECT_EQ(albums[0].title, "Same Album");
 }
 
 int main(int argc, char** argv) {

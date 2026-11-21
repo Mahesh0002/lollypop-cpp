@@ -9,13 +9,15 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <optional>
 
 namespace lollypop {
 
 struct MprisPlayerInfo {
     std::string identity;
     std::string desktop_entry;
-    std::string dbus_name;
+    std::string dbus_name;        // well-known name (e.g. org.mpris.MediaPlayer2.spotify)
+    std::string unique_name;      // unique bus name (e.g. :1.123)
 
     bool is_playing = false;
     std::string playback_status;  // Playing, Paused, Stopped
@@ -23,6 +25,7 @@ struct MprisPlayerInfo {
     std::string track_id;
     std::string track_title;
     std::string track_artist;
+    std::string track_album_artist;
     std::string track_album;
     std::string track_art_url;
     double position = 0.0;  // seconds
@@ -63,7 +66,8 @@ public:
 
     // Player discovery
     std::vector<MprisPlayerInfo> get_players() const;
-    MprisPlayerInfo get_active_player() const;
+    // Returns std::nullopt when no player is active.
+    std::optional<MprisPlayerInfo> get_active_player() const;
     std::string get_active_player_name() const;
     void set_active_player(const std::string& dbus_name);
     void set_preferred_player(const std::string& name);
@@ -76,8 +80,10 @@ public:
     void stop();
     void next();
     void previous();
-    void seek(double position_seconds);      // absolute
-    void seek_by(double offset_seconds);     // relative
+    // Absolute seek via MPRIS SetPosition(track_id, position_us).
+    void seek(double position_seconds);
+    // Relative seek via MPRIS Seek(offset_us).
+    void seek_by(double offset_seconds);
     void set_volume(double volume);
     void set_loop_state(int state);          // 0 = None, 1 = Playlist, 2 = Track
     void set_shuffle(bool shuffle);
@@ -87,6 +93,11 @@ public:
     bool can_go_next() const;
     bool can_go_previous() const;
     bool can_seek() const;
+
+    // State queries for the active player
+    double get_volume() const;
+    double get_position() const;
+    double get_duration() const;
 
     // Callbacks
     void set_player_list_changed_callback(PlayerListChangedCallback cb);

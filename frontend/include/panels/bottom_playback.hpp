@@ -13,7 +13,9 @@
 namespace lollypop {
 
 class MainWindow;
-class WaveformWidget;
+class WaveformView;
+class VisualizerModel;
+class ArtworkView;
 
 class BottomPlayback {
 public:
@@ -28,6 +30,10 @@ public:
     void set_volume(double volume);
     void set_points(const std::vector<float>& points);
 
+    // Shell media controls are the playback authority. GTK buttons are read-only
+    // by default; this allows a future pass-through mode if desired.
+    void set_controls_sensitive(bool sensitive);
+
 private:
     MainWindow* main_window_;
     GtkWidget* main_box_;
@@ -35,7 +41,7 @@ private:
 
     // Left: Artwork + track info
     GtkWidget* left_box_;
-    GtkWidget* artwork_image_;
+    ArtworkView* artwork_view_;
     GtkWidget* track_title_label_;
     GtkWidget* track_artist_label_;
 
@@ -49,15 +55,21 @@ private:
 
     // Progress: Waveform
     GtkWidget* progress_box_;
-    WaveformWidget* waveform_widget_;
+    WaveformView* waveform_view_;
+    std::unique_ptr<VisualizerModel> waveform_model_;
     GtkWidget* time_label_;
+    GtkWidget* time_right_label_;
 
-    // Right: Volume + PiP
+    // Right: Volume + PiP + Playback Modes
     GtkWidget* right_box_;
     GtkWidget* volume_button_;
     GtkWidget* volume_scale_;
     GtkWidget* volume_popover_;
     GtkWidget* pip_button_;
+    // Playback mode buttons
+    GtkWidget* shuffle_button_;
+    GtkWidget* repeat_button_;
+    GtkWidget* loop_button_;
 
     void setup_ui();
     void create_left_section();
@@ -65,12 +77,20 @@ private:
     void create_progress_section();
     void create_right_section();
 
+    // Mode button setters
+    void set_shuffle(bool enabled);
+    void set_repeat(bool enabled);
+    void set_loop(bool enabled);
+
     // Callbacks
     static void on_prev_clicked(GtkButton* button, gpointer user_data);
     static void on_play_clicked(GtkButton* button, gpointer user_data);
     static void on_next_clicked(GtkButton* button, gpointer user_data);
     static void on_volume_changed(GtkRange* range, gpointer user_data);
     static void on_pip_clicked(GtkButton* button, gpointer user_data);
+    static void on_shuffle_toggled(GtkToggleButton* button, gpointer user_data);
+    static void on_repeat_toggled(GtkToggleButton* button, gpointer user_data);
+    static void on_loop_toggled(GtkToggleButton* button, gpointer user_data);
 };
 
 } // namespace lollypop
