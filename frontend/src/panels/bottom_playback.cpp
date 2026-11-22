@@ -125,11 +125,11 @@ void BottomPlayback::create_center_section() {
     gtk_widget_set_halign(progress_box_, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(progress_box_, GTK_ALIGN_CENTER);
 
-    // Waveform widget - reduced preferred width, expands to fill
+    // Waveform widget - WIDE: 1000px preferred, expands to fill available space
     waveform_view_ = new WaveformView();
-    waveform_view_->set_preferred_size(280, 40);  // Reduced from 600 to ~280
+    waveform_view_->set_preferred_size(1000, 48);  // Wide progress bar ~1000px
     gtk_widget_set_hexpand(waveform_view_->get_widget(), TRUE);
-    gtk_widget_set_size_request(waveform_view_->get_widget(), 200, 40);  // Min width 200
+    gtk_widget_set_size_request(waveform_view_->get_widget(), 400, 48);  // Min width 400px
     gtk_box_append(GTK_BOX(progress_box_), waveform_view_->get_widget());
 
     // Time labels underneath waveform: left = current time, right = duration
