@@ -50,11 +50,12 @@ void safe_stack_add_named(GtkStack* stack, GtkWidget* child, const char* name) {
     gtk_stack_add_named(stack, child, name);
 }
 
-void safe_container_add(GtkContainer* container, GtkWidget* child) {
-    if (!container || !child) return;
-    if (gtk_widget_get_parent(child) == nullptr) {
-        gtk_container_add(container, child);
-    }
-}
+// Note: GtkContainer is deprecated in GTK4. Use specific container functions instead.
+// void safe_container_add(GtkContainer* container, GtkWidget* child) {
+//     if (!container || !child) return;
+//     if (gtk_widget_get_parent(child) == nullptr) {
+//         gtk_container_add(container, child);
+//     }
+// }
 
 } // namespace lollypop

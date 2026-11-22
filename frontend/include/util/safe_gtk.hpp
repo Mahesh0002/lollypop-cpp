@@ -14,6 +14,6 @@ void safe_grid_attach(GtkGrid* grid, GtkWidget* child, gint left, gint top, gint
 void safe_flow_box_append(GtkFlowBox* flow_box, GtkWidget* child);
 void safe_scrolled_window_set_child(GtkScrolledWindow* scrolled, GtkWidget* child);
 void safe_stack_add_named(GtkStack* stack, GtkWidget* child, const char* name);
-void safe_container_add(GtkContainer* container, GtkWidget* child);
+// Note: GtkContainer is deprecated in GTK4. Use specific container functions instead.
 
 } // namespace lollypop
