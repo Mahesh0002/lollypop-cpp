@@ -403,26 +403,23 @@ struct MprisServer::Impl {
             if (property_name == "Shuffle") {
                 shuffle = Glib::VariantBase::cast_dynamic<Glib::Variant<bool>>(value).get();
                 if (shuffle_cb) shuffle_cb(shuffle);
-                emit_properties_changed_simple(
-                    kPlayerInterface, "Shuffle",
-                    Glib::Variant<bool>::create(shuffle));
+                // Do NOT emit PropertiesChanged here - the backend will call
+                // update_shuffle() which emits the change. This prevents a
+                // feedback loop where MPRIS client -> callback -> backend -> MPRIS
+                // -> PropertiesChanged -> client -> ...
             } else if (property_name == "LoopStatus") {
                 Glib::ustring val_str =
                     Glib::VariantBase::cast_dynamic<Glib::Variant<Glib::ustring>>(value).get();
                 int state = loop_state_from_string(val_str.raw());
                 loop_status = val_str.raw();
                 if (loop_state_cb) loop_state_cb(state);
-                emit_properties_changed_simple(
-                    kPlayerInterface, "LoopStatus",
-                    Glib::Variant<Glib::ustring>::create(loop_status));
+                // Do NOT emit PropertiesChanged here - backend will emit.
             } else if (property_name == "Volume") {
                 volume = std::clamp(
                     Glib::VariantBase::cast_dynamic<Glib::Variant<double>>(value).get(),
                     0.0, 1.0);
                 if (volume_cb) volume_cb(volume);
-                emit_properties_changed_simple(
-                    kPlayerInterface, "Volume",
-                    Glib::Variant<double>::create(volume));
+                // Do NOT emit PropertiesChanged here - backend will emit.
             } else {
                 return false;
             }
