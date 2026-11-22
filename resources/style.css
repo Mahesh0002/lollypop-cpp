@@ -679,16 +679,16 @@ listboxrow:selected {
 
 /* New center section: Prev | Waveform + Time Labels | Next */
 .bottom-playback-center {
-    min-width: 1000px;
+    /* No min-width - expands to fill available space between prev/next */
 }
 
 .bottom-playback-progress {
-    min-width: 1000px;
+    /* No min-width - expands to fill available space */
 }
 
 /* Time labels underneath waveform */
 .bottom-playback-time-labels {
-    min-width: 1000px;
+    /* No min-width - expands to fill available space */
 }
 
 .bottom-playback-time {

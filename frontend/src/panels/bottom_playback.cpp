@@ -104,7 +104,7 @@ void BottomPlayback::create_center_section() {
     center_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_add_css_class(center_box_, "bottom-playback-center");
     gtk_widget_set_hexpand(center_box_, TRUE);
-    gtk_widget_set_halign(center_box_, GTK_ALIGN_CENTER);
+    gtk_widget_set_halign(center_box_, GTK_ALIGN_FILL);
     gtk_widget_set_valign(center_box_, GTK_ALIGN_CENTER);
 
     // Prev button (rewind) - immediately left of waveform
@@ -119,23 +119,25 @@ void BottomPlayback::create_center_section() {
     gtk_box_append(GTK_BOX(center_box_), prev_button_);
 
     // Progress container: vertical box with waveform on top, time labels underneath
+    // This EXPANDS to fill all available space between prev/next buttons
     progress_box_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
     gtk_widget_add_css_class(progress_box_, "bottom-playback-progress");
     gtk_widget_set_hexpand(progress_box_, TRUE);
-    gtk_widget_set_halign(progress_box_, GTK_ALIGN_CENTER);
+    gtk_widget_set_halign(progress_box_, GTK_ALIGN_FILL);
     gtk_widget_set_valign(progress_box_, GTK_ALIGN_CENTER);
 
-    // Waveform widget - WIDE: 1000px preferred, expands to fill available space
+    // Waveform widget - expands to fill all available horizontal space
     waveform_view_ = new WaveformView();
-    waveform_view_->set_preferred_size(1000, 48);  // Wide progress bar ~1000px
+    waveform_view_->set_preferred_size(800, 48);  // Base preferred size
     gtk_widget_set_hexpand(waveform_view_->get_widget(), TRUE);
-    gtk_widget_set_size_request(waveform_view_->get_widget(), 400, 48);  // Min width 400px
+    gtk_widget_set_size_request(waveform_view_->get_widget(), 200, 48);  // Min width 200px
     gtk_box_append(GTK_BOX(progress_box_), waveform_view_->get_widget());
 
     // Time labels underneath waveform: left = current time, right = duration
     GtkWidget* time_labels_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(time_labels_box, "bottom-playback-time-labels");
     gtk_widget_set_hexpand(time_labels_box, TRUE);
+    gtk_widget_set_halign(time_labels_box, GTK_ALIGN_FILL);
 
     time_label_left_ = gtk_label_new("0:00");
     gtk_widget_add_css_class(time_label_left_, "bottom-playback-time");
@@ -153,6 +155,7 @@ void BottomPlayback::create_center_section() {
     waveform_model_ = std::make_unique<VisualizerModel>();
     waveform_view_->set_model(waveform_model_.get());
 
+    // Progress box expands to fill center space
     gtk_box_append(GTK_BOX(center_box_), progress_box_);
 
     // Next button (fast forward) - immediately right of waveform
