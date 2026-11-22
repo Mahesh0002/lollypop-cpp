@@ -5,6 +5,7 @@
 #include "ui/pages/ArtistDetailPage.hpp"
 #include "main_window.hpp"
 #include "services/IPlayerService.hpp"
+#include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
 #include <iostream>
@@ -43,14 +44,14 @@ void ArtistDetailPage::setup_ui() {
     gtk_widget_add_css_class(artwork_image_.get(), "now-playing-artwork-image");
     gtk_widget_set_size_request(artwork_image_.get(), 300, 300);
     gtk_widget_set_halign(artwork_image_.get(), GTK_ALIGN_CENTER);
-    gtk_box_append(GTK_BOX(content_box_.get()), artwork_image_.get());
+    safe_box_append(GTK_BOX(content_box_.get()), artwork_image_.get());
 
     // Name
     name_label_.reset(gtk_label_new(""));
     g_object_ref_sink(name_label_.get());
     gtk_widget_add_css_class(name_label_.get(), "title-2");
     gtk_label_set_xalign(GTK_LABEL(name_label_.get()), 0.5);
-    gtk_box_append(GTK_BOX(content_box_.get()), name_label_.get());
+    safe_box_append(GTK_BOX(content_box_.get()), name_label_.get());
 
     // Track list
     track_list_box_.reset(gtk_list_box_new());
@@ -59,10 +60,9 @@ void ArtistDetailPage::setup_ui() {
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(track_list_box_.get()),
                                     GTK_SELECTION_NONE);
     gtk_widget_set_hexpand(track_list_box_.get(), TRUE);
-    gtk_box_append(GTK_BOX(content_box_.get()), track_list_box_.get());
+    safe_box_append(GTK_BOX(content_box_.get()), track_list_box_.get());
 
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()),
-                                  content_box_.get());
+    safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()), content_box_.get());
 }
 
 void ArtistDetailPage::refresh() {
@@ -86,10 +86,10 @@ void ArtistDetailPage::populate_artist(const Artist& artist) {
     if (artwork_image_) {
         if (!artist.artwork_path.empty()) {
             GFile* file = g_file_new_for_path(artist.artwork_path.c_str());
-            gtk_picture_set_file(GTK_PICTURE(artwork_image_.get()), file);
+            safe_picture_set_file(GTK_PICTURE(artwork_image_.get()), file);
             g_object_unref(file);
         } else {
-            gtk_picture_set_file(GTK_PICTURE(artwork_image_.get()), nullptr);
+            safe_picture_set_file(GTK_PICTURE(artwork_image_.get()), nullptr);
         }
     }
 
@@ -97,7 +97,7 @@ void ArtistDetailPage::populate_artist(const Artist& artist) {
     GtkWidget* child = gtk_widget_get_first_child(track_list_box_.get());
     while (child) {
         GtkWidget* next = gtk_widget_get_next_sibling(child);
-        gtk_widget_unparent(child);
+        gtk_list_box_remove(GTK_LIST_BOX(track_list_box_.get()), child);
         child = next;
     }
     track_rows_.clear();
@@ -118,7 +118,7 @@ void ArtistDetailPage::populate_tracks(const std::vector<Track>& tracks) {
             [this](const Track& t, bool liked) { on_track_liked(t, liked); });
 
         GtkWidget* w = row->get_widget();
-        gtk_list_box_append(GTK_LIST_BOX(track_list_box_.get()), w);
+        safe_list_box_append(GTK_LIST_BOX(track_list_box_.get()), w);
         track_rows_.push_back(std::move(row));
     }
 }

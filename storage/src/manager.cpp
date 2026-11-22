@@ -536,7 +536,8 @@ bool StorageManager::delete_track(const std::string& track_id) {
 
 std::vector<Track> StorageManager::get_all_tracks() {
     std::vector<Track> tracks;
-    const char* sql = (std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks ORDER BY date_added DESC;").c_str();
+    std::string sql_str = std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks ORDER BY date_added DESC;";
+    const char* sql = sql_str.c_str();
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -549,7 +550,8 @@ std::vector<Track> StorageManager::get_all_tracks() {
 
 std::vector<Track> StorageManager::get_liked_tracks() {
     std::vector<Track> tracks;
-    const char* sql = (std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks WHERE liked = 1 ORDER BY date_added DESC;").c_str();
+    std::string sql_str = std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks WHERE liked = 1 ORDER BY date_added DESC;";
+    const char* sql = sql_str.c_str();
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -562,7 +564,8 @@ std::vector<Track> StorageManager::get_liked_tracks() {
 
 std::vector<Track> StorageManager::get_recently_added(int limit) {
     std::vector<Track> tracks;
-    const char* sql = (std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks ORDER BY date_added DESC LIMIT ?;").c_str();
+    std::string sql_str = std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks ORDER BY date_added DESC LIMIT ?;";
+    const char* sql = sql_str.c_str();
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_int(stmt, 1, limit);
@@ -576,7 +579,8 @@ std::vector<Track> StorageManager::get_recently_added(int limit) {
 
 std::vector<Track> StorageManager::get_recently_played(int limit) {
     std::vector<Track> tracks;
-    const char* sql = (std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks WHERE last_played > 0 ORDER BY last_played DESC LIMIT ?;").c_str();
+    std::string sql_str = std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks WHERE last_played > 0 ORDER BY last_played DESC LIMIT ?;";
+    const char* sql = sql_str.c_str();
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_int(stmt, 1, limit);
@@ -590,7 +594,8 @@ std::vector<Track> StorageManager::get_recently_played(int limit) {
 
 Track StorageManager::get_track(const std::string& track_id) {
     Track track;
-    const char* sql = (std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks WHERE id = ?;").c_str();
+    std::string sql_str = std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks WHERE id = ?;";
+    const char* sql = sql_str.c_str();
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, track_id.c_str(), -1, SQLITE_TRANSIENT);
@@ -604,7 +609,8 @@ Track StorageManager::get_track(const std::string& track_id) {
 
 Track StorageManager::get_track_by_path(const std::string& file_path) {
     Track track;
-    const char* sql = (std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks WHERE file_path = ?;").c_str();
+    std::string sql_str = std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks WHERE file_path = ?;";
+    const char* sql = sql_str.c_str();
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, file_path.c_str(), -1, SQLITE_TRANSIENT);
@@ -618,7 +624,8 @@ Track StorageManager::get_track_by_path(const std::string& file_path) {
 
 std::vector<Track> StorageManager::get_tracks_by_artist(const std::string& artist_name) {
     std::vector<Track> tracks;
-    const char* sql = (std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks WHERE artist = ? ORDER BY album, track_number;").c_str();
+    std::string sql_str = std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks WHERE artist = ? ORDER BY album, track_number;";
+    const char* sql = sql_str.c_str();
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, artist_name.c_str(), -1, SQLITE_TRANSIENT);
@@ -632,7 +639,8 @@ std::vector<Track> StorageManager::get_tracks_by_artist(const std::string& artis
 
 std::vector<Track> StorageManager::get_tracks_by_genre(const std::string& genre) {
     std::vector<Track> tracks;
-    const char* sql = (std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks t JOIN track_genres tg ON t.id = tg.track_id WHERE tg.genre = ? ORDER BY t.artist, t.album, t.track_number;").c_str();
+    std::string sql_str = std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks t JOIN track_genres tg ON t.id = tg.track_id WHERE tg.genre = ? ORDER BY t.artist, t.album, t.track_number;";
+    const char* sql = sql_str.c_str();
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, genre.c_str(), -1, SQLITE_TRANSIENT);
@@ -646,7 +654,8 @@ std::vector<Track> StorageManager::get_tracks_by_genre(const std::string& genre)
 
 std::vector<Track> StorageManager::get_smart_playlist_tracks(const std::string& playlist_id) {
     std::vector<Track> tracks;
-    const char* sql = (std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks WHERE id IN (SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position);").c_str();
+    std::string sql_str = std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks WHERE id IN (SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position);";
+    const char* sql = sql_str.c_str();
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, playlist_id.c_str(), -1, SQLITE_TRANSIENT);
@@ -663,7 +672,8 @@ std::vector<Track> StorageManager::search_tracks_fts(const std::string& query) {
     std::string fts_query = build_fts_query(query);
     if (fts_query.empty()) return tracks;
 
-    const char* sql = (std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks WHERE id IN (SELECT rowid FROM tracks_fts WHERE tracks_fts MATCH ?) ORDER BY bm25(tracks_fts);").c_str();
+    std::string sql_str = std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks WHERE id IN (SELECT rowid FROM tracks_fts WHERE tracks_fts MATCH ?) ORDER BY bm25(tracks_fts);";
+    const char* sql = sql_str.c_str();
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, fts_query.c_str(), -1, SQLITE_TRANSIENT);
@@ -790,7 +800,8 @@ std::vector<Album> StorageManager::get_favourite_albums() {
 
 std::vector<Track> StorageManager::get_tracks_by_album(const std::string& album_id) {
     std::vector<Track> tracks;
-    const char* sql = (std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks WHERE album = (SELECT title FROM albums WHERE id = ?) ORDER BY track_number;").c_str();
+    std::string sql_str = std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks WHERE album = (SELECT title FROM albums WHERE id = ?) ORDER BY track_number;";
+    const char* sql = sql_str.c_str();
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, album_id.c_str(), -1, SQLITE_TRANSIENT);

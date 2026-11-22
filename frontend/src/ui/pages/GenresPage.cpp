@@ -5,6 +5,7 @@
 #include "ui/pages/GenresPage.hpp"
 #include "main_window.hpp"
 #include "panels/middle_library.hpp"
+#include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
 #include <iostream>
@@ -34,15 +35,14 @@ void GenresPage::setup_ui() {
                                     GTK_SELECTION_NONE);
     gtk_widget_set_hexpand(list_box_.get(), TRUE);
 
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()),
-                                  list_box_.get());
+    safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()), list_box_.get());
 }
 
 void GenresPage::refresh() {
     GtkWidget* child = gtk_widget_get_first_child(list_box_.get());
     while (child) {
         GtkWidget* next = gtk_widget_get_next_sibling(child);
-        gtk_widget_unparent(child);
+        gtk_list_box_remove(GTK_LIST_BOX(list_box_.get()), child);
         child = next;
     }
 
@@ -74,7 +74,7 @@ void GenresPage::populate(const std::vector<std::string>& genres) {
                          G_CALLBACK(on_genre_view_clicked), this);
 
         gtk_box_append(GTK_BOX(row), button);
-        gtk_list_box_append(GTK_LIST_BOX(list_box_.get()), row);
+        safe_list_box_append(GTK_LIST_BOX(list_box_.get()), row);
     }
 }
 

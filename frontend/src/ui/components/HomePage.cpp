@@ -8,6 +8,7 @@
 #include "ui/components/AlbumCard.hpp"
 #include "ui/components/TrackRow.hpp"
 #include "services/IPlayerService.hpp"
+#include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
 #include <iostream>
@@ -190,7 +191,7 @@ void HomePage::refresh_track_section(SectionData* data) {
     GtkWidget* child = gtk_widget_get_first_child(data->list_box);
     while (child) {
         GtkWidget* next = gtk_widget_get_next_sibling(child);
-        gtk_widget_unparent(child);
+        gtk_list_box_remove(GTK_LIST_BOX(data->list_box), child);
         child = next;
     }
     data->track_rows.clear();
@@ -202,7 +203,7 @@ void HomePage::refresh_track_section(SectionData* data) {
         row->set_play_callback(data->play_cb);
         row->set_like_callback(data->like_cb);
         GtkWidget* w = row->get_widget();
-        gtk_list_box_append(GTK_LIST_BOX(data->list_box), w);
+        safe_list_box_append(GTK_LIST_BOX(data->list_box), w);
         data->track_rows.push_back(std::move(row));
     }
 }
@@ -210,11 +211,11 @@ void HomePage::refresh_track_section(SectionData* data) {
 void HomePage::refresh_album_section(AlbumSectionData* data) {
     if (!data || !data->grid) return;
 
-    // Clear existing - use gtk_widget_unparent to avoid flow box internal state issues
+    // Clear existing - use gtk_flow_box_remove for proper cleanup
     GtkWidget* child = gtk_widget_get_first_child(data->grid);
     while (child) {
         GtkWidget* next = gtk_widget_get_next_sibling(child);
-        gtk_widget_unparent(child);
+        gtk_flow_box_remove(GTK_FLOW_BOX(data->grid), child);
         child = next;
     }
     data->album_cards.clear();
@@ -226,7 +227,7 @@ void HomePage::refresh_album_section(AlbumSectionData* data) {
         card->set_play_callback(data->play_cb);
         card->set_click_callback(data->click_cb);
         GtkWidget* w = card->get_widget();
-        gtk_flow_box_append(GTK_FLOW_BOX(data->grid), w);
+        safe_flow_box_append(GTK_FLOW_BOX(data->grid), w);
         data->album_cards.push_back(std::move(card));
     }
 }

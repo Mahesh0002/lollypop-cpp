@@ -6,6 +6,7 @@
 #include "ui/pages/SearchResultsPage.hpp"
 #include "main_window.hpp"
 #include "services/IPlayerService.hpp"
+#include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
 #include <iostream>
@@ -53,7 +54,7 @@ void SearchResultsPage::setup_ui() {
     gtk_label_set_xalign(GTK_LABEL(search_label), 0.0);
     gtk_box_append(GTK_BOX(header_box_.get()), search_label);
 
-    gtk_box_append(GTK_BOX(main_box), header_box_.get());
+    safe_box_append(GTK_BOX(main_box), header_box_.get());
 
     // Results list
     scrolled_window_.reset(gtk_scrolled_window_new());
@@ -71,7 +72,7 @@ void SearchResultsPage::setup_ui() {
                                     GTK_SELECTION_NONE);
     gtk_widget_set_hexpand(list_box_.get(), TRUE);
 
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window_.get()), list_box_.get());
+    safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window_.get()), list_box_.get());
     gtk_widget_set_vexpand(scrolled_window_.get(), TRUE);
     gtk_widget_set_hexpand(scrolled_window_.get(), TRUE);
 
@@ -108,10 +109,10 @@ void SearchResultsPage::setup_ui() {
     gtk_widget_set_halign(empty_desc, GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(empty_state_.get()), empty_desc);
 
-    gtk_box_append(GTK_BOX(main_box), header_box_.get());
-    gtk_box_append(GTK_BOX(main_box), scrolled_window_.get());
+    safe_box_append(GTK_BOX(main_box), header_box_.get());
+    safe_box_append(GTK_BOX(main_box), scrolled_window_.get());
 
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()), main_box);
+    safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()), main_box);
 }
 
 void SearchResultsPage::search(const std::string& query, uint64_t generation) {
@@ -192,7 +193,7 @@ void SearchResultsPage::append_tracks(std::vector<Track>&& tracks) {
         if (gtk_widget_get_parent(empty_state_.get()) == scrolled_window_.get()) {
             gtk_widget_unparent(empty_state_.get());
         }
-        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window_.get()), list_box_.get());
+        safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window_.get()), list_box_.get());
     }
 
     // Remove empty state if present
@@ -209,7 +210,7 @@ void SearchResultsPage::append_tracks(std::vector<Track>&& tracks) {
             [this](const Track& t, bool liked) { on_track_liked(t, liked); });
 
         GtkWidget* w = row->get_widget();
-        gtk_list_box_append(GTK_LIST_BOX(list_box_.get()), w);
+        safe_list_box_append(GTK_LIST_BOX(list_box_.get()), w);
         track_rows_.push_back(std::move(row));
     }
     loaded_count_ += tracks.size();
@@ -233,7 +234,7 @@ void SearchResultsPage::show_empty_state(const std::string& message) {
     }
 
     if (gtk_widget_get_parent(empty_state_.get()) == nullptr) {
-        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window_.get()), empty_state_.get());
+        safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window_.get()), empty_state_.get());
     }
 }
 
@@ -242,7 +243,7 @@ void SearchResultsPage::clear_results() {
     GtkWidget* child = gtk_widget_get_first_child(list_box_.get());
     while (child) {
         GtkWidget* next = gtk_widget_get_next_sibling(child);
-        gtk_widget_unparent(child);
+        gtk_list_box_remove(GTK_LIST_BOX(list_box_.get()), child);
         child = next;
     }
     track_rows_.clear();

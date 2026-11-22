@@ -2,7 +2,7 @@
  * Lollypop C++ - Middle Library Panel
  * Apple Music-inspired music library browsing experience.
  *
- * Uses AdwViewStack-style page switching via GtkStack.
+ * Uses StackNavigator for safe page switching via GtkStack.
  * Home page is a real page with library data (Phase 4.6).
  */
 
@@ -14,6 +14,7 @@
 #include <unordered_map>
 
 #include "ui/components/LibraryPage.hpp"
+#include "ui/components/StackNavigator.hpp"
 
 namespace lollypop {
 
@@ -53,6 +54,9 @@ private:
     // Search
     guint search_timeout_id_ = 0;
     uint64_t search_generation_ = 0;
+
+    // Navigation
+    std::unique_ptr<StackNavigator> navigator_;
 
     void setup_ui();
     void create_header_bar();

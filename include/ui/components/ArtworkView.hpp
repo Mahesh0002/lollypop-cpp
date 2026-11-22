@@ -7,7 +7,7 @@
  * - Preserve aspect ratio.
  * - Support rounded corners.
  * - Show fallback artwork when missing.
- * - Load asynchronously via GdkTexture from file.
+ * - Load asynchronously via GdkTexture from file with GCancellable support.
  */
 
 #pragma once
@@ -51,6 +51,7 @@ private:
     std::unique_ptr<GtkWidget, WidgetDeleter> artwork_image_;
     std::unique_ptr<GtkWidget, WidgetDeleter> fallback_image_;
     GTask* decode_task_ = nullptr;
+    GCancellable* cancellable_ = nullptr;
     std::string current_path_;
     bool has_artwork_ = false;
     double corner_radius_ = 12.0;

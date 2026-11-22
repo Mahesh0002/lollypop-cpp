@@ -1,6 +1,6 @@
 /**
  * Lollypop C++ - ArtworkView Implementation
- * Async artwork loading with GTask, cancellation support, and fallback.
+ * Async artwork loading with GTask, GCancellable support, and fallback.
  */
 
 #include "ui/components/ArtworkView.hpp"
@@ -12,7 +12,7 @@
 namespace lollypop {
 
 ArtworkView::ArtworkView()
-    : decode_task_(nullptr), has_artwork_(false) {
+    : decode_task_(nullptr), cancellable_(nullptr), has_artwork_(false) {
     widget_.reset(gtk_box_new(GTK_ORIENTATION_VERTICAL, 0));
     g_object_ref_sink(widget_.get());
     gtk_widget_set_hexpand(widget_.get(), FALSE);
@@ -43,10 +43,14 @@ ArtworkView::ArtworkView()
 }
 
 ArtworkView::~ArtworkView() {
-    // Cancel any pending decode task
+    // Cancel any pending decode task via GCancellable
+    if (cancellable_) {
+        g_cancellable_cancel(cancellable_);
+        g_object_unref(cancellable_);
+        cancellable_ = nullptr;
+    }
+    // Also clean up task reference if still present
     if (decode_task_) {
-        GError* error = g_error_new(G_IO_ERROR, G_IO_ERROR_CANCELLED, "ArtworkView destroyed");
-        g_task_return_error(decode_task_, error);
         g_object_unref(decode_task_);
         decode_task_ = nullptr;
     }
@@ -54,9 +58,12 @@ ArtworkView::~ArtworkView() {
 
 void ArtworkView::set_artwork_path(const std::string& path) {
     // Cancel previous decode task if any
+    if (cancellable_) {
+        g_cancellable_cancel(cancellable_);
+        g_object_unref(cancellable_);
+        cancellable_ = nullptr;
+    }
     if (decode_task_) {
-        GError* error = g_error_new(G_IO_ERROR, G_IO_ERROR_CANCELLED, "Superseded by new request");
-        g_task_return_error(decode_task_, error);
         g_object_unref(decode_task_);
         decode_task_ = nullptr;
     }
@@ -68,8 +75,11 @@ void ArtworkView::set_artwork_path(const std::string& path) {
         has_artwork_ = false;
         update_visibility();
 
+        // Create new cancellable for this load
+        cancellable_ = g_cancellable_new();
+
         // Start async decode in thread pool
-        decode_task_ = g_task_new(nullptr, nullptr, on_decode_done, this);
+        decode_task_ = g_task_new(nullptr, cancellable_, on_decode_done, this);
         g_task_set_task_data(decode_task_, g_strdup(path.c_str()), g_free);
         g_task_run_in_thread(decode_task_, decode_thread_func);
     } else {
@@ -80,9 +90,16 @@ void ArtworkView::set_artwork_path(const std::string& path) {
     }
 }
 
-void ArtworkView::decode_thread_func(GTask* task, gpointer /*source_object*/, gpointer /*task_data*/, GCancellable* /*cancellable*/) {
+void ArtworkView::decode_thread_func(GTask* task, gpointer /*source_object*/, gpointer /*task_data*/, GCancellable* cancellable) {
     const char* path = static_cast<const char*>(g_task_get_task_data(task));
     GError* error = nullptr;
+    
+    // Check cancellation before starting
+    if (g_cancellable_is_cancelled(cancellable)) {
+        g_task_return_error(task, g_error_new(G_IO_ERROR, G_IO_ERROR_CANCELLED, "Cancelled"));
+        return;
+    }
+    
     GdkTexture* texture = gdk_texture_new_from_filename(path, &error);
     if (error) {
         g_task_return_error(task, error);
@@ -118,6 +135,11 @@ void ArtworkView::on_decode_done(GObject* /*source*/, GAsyncResult* res, gpointe
     if (self->decode_task_) {
         g_object_unref(self->decode_task_);
         self->decode_task_ = nullptr;
+    }
+    // Clean up cancellable
+    if (self->cancellable_) {
+        g_object_unref(self->cancellable_);
+        self->cancellable_ = nullptr;
     }
 }
 

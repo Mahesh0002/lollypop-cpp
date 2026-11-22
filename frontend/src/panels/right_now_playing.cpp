@@ -13,6 +13,7 @@
 #include "types.hpp"
 #include "ui/components/ArtworkView.hpp"
 #include "ui/components/TrackRow.hpp"
+#include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
 #include <iostream>
@@ -75,8 +76,8 @@ void RightNowPlaying::setup_ui() {
     gtk_widget_set_margin_start(content_box_, 16);
     gtk_widget_set_margin_end(content_box_, 16);
 
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window_), content_box_);
-    gtk_box_append(GTK_BOX(main_box_), scrolled_window_);
+    safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window_), content_box_);
+    safe_box_append(GTK_BOX(main_box_), scrolled_window_);
 
     // Create sections
     create_artwork_section();
@@ -95,9 +96,9 @@ void RightNowPlaying::create_artwork_section() {
     artwork_view_ = new ArtworkView();
     artwork_view_->set_preferred_size(280, 280);
     artwork_view_->set_corner_radius(12.0);
-    gtk_box_append(GTK_BOX(artwork_box_), artwork_view_->get_widget());
+    safe_box_append(GTK_BOX(artwork_box_), artwork_view_->get_widget());
 
-    gtk_box_append(GTK_BOX(content_box_), artwork_box_);
+    safe_box_append(GTK_BOX(content_box_), artwork_box_);
 }
 
 void RightNowPlaying::create_track_info() {
@@ -115,9 +116,9 @@ void RightNowPlaying::create_track_info() {
     gtk_widget_add_css_class(track_artist_label_, "now-playing-artist");
     gtk_label_set_xalign(GTK_LABEL(track_artist_label_), 0.5);
 
-    gtk_box_append(GTK_BOX(info_box), track_title_label_);
-    gtk_box_append(GTK_BOX(info_box), track_artist_label_);
-    gtk_box_append(GTK_BOX(content_box_), info_box);
+    safe_box_append(GTK_BOX(info_box), track_title_label_);
+    safe_box_append(GTK_BOX(info_box), track_artist_label_);
+    safe_box_append(GTK_BOX(content_box_), info_box);
 }
 
 void RightNowPlaying::create_waveform_section() {
@@ -129,7 +130,7 @@ void RightNowPlaying::create_waveform_section() {
     time_label_ = gtk_label_new("0:00 / 0:00");
     gtk_widget_add_css_class(time_label_, "now-playing-time");
     gtk_widget_set_halign(time_label_, GTK_ALIGN_CENTER);
-    gtk_box_append(GTK_BOX(waveform_box_), time_label_);
+    safe_box_append(GTK_BOX(waveform_box_), time_label_);
 
     // Waveform with prev/next buttons
     GtkWidget* waveform_controls = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 16);
@@ -142,14 +143,14 @@ void RightNowPlaying::create_waveform_section() {
     gtk_widget_add_css_class(prev_button_, "now-playing-control-button");
     GtkWidget* prev_icon = gtk_image_new_from_icon_name("media-skip-backward-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(prev_icon), 24);
-    gtk_button_set_child(GTK_BUTTON(prev_button_), prev_icon);
+    safe_button_set_child(GTK_BUTTON(prev_button_), prev_icon);
     g_signal_connect(prev_button_, "clicked", G_CALLBACK(on_prev_clicked), this);
     gtk_widget_set_sensitive(prev_button_, FALSE);
 
     // Waveform widget
     waveform_view_ = new WaveformView();
     waveform_view_->set_preferred_size(300, 40);
-    gtk_box_append(GTK_BOX(waveform_controls), waveform_view_->get_widget());
+    safe_box_append(GTK_BOX(waveform_controls), waveform_view_->get_widget());
 
     waveform_model_ = std::make_unique<VisualizerModel>();
     waveform_view_->set_model(waveform_model_.get());
@@ -160,12 +161,12 @@ void RightNowPlaying::create_waveform_section() {
     gtk_widget_add_css_class(next_button_, "now-playing-control-button");
     GtkWidget* next_icon = gtk_image_new_from_icon_name("media-skip-forward-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(next_icon), 24);
-    gtk_button_set_child(GTK_BUTTON(next_button_), next_icon);
+    safe_button_set_child(GTK_BUTTON(next_button_), next_icon);
     g_signal_connect(next_button_, "clicked", G_CALLBACK(on_next_clicked), this);
     gtk_widget_set_sensitive(next_button_, FALSE);
 
-    gtk_box_append(GTK_BOX(waveform_box_), waveform_controls);
-    gtk_box_append(GTK_BOX(content_box_), waveform_box_);
+    safe_box_append(GTK_BOX(waveform_box_), waveform_controls);
+    safe_box_append(GTK_BOX(content_box_), waveform_box_);
 }
 
 void RightNowPlaying::create_playback_modes() {
@@ -180,7 +181,7 @@ void RightNowPlaying::create_playback_modes() {
     gtk_widget_add_css_class(shuffle_button_, "now-playing-mode-button");
     GtkWidget* shuffle_icon = gtk_image_new_from_icon_name("media-shuffle-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(shuffle_icon), 20);
-    gtk_button_set_child(GTK_BUTTON(shuffle_button_), shuffle_icon);
+    safe_button_set_child(GTK_BUTTON(shuffle_button_), shuffle_icon);
     g_signal_connect(shuffle_button_, "toggled", G_CALLBACK(on_shuffle_toggled), this);
     gtk_widget_set_sensitive(shuffle_button_, FALSE);
 
@@ -190,7 +191,7 @@ void RightNowPlaying::create_playback_modes() {
     gtk_widget_add_css_class(repeat_button_, "now-playing-mode-button");
     GtkWidget* repeat_icon = gtk_image_new_from_icon_name("media-playlist-repeat-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(repeat_icon), 20);
-    gtk_button_set_child(GTK_BUTTON(repeat_button_), repeat_icon);
+    safe_button_set_child(GTK_BUTTON(repeat_button_), repeat_icon);
     g_signal_connect(repeat_button_, "toggled", G_CALLBACK(on_repeat_toggled), this);
     gtk_widget_set_sensitive(repeat_button_, FALSE);
 
@@ -200,14 +201,14 @@ void RightNowPlaying::create_playback_modes() {
     gtk_widget_add_css_class(loop_button_, "now-playing-mode-button");
     GtkWidget* loop_icon = gtk_image_new_from_icon_name("media-playlist-repeat-song-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(loop_icon), 20);
-    gtk_button_set_child(GTK_BUTTON(loop_button_), loop_icon);
+    safe_button_set_child(GTK_BUTTON(loop_button_), loop_icon);
     g_signal_connect(loop_button_, "toggled", G_CALLBACK(on_loop_toggled), this);
     gtk_widget_set_sensitive(loop_button_, FALSE);
 
-    gtk_box_append(GTK_BOX(modes_box_), shuffle_button_);
-    gtk_box_append(GTK_BOX(modes_box_), repeat_button_);
-    gtk_box_append(GTK_BOX(modes_box_), loop_button_);
-    gtk_box_append(GTK_BOX(content_box_), modes_box_);
+    safe_box_append(GTK_BOX(modes_box_), shuffle_button_);
+    safe_box_append(GTK_BOX(modes_box_), repeat_button_);
+    safe_box_append(GTK_BOX(modes_box_), loop_button_);
+    safe_box_append(GTK_BOX(content_box_), modes_box_);
 }
 
 void RightNowPlaying::create_lyrics_empty_state() {
@@ -222,13 +223,13 @@ void RightNowPlaying::create_lyrics_empty_state() {
     gtk_widget_add_css_class(icon, "empty-state-icon");
     gtk_image_set_pixel_size(GTK_IMAGE(icon), 48);
     gtk_widget_set_halign(icon, GTK_ALIGN_CENTER);
-    gtk_box_append(GTK_BOX(lyrics_empty_state_), icon);
+    safe_box_append(GTK_BOX(lyrics_empty_state_), icon);
 
     auto* title = gtk_label_new("No lyrics available");
     gtk_widget_add_css_class(title, "empty-state-title");
     gtk_label_set_xalign(GTK_LABEL(title), 0.5);
     gtk_widget_set_halign(title, GTK_ALIGN_CENTER);
-    gtk_box_append(GTK_BOX(lyrics_empty_state_), title);
+    safe_box_append(GTK_BOX(lyrics_empty_state_), title);
 
     auto* desc = gtk_label_new("Lyrics are not available for this track.");
     gtk_widget_add_css_class(desc, "empty-state-description");
@@ -236,7 +237,7 @@ void RightNowPlaying::create_lyrics_empty_state() {
     gtk_label_set_wrap(GTK_LABEL(desc), TRUE);
     gtk_label_set_max_width_chars(GTK_LABEL(desc), 40);
     gtk_widget_set_halign(desc, GTK_ALIGN_CENTER);
-    gtk_box_append(GTK_BOX(lyrics_empty_state_), desc);
+    safe_box_append(GTK_BOX(lyrics_empty_state_), desc);
 }
 
 void RightNowPlaying::create_tabs() {
@@ -259,8 +260,8 @@ void RightNowPlaying::create_tabs() {
     gtk_widget_add_css_class(queue_tab_, "now-playing-tab-button");
     gtk_widget_set_hexpand(queue_tab_, TRUE);
 
-    gtk_box_append(GTK_BOX(tab_buttons), lyrics_tab_);
-    gtk_box_append(GTK_BOX(tab_buttons), queue_tab_);
+    safe_box_append(GTK_BOX(tab_buttons), lyrics_tab_);
+    safe_box_append(GTK_BOX(tab_buttons), queue_tab_);
 
     // Stack for tab content
     tab_content_stack_ = gtk_stack_new();
@@ -279,12 +280,12 @@ void RightNowPlaying::create_tabs() {
     GtkWidget* lyrics_scroll = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(lyrics_scroll),
                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(lyrics_scroll), lyrics_view_);
-    gtk_stack_add_named(GTK_STACK(tab_content_stack_), lyrics_scroll, "lyrics");
+    safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(lyrics_scroll), lyrics_view_);
+    safe_stack_add_named(GTK_STACK(tab_content_stack_), lyrics_scroll, "lyrics");
 
     // Lyrics empty state (overlaid when no lyrics)
     create_lyrics_empty_state();
-    gtk_stack_add_named(GTK_STACK(tab_content_stack_), lyrics_empty_state_, "lyrics_empty");
+    safe_stack_add_named(GTK_STACK(tab_content_stack_), lyrics_empty_state_, "lyrics_empty");
 
     // Queue view
     queue_view_ = gtk_list_box_new();
@@ -293,8 +294,8 @@ void RightNowPlaying::create_tabs() {
     GtkWidget* queue_scroll = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(queue_scroll),
                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(queue_scroll), queue_view_);
-    gtk_stack_add_named(GTK_STACK(tab_content_stack_), queue_scroll, "queue");
+    safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(queue_scroll), queue_view_);
+    safe_stack_add_named(GTK_STACK(tab_content_stack_), queue_scroll, "queue");
 
     // Connect tab buttons
     g_signal_connect(lyrics_tab_, "clicked", G_CALLBACK(on_lyrics_tab_clicked), this);
@@ -304,9 +305,9 @@ void RightNowPlaying::create_tabs() {
     gtk_stack_set_visible_child_name(GTK_STACK(tab_content_stack_), "lyrics");
     gtk_widget_add_css_class(lyrics_tab_, "active");
 
-    gtk_box_append(GTK_BOX(tabs_box_), tab_buttons);
-    gtk_box_append(GTK_BOX(tabs_box_), tab_content_stack_);
-    gtk_box_append(GTK_BOX(content_box_), tabs_box_);
+    safe_box_append(GTK_BOX(tabs_box_), tab_buttons);
+    safe_box_append(GTK_BOX(tabs_box_), tab_content_stack_);
+    safe_box_append(GTK_BOX(content_box_), tabs_box_);
 }
 
 void RightNowPlaying::update_track_info(const std::string& title,
@@ -446,7 +447,7 @@ void RightNowPlaying::populate_queue(
     GtkWidget* child = gtk_widget_get_first_child(queue_view_);
     while (child) {
         GtkWidget* next = gtk_widget_get_next_sibling(child);
-        gtk_widget_unparent(child);
+        gtk_list_box_remove(GTK_LIST_BOX(queue_view_), child);
         child = next;
     }
 
@@ -456,7 +457,7 @@ void RightNowPlaying::populate_queue(
         gtk_widget_add_css_class(empty, "library-placeholder");
         gtk_label_set_xalign(GTK_LABEL(empty), 0.5);
         gtk_widget_set_halign(empty, GTK_ALIGN_CENTER);
-        gtk_list_box_append(GTK_LIST_BOX(queue_view_), empty);
+        safe_list_box_append(GTK_LIST_BOX(queue_view_), empty);
         return;
     }
 
@@ -493,7 +494,7 @@ void RightNowPlaying::populate_queue(
             });
 
         GtkWidget* w = row->get_widget();
-        gtk_list_box_append(GTK_LIST_BOX(queue_view_), w);
+        safe_list_box_append(GTK_LIST_BOX(queue_view_), w);
     }
 }
 

@@ -4,6 +4,7 @@
 
 #include "ui/pages/ArtistsPage.hpp"
 #include "main_window.hpp"
+#include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
 #include <iostream>
@@ -36,16 +37,15 @@ void ArtistsPage::setup_ui() {
     gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(grid_.get()), 24);
     gtk_widget_set_hexpand(grid_.get(), TRUE);
 
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()),
-                                  grid_.get());
+    safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()), grid_.get());
 }
 
 void ArtistsPage::refresh() {
-    // Clear existing - use gtk_widget_unparent to avoid flow box internal state issues
+    // Clear existing - use gtk_flow_box_remove for proper cleanup
     GtkWidget* child = gtk_widget_get_first_child(grid_.get());
     while (child) {
         GtkWidget* next = gtk_widget_get_next_sibling(child);
-        gtk_widget_unparent(child);
+        gtk_flow_box_remove(GTK_FLOW_BOX(grid_.get()), child);
         child = next;
     }
     artist_items_.clear();
@@ -63,7 +63,7 @@ void ArtistsPage::populate(const std::vector<Artist>& artists) {
             [this](const Artist& a) { on_artist_clicked(a); });
 
         GtkWidget* w = item->get_widget();
-        gtk_flow_box_append(GTK_FLOW_BOX(grid_.get()), w);
+        safe_flow_box_append(GTK_FLOW_BOX(grid_.get()), w);
         artist_items_.push_back(std::move(item));
     }
 }

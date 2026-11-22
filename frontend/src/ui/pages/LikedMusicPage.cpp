@@ -5,6 +5,7 @@
 #include "ui/pages/LikedMusicPage.hpp"
 #include "main_window.hpp"
 #include "services/IPlayerService.hpp"
+#include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
 #include <iostream>
@@ -34,15 +35,14 @@ void LikedMusicPage::setup_ui() {
                                     GTK_SELECTION_NONE);
     gtk_widget_set_hexpand(list_box_.get(), TRUE);
 
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()),
-                                  list_box_.get());
+    safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()), list_box_.get());
 }
 
 void LikedMusicPage::refresh() {
     GtkWidget* child = gtk_widget_get_first_child(list_box_.get());
     while (child) {
         GtkWidget* next = gtk_widget_get_next_sibling(child);
-        gtk_widget_unparent(child);
+        gtk_list_box_remove(GTK_LIST_BOX(list_box_.get()), child);
         child = next;
     }
     track_rows_.clear();
@@ -64,7 +64,7 @@ void LikedMusicPage::populate(const std::vector<Track>& tracks) {
         row->set_liked(true);
 
         GtkWidget* w = row->get_widget();
-        gtk_list_box_append(GTK_LIST_BOX(list_box_.get()), w);
+        safe_list_box_append(GTK_LIST_BOX(list_box_.get()), w);
         track_rows_.push_back(std::move(row));
     }
 }

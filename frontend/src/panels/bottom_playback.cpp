@@ -15,6 +15,7 @@
 #include "services/IPlayerService.hpp"
 #include "models/VisualizerModel.hpp"
 #include "ui/components/ArtworkView.hpp"
+#include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
 #include <iostream>
@@ -76,7 +77,7 @@ void BottomPlayback::create_left_section() {
     artwork_view_ = new ArtworkView();
     artwork_view_->set_preferred_size(56, 56);
     artwork_view_->set_corner_radius(6.0);
-    gtk_box_append(GTK_BOX(left_box_), artwork_view_->get_widget());
+    safe_box_append(GTK_BOX(left_box_), artwork_view_->get_widget());
 
     // Track info
     GtkWidget* info_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
@@ -95,11 +96,11 @@ void BottomPlayback::create_left_section() {
     gtk_label_set_ellipsize(GTK_LABEL(track_artist_label_), PANGO_ELLIPSIZE_END);
     gtk_widget_set_size_request(track_artist_label_, 160, -1);
 
-    gtk_box_append(GTK_BOX(info_box), track_title_label_);
-    gtk_box_append(GTK_BOX(info_box), track_artist_label_);
+    safe_box_append(GTK_BOX(info_box), track_title_label_);
+    safe_box_append(GTK_BOX(info_box), track_artist_label_);
 
-    gtk_box_append(GTK_BOX(left_box_), info_box);
-    gtk_box_append(GTK_BOX(main_box_), left_box_);
+    safe_box_append(GTK_BOX(left_box_), info_box);
+    safe_box_append(GTK_BOX(main_box_), left_box_);
 }
 
 void BottomPlayback::create_center_section() {
@@ -115,11 +116,11 @@ void BottomPlayback::create_center_section() {
     gtk_widget_add_css_class(prev_button_, "bottom-playback-control-button");
     GtkWidget* prev_icon = gtk_image_new_from_icon_name("media-skip-backward-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(prev_icon), 24);
-    gtk_button_set_child(GTK_BUTTON(prev_button_), prev_icon);
+    safe_button_set_child(GTK_BUTTON(prev_button_), prev_icon);
     g_signal_connect(prev_button_, "clicked", G_CALLBACK(on_prev_clicked), this);
     // Enable for visual feedback (hover/ripple), shell still controls playback via callback
     gtk_widget_set_sensitive(prev_button_, TRUE);
-    gtk_box_append(GTK_BOX(center_box_), prev_button_);
+    safe_box_append(GTK_BOX(center_box_), prev_button_);
 
     // Progress container: vertical box with waveform on top, time labels underneath
     // This EXPANDS to fill all available space between prev/next buttons
@@ -134,7 +135,7 @@ void BottomPlayback::create_center_section() {
     waveform_view_->set_preferred_size(800, 48);  // Base preferred size, will expand
     gtk_widget_set_hexpand(waveform_view_->get_widget(), TRUE);
     gtk_widget_set_size_request(waveform_view_->get_widget(), 200, 48);  // Min width 200px
-    gtk_box_append(GTK_BOX(progress_box_), waveform_view_->get_widget());
+    safe_box_append(GTK_BOX(progress_box_), waveform_view_->get_widget());
 
     // Time labels underneath waveform: left = current time, right = duration
     GtkWidget* time_labels_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
@@ -145,21 +146,21 @@ void BottomPlayback::create_center_section() {
     time_label_left_ = gtk_label_new("0:00");
     gtk_widget_add_css_class(time_label_left_, "bottom-playback-time");
     gtk_label_set_xalign(GTK_LABEL(time_label_left_), 0.0);
-    gtk_box_append(GTK_BOX(time_labels_box), time_label_left_);
+    safe_box_append(GTK_BOX(time_labels_box), time_label_left_);
 
     time_label_right_ = gtk_label_new("0:00");
     gtk_widget_add_css_class(time_label_right_, "bottom-playback-time");
     gtk_label_set_xalign(GTK_LABEL(time_label_right_), 1.0);
-    gtk_box_append(GTK_BOX(time_labels_box), time_label_right_);
+    safe_box_append(GTK_BOX(time_labels_box), time_label_right_);
 
-    gtk_box_append(GTK_BOX(progress_box_), time_labels_box);
+    safe_box_append(GTK_BOX(progress_box_), time_labels_box);
 
     // Create a VisualizerModel to feed the waveform
     waveform_model_ = std::make_unique<VisualizerModel>();
     waveform_view_->set_model(waveform_model_.get());
 
     // Progress box expands to fill center space
-    gtk_box_append(GTK_BOX(center_box_), progress_box_);
+    safe_box_append(GTK_BOX(center_box_), progress_box_);
 
     // Next button (fast forward) - immediately right of waveform
     next_button_ = gtk_button_new();
@@ -167,13 +168,13 @@ void BottomPlayback::create_center_section() {
     gtk_widget_add_css_class(next_button_, "bottom-playback-control-button");
     GtkWidget* next_icon = gtk_image_new_from_icon_name("media-skip-forward-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(next_icon), 24);
-    gtk_button_set_child(GTK_BUTTON(next_button_), next_icon);
+    safe_button_set_child(GTK_BUTTON(next_button_), next_icon);
     g_signal_connect(next_button_, "clicked", G_CALLBACK(on_next_clicked), this);
     // Enable for visual feedback (hover/ripple), shell still controls playback via callback
     gtk_widget_set_sensitive(next_button_, TRUE);
-    gtk_box_append(GTK_BOX(center_box_), next_button_);
+    safe_box_append(GTK_BOX(center_box_), next_button_);
 
-    gtk_box_append(GTK_BOX(main_box_), center_box_);
+    safe_box_append(GTK_BOX(main_box_), center_box_);
 }
 
 void BottomPlayback::create_right_section() {
@@ -196,10 +197,10 @@ void BottomPlayback::create_right_section() {
     gtk_widget_add_css_class(shuffle_button_, "bottom-playback-mode-button");
     GtkWidget* shuffle_icon = gtk_image_new_from_icon_name("media-shuffle-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(shuffle_icon), 18);
-    gtk_button_set_child(GTK_BUTTON(shuffle_button_), shuffle_icon);
+    safe_button_set_child(GTK_BUTTON(shuffle_button_), shuffle_icon);
     g_signal_connect(shuffle_button_, "toggled", G_CALLBACK(on_shuffle_toggled), this);
     gtk_widget_set_sensitive(shuffle_button_, FALSE);  // will be enabled by MainWindow
-    gtk_box_append(GTK_BOX(modes_box), shuffle_button_);
+    safe_box_append(GTK_BOX(modes_box), shuffle_button_);
 
     // Repeat
     repeat_button_ = gtk_toggle_button_new();
@@ -207,10 +208,10 @@ void BottomPlayback::create_right_section() {
     gtk_widget_add_css_class(repeat_button_, "bottom-playback-mode-button");
     GtkWidget* repeat_icon = gtk_image_new_from_icon_name("media-playlist-repeat-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(repeat_icon), 18);
-    gtk_button_set_child(GTK_BUTTON(repeat_button_), repeat_icon);
+    safe_button_set_child(GTK_BUTTON(repeat_button_), repeat_icon);
     g_signal_connect(repeat_button_, "toggled", G_CALLBACK(on_repeat_toggled), this);
     gtk_widget_set_sensitive(repeat_button_, FALSE);
-    gtk_box_append(GTK_BOX(modes_box), repeat_button_);
+    safe_box_append(GTK_BOX(modes_box), repeat_button_);
 
     // Loop (repeat one)
     loop_button_ = gtk_toggle_button_new();
@@ -218,12 +219,12 @@ void BottomPlayback::create_right_section() {
     gtk_widget_add_css_class(loop_button_, "bottom-playback-mode-button");
     GtkWidget* loop_icon = gtk_image_new_from_icon_name("media-playlist-repeat-song-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(loop_icon), 18);
-    gtk_button_set_child(GTK_BUTTON(loop_button_), loop_icon);
+    safe_button_set_child(GTK_BUTTON(loop_button_), loop_icon);
     g_signal_connect(loop_button_, "toggled", G_CALLBACK(on_loop_toggled), this);
     gtk_widget_set_sensitive(loop_button_, FALSE);
-    gtk_box_append(GTK_BOX(modes_box), loop_button_);
+    safe_box_append(GTK_BOX(modes_box), loop_button_);
 
-    gtk_box_append(GTK_BOX(right_box_), modes_box);
+    safe_box_append(GTK_BOX(right_box_), modes_box);
 
     // Volume dial button with popover (circular dial like MaterialDial.qml)
     // Use GtkMenuButton to support popover
@@ -235,7 +236,7 @@ void BottomPlayback::create_right_section() {
     // Volume icon that changes based on level
     GtkWidget* volume_icon = gtk_image_new_from_icon_name("audio-volume-high-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(volume_icon), 22);
-    gtk_menu_button_set_child(GTK_MENU_BUTTON(volume_dial_), volume_icon);
+    safe_menu_button_set_child(GTK_MENU_BUTTON(volume_dial_), volume_icon);
     gtk_widget_set_sensitive(volume_dial_, TRUE);  // Volume is a user control
 
     // Volume popover with circular dial (MaterialDial style)
@@ -257,14 +258,14 @@ void BottomPlayback::create_right_section() {
     gtk_widget_add_css_class(volume_scale_, "bottom-playback-volume-scale");
     g_signal_connect(volume_scale_, "value-changed", G_CALLBACK(on_volume_changed), this);
 
-    gtk_box_append(GTK_BOX(volume_box), volume_scale_);
+    safe_box_append(GTK_BOX(volume_box), volume_scale_);
     gtk_popover_set_child(GTK_POPOVER(volume_popover_), volume_box);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(volume_dial_), volume_popover_);
 
     // Update volume icon based on level
     g_signal_connect(volume_scale_, "value-changed", G_CALLBACK(on_volume_dial_changed), this);
 
-    gtk_box_append(GTK_BOX(right_box_), volume_dial_);
+    safe_box_append(GTK_BOX(right_box_), volume_dial_);
 
     // PiP button
     pip_button_ = gtk_button_new();
@@ -272,12 +273,12 @@ void BottomPlayback::create_right_section() {
     gtk_widget_add_css_class(pip_button_, "bottom-playback-pip-button");
     GtkWidget* pip_icon = gtk_image_new_from_icon_name("window-new-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(pip_icon), 22);
-    gtk_button_set_child(GTK_BUTTON(pip_button_), pip_icon);
+    safe_button_set_child(GTK_BUTTON(pip_button_), pip_icon);
     g_signal_connect(pip_button_, "clicked", G_CALLBACK(on_pip_clicked), this);
 
-    gtk_box_append(GTK_BOX(right_box_), volume_dial_);
-    gtk_box_append(GTK_BOX(right_box_), pip_button_);
-    gtk_box_append(GTK_BOX(main_box_), right_box_);
+    safe_box_append(GTK_BOX(right_box_), volume_dial_);
+    safe_box_append(GTK_BOX(right_box_), pip_button_);
+    safe_box_append(GTK_BOX(main_box_), right_box_);
 }
 
 void BottomPlayback::update_track_info(const std::string& title, const std::string& artist, const std::string& artwork_path) {

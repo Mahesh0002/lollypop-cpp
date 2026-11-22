@@ -9,6 +9,7 @@
 
 #include "panels/left_sidebar.hpp"
 #include "main_window.hpp"
+#include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
 #include <iostream>
@@ -58,7 +59,7 @@ void LeftSidebar::setup_ui() {
     collapse_icon_ = gtk_image_new_from_icon_name(
         expanded_ ? "pan-start-symbolic" : "pan-end-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(collapse_icon_), kIconSize);
-    gtk_button_set_child(GTK_BUTTON(collapse_button_), collapse_icon_);
+    safe_button_set_child(GTK_BUTTON(collapse_button_), collapse_icon_);
     g_signal_connect(collapse_button_, "clicked", G_CALLBACK(on_collapse_clicked), this);
     gtk_widget_set_tooltip_text(collapse_button_, expanded_
                                 ? "Collapse sidebar"
@@ -71,7 +72,7 @@ void LeftSidebar::setup_ui() {
     gtk_widget_add_css_class(menu_button_, "sidebar-menu-button");
     GtkWidget* menu_icon = gtk_image_new_from_icon_name("open-menu-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(menu_icon), kIconSize);
-    gtk_menu_button_set_child(GTK_MENU_BUTTON(menu_button_), menu_icon);
+    safe_menu_button_set_child(GTK_MENU_BUTTON(menu_button_), menu_icon);
     gtk_widget_set_tooltip_text(menu_button_, "More");
 
     // Popover menu
@@ -94,13 +95,13 @@ void LeftSidebar::setup_ui() {
     gtk_widget_set_hexpand(fullscreen_button_, TRUE);
     g_signal_connect(fullscreen_button_, "clicked", G_CALLBACK(on_fullscreen_clicked), this);
 
-    gtk_box_append(GTK_BOX(popover_box), settings_button_);
-    gtk_box_append(GTK_BOX(popover_box), fullscreen_button_);
+    safe_box_append(GTK_BOX(popover_box), settings_button_);
+    safe_box_append(GTK_BOX(popover_box), fullscreen_button_);
     gtk_popover_set_child(GTK_POPOVER(menu_popover_), popover_box);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(menu_button_), menu_popover_);
 
-    gtk_box_append(GTK_BOX(header_box_), collapse_button_);
-    gtk_box_append(GTK_BOX(header_box_), menu_button_);
+    safe_box_append(GTK_BOX(header_box_), collapse_button_);
+    safe_box_append(GTK_BOX(header_box_), menu_button_);
 
     // Navigation list
     nav_list_box_ = gtk_list_box_new();
@@ -110,8 +111,8 @@ void LeftSidebar::setup_ui() {
     gtk_widget_set_valign(nav_list_box_, GTK_ALIGN_START);
 
     // Assemble sidebar
-    gtk_box_append(GTK_BOX(sidebar_box_), header_box_);
-    gtk_box_append(GTK_BOX(sidebar_box_), nav_list_box_);
+    safe_box_append(GTK_BOX(sidebar_box_), header_box_);
+    safe_box_append(GTK_BOX(sidebar_box_), nav_list_box_);
 }
 
 void LeftSidebar::create_navigation_items() {
@@ -169,9 +170,9 @@ void LeftSidebar::create_nav_button(const NavigationItem& item) {
     gtk_revealer_set_transition_duration(GTK_REVEALER(revealer), 180);
     gtk_revealer_set_child(GTK_REVEALER(revealer), label);
 
-    gtk_box_append(GTK_BOX(box), icon);
-    gtk_box_append(GTK_BOX(box), revealer);
-    gtk_button_set_child(GTK_BUTTON(button), box);
+    safe_box_append(GTK_BOX(box), icon);
+    safe_box_append(GTK_BOX(box), revealer);
+    safe_button_set_child(GTK_BUTTON(button), box);
 
     // Store item ID and revealer in button data for later access
     g_object_set_data_full(G_OBJECT(button), "nav-item-id",
@@ -180,7 +181,7 @@ void LeftSidebar::create_nav_button(const NavigationItem& item) {
 
     g_signal_connect(button, "clicked", G_CALLBACK(on_nav_item_clicked), this);
 
-    gtk_list_box_append(GTK_LIST_BOX(nav_list_box_), button);
+    safe_list_box_append(GTK_LIST_BOX(nav_list_box_), button);
 }
 
 void LeftSidebar::set_active_item(const std::string& item_id) {
@@ -255,10 +256,8 @@ void LeftSidebar::update_toggle_icon() {
     const char* icon_name = expanded_ ? "pan-start-symbolic" : "pan-end-symbolic";
     GtkWidget* new_icon = gtk_image_new_from_icon_name(icon_name);
     gtk_image_set_pixel_size(GTK_IMAGE(new_icon), kIconSize);
-    GtkWidget* old_child = gtk_button_get_child(GTK_BUTTON(collapse_button_));
-    gtk_button_set_child(GTK_BUTTON(collapse_button_), new_icon);
+    safe_button_set_child(GTK_BUTTON(collapse_button_), new_icon);
     collapse_icon_ = new_icon;  // Keep reference
-    (void)old_child;
 
     gtk_widget_set_tooltip_text(collapse_button_, expanded_
                                 ? "Collapse sidebar"

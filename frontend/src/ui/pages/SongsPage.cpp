@@ -7,6 +7,7 @@
 #include "ui/pages/SongsPage.hpp"
 #include "main_window.hpp"
 #include "services/IPlayerService.hpp"
+#include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
 #include <iostream>
@@ -60,7 +61,7 @@ void SongsPage::setup_ui() {
                                     GTK_SELECTION_NONE);
     gtk_widget_set_hexpand(list_box_.get(), TRUE);
 
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_list_.get()), list_box_.get());
+    safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_list_.get()), list_box_.get());
     gtk_widget_set_vexpand(scrolled_list_.get(), TRUE);
     gtk_widget_set_hexpand(scrolled_list_.get(), TRUE);
 
@@ -68,10 +69,10 @@ void SongsPage::setup_ui() {
     GtkAdjustment* vadj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(scrolled_list_.get()));
     g_signal_connect(vadj, "value-changed", G_CALLBACK(on_scroll_changed), this);
 
-    gtk_box_append(GTK_BOX(main_box), header_box_.get());
-    gtk_box_append(GTK_BOX(main_box), scrolled_list_.get());
+    safe_box_append(GTK_BOX(main_box), header_box_.get());
+    safe_box_append(GTK_BOX(main_box), scrolled_list_.get());
 
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()), main_box);
+    safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()), main_box);
 }
 
 void SongsPage::create_header(GtkWidget* main_box) {
@@ -166,7 +167,7 @@ void SongsPage::reload() {
     GtkWidget* child = gtk_widget_get_first_child(list_box_.get());
     while (child) {
         GtkWidget* next = gtk_widget_get_next_sibling(child);
-        gtk_widget_unparent(child);
+        gtk_list_box_remove(GTK_LIST_BOX(list_box_.get()), child);
         child = next;
     }
     track_rows_.clear();
@@ -217,7 +218,7 @@ void SongsPage::append_tracks(std::vector<Track>&& tracks) {
             [this](const Track& t, bool liked) { on_track_liked(t, liked); });
 
         GtkWidget* w = row->get_widget();
-        gtk_list_box_append(GTK_LIST_BOX(list_box_.get()), w);
+        safe_list_box_append(GTK_LIST_BOX(list_box_.get()), w);
         track_rows_.push_back(std::move(row));
     }
     loaded_count_ += tracks.size();

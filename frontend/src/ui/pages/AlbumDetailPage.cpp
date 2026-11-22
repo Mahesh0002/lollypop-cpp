@@ -5,6 +5,7 @@
 #include "ui/pages/AlbumDetailPage.hpp"
 #include "main_window.hpp"
 #include "services/IPlayerService.hpp"
+#include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
 #include <iostream>
@@ -45,28 +46,28 @@ void AlbumDetailPage::setup_ui() {
     gtk_widget_add_css_class(artwork_image_.get(), "now-playing-artwork-image");
     gtk_widget_set_size_request(artwork_image_.get(), 300, 300);
     gtk_widget_set_halign(artwork_image_.get(), GTK_ALIGN_CENTER);
-    gtk_box_append(GTK_BOX(content_box_.get()), artwork_image_.get());
+    safe_box_append(GTK_BOX(content_box_.get()), artwork_image_.get());
 
     // Title
     title_label_.reset(gtk_label_new(""));
     g_object_ref_sink(title_label_.get());
     gtk_widget_add_css_class(title_label_.get(), "title-2");
     gtk_label_set_xalign(GTK_LABEL(title_label_.get()), 0.5);
-    gtk_box_append(GTK_BOX(content_box_.get()), title_label_.get());
+    safe_box_append(GTK_BOX(content_box_.get()), title_label_.get());
 
     // Artist
     artist_label_.reset(gtk_label_new(""));
     g_object_ref_sink(artist_label_.get());
     gtk_widget_add_css_class(artist_label_.get(), "body-strong");
     gtk_label_set_xalign(GTK_LABEL(artist_label_.get()), 0.5);
-    gtk_box_append(GTK_BOX(content_box_.get()), artist_label_.get());
+    safe_box_append(GTK_BOX(content_box_.get()), artist_label_.get());
 
     // Meta (year, track count)
     meta_label_.reset(gtk_label_new(""));
     g_object_ref_sink(meta_label_.get());
     gtk_widget_add_css_class(meta_label_.get(), "caption");
     gtk_label_set_xalign(GTK_LABEL(meta_label_.get()), 0.5);
-    gtk_box_append(GTK_BOX(content_box_.get()), meta_label_.get());
+    safe_box_append(GTK_BOX(content_box_.get()), meta_label_.get());
 
     // Action buttons
     GtkWidget* actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
@@ -75,14 +76,14 @@ void AlbumDetailPage::setup_ui() {
     GtkWidget* play_btn = gtk_button_new_with_label("Play Album");
     gtk_widget_add_css_class(play_btn, "body-strong");
     g_signal_connect(play_btn, "clicked", G_CALLBACK(on_album_play_trampoline), this);
-    gtk_box_append(GTK_BOX(actions), play_btn);
+    safe_box_append(GTK_BOX(actions), play_btn);
 
     GtkWidget* shuffle_btn = gtk_button_new_with_label("Shuffle");
     gtk_widget_add_css_class(shuffle_btn, "body-strong");
     g_signal_connect(shuffle_btn, "clicked", G_CALLBACK(on_album_shuffle_trampoline), this);
-    gtk_box_append(GTK_BOX(actions), shuffle_btn);
+    safe_box_append(GTK_BOX(actions), shuffle_btn);
 
-    gtk_box_append(GTK_BOX(content_box_.get()), actions);
+    safe_box_append(GTK_BOX(content_box_.get()), actions);
 
     // Track list
     track_list_box_.reset(gtk_list_box_new());
@@ -91,10 +92,9 @@ void AlbumDetailPage::setup_ui() {
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(track_list_box_.get()),
                                     GTK_SELECTION_NONE);
     gtk_widget_set_hexpand(track_list_box_.get(), TRUE);
-    gtk_box_append(GTK_BOX(content_box_.get()), track_list_box_.get());
+    safe_box_append(GTK_BOX(content_box_.get()), track_list_box_.get());
 
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()),
-                                  content_box_.get());
+    safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()), content_box_.get());
 }
 
 void AlbumDetailPage::refresh() {
@@ -124,10 +124,10 @@ void AlbumDetailPage::populate_album(const Album& album) {
     if (artwork_image_) {
         if (!album.artwork_path.empty()) {
             GFile* file = g_file_new_for_path(album.artwork_path.c_str());
-            gtk_picture_set_file(GTK_PICTURE(artwork_image_.get()), file);
+            safe_picture_set_file(GTK_PICTURE(artwork_image_.get()), file);
             g_object_unref(file);
         } else {
-            gtk_picture_set_file(GTK_PICTURE(artwork_image_.get()), nullptr);
+            safe_picture_set_file(GTK_PICTURE(artwork_image_.get()), nullptr);
         }
     }
 
@@ -135,7 +135,7 @@ void AlbumDetailPage::populate_album(const Album& album) {
     GtkWidget* child = gtk_widget_get_first_child(track_list_box_.get());
     while (child) {
         GtkWidget* next = gtk_widget_get_next_sibling(child);
-        gtk_widget_unparent(child);
+        gtk_list_box_remove(GTK_LIST_BOX(track_list_box_.get()), child);
         child = next;
     }
     track_rows_.clear();
@@ -156,7 +156,7 @@ void AlbumDetailPage::populate_tracks(const std::vector<Track>& tracks) {
             [this](const Track& t, bool liked) { on_track_liked(t, liked); });
 
         GtkWidget* w = row->get_widget();
-        gtk_list_box_append(GTK_LIST_BOX(track_list_box_.get()), w);
+        safe_list_box_append(GTK_LIST_BOX(track_list_box_.get()), w);
         track_rows_.push_back(std::move(row));
     }
 }

@@ -16,6 +16,7 @@
 #include "ui/pages/ArtistDetailPage.hpp"
 #include "ui/pages/SearchResultsPage.hpp"
 #include "ui/components/HomePage.hpp"
+#include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
 #include <gtk/gtkentry.h>
@@ -92,6 +93,10 @@ void MiddleLibrary::setup_ui() {
     gtk_stack_set_transition_type(GTK_STACK(stack_), GTK_STACK_TRANSITION_TYPE_SLIDE_LEFT_RIGHT);
     gtk_stack_set_transition_duration(GTK_STACK(stack_), 200);
 
+    // Initialize navigator
+    navigator_ = std::make_unique<StackNavigator>(GTK_STACK(stack_));
+    navigator_->set_transition(StackNavigator::Transition::SlideLeft);
+
     scrolled_window_ = gtk_scrolled_window_new();
     gtk_widget_add_css_class(scrolled_window_, "library-scrolled");
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled_window_),
@@ -154,61 +159,61 @@ void MiddleLibrary::create_placeholder_pages() {
     // Home page (real page with library data)
     auto hp = std::make_unique<HomePage>(main_window_, library_service_);
     GtkWidget* hw = hp->get_widget();
-    gtk_stack_add_named(GTK_STACK(stack_), hw, "home");
+    navigator_->push("home", hw);
     pages_["home"] = std::move(hp);
 
     // Albums (real grid page)
     auto albums = std::make_unique<AlbumsPage>(main_window_, library_service_);
     GtkWidget* aw = albums->get_widget();
-    gtk_stack_add_named(GTK_STACK(stack_), aw, "albums");
+    navigator_->push("albums", aw);
     pages_["albums"] = std::move(albums);
 
     // Artists (real grid page)
     auto artists = std::make_unique<ArtistsPage>(main_window_, library_service_);
     GtkWidget* arw = artists->get_widget();
-    gtk_stack_add_named(GTK_STACK(stack_), arw, "artists");
+    navigator_->push("artists", arw);
     pages_["artists"] = std::move(artists);
 
     // Playlists (real grid page)
     auto playlists = std::make_unique<PlaylistsPage>(main_window_, library_service_);
     GtkWidget* pw = playlists->get_widget();
-    gtk_stack_add_named(GTK_STACK(stack_), pw, "playlists");
+    navigator_->push("playlists", pw);
     pages_["playlists"] = std::move(playlists);
 
     // Genres (real list page)
     auto genres = std::make_unique<GenresPage>(main_window_, library_service_);
     GtkWidget* gw = genres->get_widget();
-    gtk_stack_add_named(GTK_STACK(stack_), gw, "genres");
+    navigator_->push("genres", gw);
     pages_["genres"] = std::move(genres);
 
     // Songs (GtkColumnView page)
     auto songs = std::make_unique<SongsPage>(main_window_, library_service_);
     GtkWidget* sw = songs->get_widget();
-    gtk_stack_add_named(GTK_STACK(stack_), sw, "songs");
+    navigator_->push("songs", sw);
     pages_["songs"] = std::move(songs);
 
     // Favourite Albums (real grid page)
     auto fav = std::make_unique<FavouriteAlbumsPage>(main_window_, library_service_);
     GtkWidget* fw = fav->get_widget();
-    gtk_stack_add_named(GTK_STACK(stack_), fw, "favorites");
+    navigator_->push("favorites", fw);
     pages_["favorites"] = std::move(fav);
 
     // Liked Music (real list page)
     auto liked = std::make_unique<LikedMusicPage>(main_window_, library_service_);
     GtkWidget* lw = liked->get_widget();
-    gtk_stack_add_named(GTK_STACK(stack_), lw, "liked");
+    navigator_->push("liked", lw);
     pages_["liked"] = std::move(liked);
 
     // Album details (detail page)
     auto album_detail = std::make_unique<AlbumDetailPage>(main_window_, library_service_);
     GtkWidget* adw = album_detail->get_widget();
-    gtk_stack_add_named(GTK_STACK(stack_), adw, "album_detail");
+    navigator_->push("album_detail", adw);
     pages_["album_detail"] = std::move(album_detail);
 
     // Artist details (detail page)
     auto artist_detail = std::make_unique<ArtistDetailPage>(main_window_, library_service_);
     GtkWidget* ardw = artist_detail->get_widget();
-    gtk_stack_add_named(GTK_STACK(stack_), ardw, "artist_detail");
+    navigator_->push("artist_detail", ardw);
     pages_["artist_detail"] = std::move(artist_detail);
 
     // Show home page by default
@@ -218,14 +223,14 @@ void MiddleLibrary::create_placeholder_pages() {
 void MiddleLibrary::register_page(std::unique_ptr<LibraryPage> page) {
     std::string page_id = page->get_page_id();
     GtkWidget* widget = page->get_widget();
-    gtk_stack_add_named(GTK_STACK(stack_), widget, page_id.c_str());
+    navigator_->push(page_id, widget);
     pages_[page_id] = std::move(page);
 }
 
 void MiddleLibrary::set_active_page(const std::string& page_id) {
     if (pages_.find(page_id) != pages_.end()) {
         active_page_id_ = page_id;
-        gtk_stack_set_visible_child_name(GTK_STACK(stack_), page_id.c_str());
+        navigator_->navigate_to(page_id);
         pages_[page_id]->refresh();
     }
 }
@@ -297,7 +302,7 @@ void MiddleLibrary::perform_search(const std::string& query, uint64_t generation
     if (pages_.find("search") == pages_.end()) {
         auto search_page = std::make_unique<SearchResultsPage>(main_window_, library_service_);
         GtkWidget* sw = search_page->get_widget();
-        gtk_stack_add_named(GTK_STACK(stack_), sw, "search");
+        navigator_->push("search", sw);
         pages_["search"] = std::move(search_page);
     }
 
