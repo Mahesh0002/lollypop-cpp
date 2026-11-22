@@ -10,7 +10,13 @@
  *
  * Wayland note: GTK 4 does not provide portable always-on-top behavior.
  * The PiP window is a normal GtkWindow. Users who want it to float above
- * other windows should add a Hyprland windowrule (documented, not auto-applied).
+ * other windows should add a Hyprland windowrule:
+ *   windowrule = float,class:^(lollypop-cpp)$
+ *   windowrule = pin,class:^(lollypop-cpp)$
+ *
+ * Design per mockup:
+ *   [Artwork + Title/Artist] [Prev] [Waveform] [Next] [Volume] [Close]
+ *   No play/pause button - shell/MPRIS owns playback
  */
 
 #pragma once
@@ -63,11 +69,14 @@ private:
     std::unique_ptr<GtkWidget, WidgetDeleter> artist_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> controls_box_;
     std::unique_ptr<GtkWidget, WidgetDeleter> prev_button_;
-    std::unique_ptr<GtkWidget, WidgetDeleter> play_button_;
     std::unique_ptr<GtkWidget, WidgetDeleter> next_button_;
-    std::unique_ptr<GtkWidget, WidgetDeleter> play_icon_;
+    // No play/pause button - shell/MPRIS owns playback
     std::unique_ptr<WaveformView> waveform_view_;
     std::unique_ptr<VisualizerModel> waveform_model_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> volume_button_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> volume_scale_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> volume_popover_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> close_button_;
 
     Application* app_;
     IPlayerService* backend_ = nullptr;
@@ -84,8 +93,9 @@ private:
     void set_points(const std::vector<float>& points);
 
     static void on_prev_clicked(GtkButton* button, gpointer user_data);
-    static void on_play_clicked(GtkButton* button, gpointer user_data);
     static void on_next_clicked(GtkButton* button, gpointer user_data);
+    static void on_volume_changed(GtkRange* range, gpointer user_data);
+    static void on_close_clicked(GtkButton* button, gpointer user_data);
 };
 
 } // namespace lollypop

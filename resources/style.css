@@ -802,6 +802,7 @@ scrollbar button {
 .pip-content {
     background-color: var(--bg-secondary);
     border-radius: 16px;
+    box-shadow: 0 16px 48px var(--shadow-strong);
 }
 
 .pip-title {
@@ -831,6 +832,60 @@ scrollbar button {
 .pip-control-button:disabled {
     opacity: 0.4;
     color: var(--text-disabled);
+}
+
+.pip-volume-button {
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 18px;
+    padding: 8px;
+    color: var(--text-primary);
+}
+
+.pip-volume-button:hover {
+    background-color: var(--bg-hover);
+}
+
+.pip-volume-scale {
+    min-width: 24px;
+    min-height: 100px;
+}
+
+.pip-volume-scale slider {
+    min-width: 14px;
+    min-height: 14px;
+    border-radius: 7px;
+    background-color: var(--text-primary);
+    border: none;
+    box-shadow: 0 2px 8px var(--shadow-subtle);
+}
+
+.pip-volume-scale slider:hover {
+    background-color: var(--text-primary);
+}
+
+.pip-volume-scale trough {
+    min-width: 4px;
+    border-radius: 2px;
+    background-color: var(--bg-tertiary);
+}
+
+.pip-volume-scale highlight {
+    background-color: var(--accent-color);
+    border-radius: 2px;
+}
+
+.pip-close-button {
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 18px;
+    padding: 8px;
+    color: var(--text-tertiary);
+}
+
+.pip-close-button:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
 }
 
 /* ============================================================================

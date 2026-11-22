@@ -1,5 +1,9 @@
 /**
  * Lollypop C++ - PiP Window Implementation
+ *
+ * Compact floating player: [Artwork + Title/Artist] [Prev] [Waveform] [Next] [Volume] [Close]
+ * No play/pause button - shell/MPRIS owns playback
+ * Wayland: add Hyprland windowrule = float,pin for always-on-top
  */
 
 #include "panels/pip_window.hpp"
@@ -22,11 +26,13 @@ PiPWindow::PiPWindow(Application* app)
       artist_label_(nullptr),
       controls_box_(nullptr),
       prev_button_(nullptr),
-      play_button_(nullptr),
       next_button_(nullptr),
-      play_icon_(nullptr),
       waveform_view_(nullptr),
-      waveform_model_(nullptr) {
+      waveform_model_(nullptr),
+      volume_button_(nullptr),
+      volume_scale_(nullptr),
+      volume_popover_(nullptr),
+      close_button_(nullptr) {
     setup_ui();
 }
 
@@ -46,8 +52,6 @@ void PiPWindow::set_backend(IPlayerService* backend) {
     backend->set_track_changed_callback([this](const Track& track) {
         update_track_info(track.title, track.artist, track.artwork_path);
         current_track_id_ = track.id;
-
-        // Request lyrics not needed for PiP (compact view)
     });
 
     // Position changed → update progress
@@ -56,7 +60,7 @@ void PiPWindow::set_backend(IPlayerService* backend) {
         update_playback_position(position, duration);
     });
 
-    // Playback state changed → update Play/Pause icon
+    // Playback state changed → update waveform animation
     backend->set_playback_state_changed_callback([this](bool playing) {
         set_playing(playing);
     });
@@ -77,14 +81,14 @@ void PiPWindow::setup_ui() {
     gtk_window_set_title(GTK_WINDOW(window_.get()), "Lollypop — PiP");
     gtk_window_set_decorated(GTK_WINDOW(window_.get()), FALSE);
     gtk_window_set_resizable(GTK_WINDOW(window_.get()), FALSE);
-    gtk_window_set_default_size(GTK_WINDOW(window_.get()), 400, 140);
+    gtk_window_set_default_size(GTK_WINDOW(window_.get()), 420, 120);
 
     // Content box
     content_box_.reset(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12));
     g_object_ref_sink(content_box_.get());
     gtk_widget_add_css_class(content_box_.get(), "pip-content");
-    gtk_widget_set_margin_top(content_box_.get(), 12);
-    gtk_widget_set_margin_bottom(content_box_.get(), 12);
+    gtk_widget_set_margin_top(content_box_.get(), 8);
+    gtk_widget_set_margin_bottom(content_box_.get(), 8);
     gtk_widget_set_margin_start(content_box_.get(), 12);
     gtk_widget_set_margin_end(content_box_.get(), 12);
     gtk_widget_set_hexpand(content_box_.get(), TRUE);
@@ -95,7 +99,7 @@ void PiPWindow::setup_ui() {
 
     // ArtworkView
     artwork_view_ = std::make_unique<ArtworkView>();
-    artwork_view_->set_preferred_size(100, 100);
+    artwork_view_->set_preferred_size(88, 88);
     artwork_view_->set_corner_radius(8.0);
     gtk_box_append(GTK_BOX(content_box_.get()),
                    artwork_view_->get_widget());
@@ -127,7 +131,7 @@ void PiPWindow::setup_ui() {
 
     gtk_box_append(GTK_BOX(content_box_.get()), info_box_.get());
 
-    // Controls box
+    // Controls box: Prev | Waveform | Next | Volume | Close
     controls_box_.reset(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8));
     g_object_ref_sink(controls_box_.get());
     gtk_widget_add_css_class(controls_box_.get(), "pip-controls");
@@ -150,22 +154,12 @@ void PiPWindow::setup_ui() {
                      G_CALLBACK(on_prev_clicked), this);
     gtk_box_append(GTK_BOX(controls_box_.get()), prev_button_.get());
 
-    // Play/Pause
-    play_button_ = std::unique_ptr<GtkWidget, WidgetDeleter>(
-        gtk_button_new());
-    g_object_ref_sink(play_button_.get());
-    gtk_button_set_has_frame(GTK_BUTTON(play_button_.get()), FALSE);
-    gtk_widget_add_css_class(play_button_.get(),
-                             "pip-control-button");
-    play_icon_ = std::unique_ptr<GtkWidget, WidgetDeleter>(
-        gtk_image_new_from_icon_name("media-playback-start-symbolic"));
-    g_object_ref_sink(play_icon_.get());
-    gtk_image_set_pixel_size(GTK_IMAGE(play_icon_.get()), 24);
-    gtk_button_set_child(GTK_BUTTON(play_button_.get()), play_icon_.get());
-    gtk_widget_set_sensitive(play_button_.get(), FALSE);
-    g_signal_connect(play_button_.get(), "clicked",
-                     G_CALLBACK(on_play_clicked), this);
-    gtk_box_append(GTK_BOX(controls_box_.get()), play_button_.get());
+    // Waveform
+    waveform_view_ = std::make_unique<WaveformView>();
+    waveform_view_->set_preferred_size(180, 28);
+    gtk_widget_set_hexpand(waveform_view_->get_widget(), TRUE);
+    gtk_box_append(GTK_BOX(controls_box_.get()),
+                   waveform_view_->get_widget());
 
     // Next
     next_button_ = std::unique_ptr<GtkWidget, WidgetDeleter>(
@@ -183,14 +177,63 @@ void PiPWindow::setup_ui() {
                      G_CALLBACK(on_next_clicked), this);
     gtk_box_append(GTK_BOX(controls_box_.get()), next_button_.get());
 
+    // Volume button with popover
+    volume_button_ = std::unique_ptr<GtkWidget, WidgetDeleter>(
+        gtk_menu_button_new());
+    g_object_ref_sink(volume_button_.get());
+    gtk_menu_button_set_has_frame(GTK_MENU_BUTTON(volume_button_.get()), FALSE);
+    gtk_widget_add_css_class(volume_button_.get(), "pip-volume-button");
+    GtkWidget* volume_icon = gtk_image_new_from_icon_name("audio-volume-high-symbolic");
+    gtk_image_set_pixel_size(GTK_IMAGE(volume_icon), 20);
+    gtk_menu_button_set_child(GTK_MENU_BUTTON(volume_button_.get()), volume_icon);
+    gtk_widget_set_sensitive(volume_button_.get(), TRUE);
+
+    volume_popover_ = std::unique_ptr<GtkWidget, WidgetDeleter>(
+        gtk_popover_new());
+    g_object_ref_sink(volume_popover_.get());
+    gtk_popover_set_has_arrow(GTK_POPOVER(volume_popover_.get()), FALSE);
+    GtkWidget* volume_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_margin_top(volume_box, 12);
+    gtk_widget_set_margin_bottom(volume_box, 12);
+    gtk_widget_set_margin_start(volume_box, 12);
+    gtk_widget_set_margin_end(volume_box, 12);
+
+    volume_scale_ = std::unique_ptr<GtkWidget, WidgetDeleter>(
+        gtk_scale_new_with_range(GTK_ORIENTATION_VERTICAL, 0, 100, 1));
+    g_object_ref_sink(volume_scale_.get());
+    gtk_range_set_value(GTK_RANGE(volume_scale_.get()), 70);
+    gtk_range_set_inverted(GTK_RANGE(volume_scale_.get()), TRUE);
+    gtk_widget_set_size_request(volume_scale_.get(), -1, 100);
+    gtk_widget_add_css_class(volume_scale_.get(), "pip-volume-scale");
+    g_signal_connect(volume_scale_.get(), "value-changed",
+                     G_CALLBACK(on_volume_changed), this);
+
+    gtk_box_append(GTK_BOX(volume_box), volume_scale_.get());
+    gtk_popover_set_child(GTK_POPOVER(volume_popover_.get()), volume_box);
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(volume_button_.get()),
+                                volume_popover_.get());
+
+    gtk_box_append(GTK_BOX(controls_box_.get()), volume_button_.get());
+
+    // Close button
+    close_button_ = std::unique_ptr<GtkWidget, WidgetDeleter>(
+        gtk_button_new());
+    g_object_ref_sink(close_button_.get());
+    gtk_button_set_has_frame(GTK_BUTTON(close_button_.get()), FALSE);
+    gtk_widget_add_css_class(close_button_.get(), "pip-close-button");
+    GtkWidget* close_icon = gtk_image_new_from_icon_name("window-close-symbolic");
+    gtk_image_set_pixel_size(GTK_IMAGE(close_icon), 20);
+    gtk_button_set_child(GTK_BUTTON(close_button_.get()), close_icon);
+    g_signal_connect(close_button_.get(), "clicked",
+                     G_CALLBACK(on_close_clicked), this);
+    gtk_box_append(GTK_BOX(controls_box_.get()), close_button_.get());
+
     gtk_box_append(GTK_BOX(content_box_.get()), controls_box_.get());
 
-    // Waveform
+    // Waveform model
     waveform_view_ = std::make_unique<WaveformView>();
-    waveform_view_->set_preferred_size(200, 30);
+    waveform_view_->set_preferred_size(180, 28);
     gtk_widget_set_hexpand(waveform_view_->get_widget(), TRUE);
-    gtk_box_append(GTK_BOX(content_box_.get()),
-                   waveform_view_->get_widget());
 
     waveform_model_ = std::make_unique<VisualizerModel>();
     waveform_view_->set_model(waveform_model_.get());
@@ -218,10 +261,6 @@ void PiPWindow::update_playback_position(double position,
 
 void PiPWindow::set_playing(bool playing) {
     is_playing_ = playing;
-    const char* icon_name =
-        playing ? "media-playback-pause-symbolic"
-                : "media-playback-start-symbolic";
-    gtk_image_set_from_icon_name(GTK_IMAGE(play_icon_.get()), icon_name);
     if (waveform_view_) {
         waveform_view_->set_playing(playing);
     }
@@ -243,19 +282,27 @@ void PiPWindow::on_prev_clicked(GtkButton* button, gpointer user_data) {
     }
 }
 
-void PiPWindow::on_play_clicked(GtkButton* button, gpointer user_data) {
-    (void)button;
-    PiPWindow* self = static_cast<PiPWindow*>(user_data);
-    if (self->backend_) {
-        self->backend_->toggle_play_pause();
-    }
-}
-
 void PiPWindow::on_next_clicked(GtkButton* button, gpointer user_data) {
     (void)button;
     PiPWindow* self = static_cast<PiPWindow*>(user_data);
     if (self->backend_) {
         self->backend_->next_track();
+    }
+}
+
+void PiPWindow::on_volume_changed(GtkRange* range, gpointer user_data) {
+    PiPWindow* self = static_cast<PiPWindow*>(user_data);
+    double volume = gtk_range_get_value(range) / 100.0;
+    if (self->backend_) {
+        self->backend_->set_volume(volume);
+    }
+}
+
+void PiPWindow::on_close_clicked(GtkButton* button, gpointer user_data) {
+    (void)button;
+    PiPWindow* self = static_cast<PiPWindow*>(user_data);
+    if (self->app_) {
+        self->app_->hide_pip();
     }
 }
 
