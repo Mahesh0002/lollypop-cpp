@@ -133,6 +133,44 @@ if(GSK_GLSL_COMPILER)
     )
 endif()
 
+# GResource compilation
+find_program(GLIB_COMPILE_RESOURCES glib-compile-resources)
+if(GLIB_COMPILE_RESOURCES)
+    if(GSK_GLSL_COMPILER)
+        # Full resource bundle with shaders
+        add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lollypop.gresource
+            COMMAND ${GLIB_COMPILE_RESOURCES}
+                --target ${CMAKE_CURRENT_BINARY_DIR}/lollypop.gresource
+                --sourcedir ${CMAKE_CURRENT_SOURCE_DIR}/resources
+                ${CMAKE_CURRENT_SOURCE_DIR}/resources/lollypop.gresource.xml
+            DEPENDS
+                ${CMAKE_CURRENT_SOURCE_DIR}/resources/lollypop.gresource.xml
+                ${CMAKE_CURRENT_BINARY_DIR}/shaders/glass.gskshader
+                ${CMAKE_CURRENT_BINARY_DIR}/shaders/glass_reflection.gskshader
+                ${CMAKE_CURRENT_BINARY_DIR}/shaders/glass_dial.gskshader
+                ${CMAKE_CURRENT_BINARY_DIR}/shaders/waveform.gskshader
+                ${CMAKE_CURRENT_BINARY_DIR}/shaders/morph.gskshader
+            COMMENT "Compiling GResource bundle with shaders"
+        )
+    else()
+        # Minimal resource bundle without shaders (for development without gsk-glsl-compiler)
+        add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lollypop.gresource
+            COMMAND ${GLIB_COMPILE_RESOURCES}
+                --target ${CMAKE_CURRENT_BINARY_DIR}/lollypop.gresource
+                --sourcedir ${CMAKE_CURRENT_SOURCE_DIR}/resources
+                ${CMAKE_CURRENT_SOURCE_DIR}/resources/lollypop.gresource.xml
+            DEPENDS
+                ${CMAKE_CURRENT_SOURCE_DIR}/resources/lollypop.gresource.xml
+            COMMENT "Compiling GResource bundle (no shaders)"
+        )
+    endif()
+    add_custom_target(resources ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lollypop.gresource)
+else()
+    message(WARNING "glib-compile-resources not found - resources will not be compiled")
+endif()
+
 # Add subdirectories
 add_subdirectory(frontend)
 add_subdirectory(backend)
@@ -143,12 +181,25 @@ add_executable(lollypop-cpp
     src/main.cpp
 )
 
+# Depend on resources and shaders (if available)
+if(GLIB_COMPILE_RESOURCES)
+    add_dependencies(lollypop-cpp resources)
+endif()
+if(GSK_GLSL_COMPILER)
+    add_dependencies(lollypop-cpp shaders)
+endif()
+
 target_link_libraries(lollypop-cpp PRIVATE
     lollypop-frontend
     lollypop-backend
     lollypop-storage
     ${LIBRARIES}
 )
+
+# Embed GResource
+if(GLIB_COMPILE_RESOURCES)
+    target_sources(lollypop-cpp PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/lollypop.gresource)
+endif()
 
 # Copy resources to build directory
 add_custom_command(TARGET lollypop-cpp POST_BUILD
