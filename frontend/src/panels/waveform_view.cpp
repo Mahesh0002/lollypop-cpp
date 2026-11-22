@@ -1,15 +1,9 @@
 /**
  * Lollypop C++ - WaveformView Implementation
  *
- * Phase 8 final renderer: Cairo-based GtkDrawingArea with frame-clock
- * driven animation (~30 FPS), sample smoothing, accent-color integration,
- * and split-color playhead (saturated accent left of playhead, dimmed
- * right).
- *
- * NOTE: GTK 4.24.1 on this system does not expose gtk_widget_set_snapshot_func
- * or GSK path/clip APIs. Cairo rendering via GtkDrawingArea is used instead.
- * The public interface is unchanged; a future GtkSnapshot migration requires
- * no changes to WaveformView's public API.
+ * Wavy animated waveform like Quickshell's WaveVisualizer.qml / StyledSlider.qml.
+ * Cairo-based GtkDrawingArea with frame-clock driven animation (~30 FPS),
+ * sample smoothing, accent-color integration, and wavy modulation.
  *
  * Implemented using GTK 4 C API directly. No gtkmm, no Peel.
  */
@@ -113,7 +107,7 @@ void WaveformView::set_smoothing(int window) {
 }
 
 // ---------------------------------------------------------------------------
-// Sample smoothing (moving average)
+// Sample smoothing (moving average) + wavy modulation
 // ---------------------------------------------------------------------------
 
 void WaveformView::compute_smoothed_samples() {
@@ -135,7 +129,10 @@ void WaveformView::compute_smoothed_samples() {
                 ++count;
             }
         }
-        smoothed_samples_[i] = static_cast<float>(sum / count);
+        // Apply wavy modulation: sin wave that travels left-to-right
+        float base = static_cast<float>(sum / count);
+        float wave_mod = 1.0f + 0.15f * std::sin(animation_phase_ + static_cast<float>(i) * 0.3f);
+        smoothed_samples_[i] = base * wave_mod;
     }
 }
 
@@ -144,14 +141,20 @@ void WaveformView::compute_smoothed_samples() {
 // ---------------------------------------------------------------------------
 
 gboolean WaveformView::tick_callback(GtkWidget* widget, GdkFrameClock* clock,
-                                     gpointer user_data) {
+                                      gpointer user_data) {
     auto* self = static_cast<WaveformView*>(user_data);
     (void)widget;
     (void)clock;
 
     if (!self->playing_) return G_SOURCE_REMOVE;
 
-    // Recompute smoothed samples in case model data changed
+    // Animate the wavy phase (traveling wave)
+    self->animation_phase_ += 0.08f;
+    if (self->animation_phase_ > 2.0f * M_PI) {
+        self->animation_phase_ -= 2.0f * M_PI;
+    }
+
+    // Recompute smoothed samples with new phase
     self->compute_smoothed_samples();
 
     // Queue a redraw for the next frame
@@ -162,11 +165,11 @@ gboolean WaveformView::tick_callback(GtkWidget* widget, GdkFrameClock* clock,
 }
 
 // ---------------------------------------------------------------------------
-// Cairo draw callback
+// Cairo draw callback - Wavy waveform like Quickshell WaveVisualizer
 // ---------------------------------------------------------------------------
 
 void WaveformView::draw_callback(GtkDrawingArea* area, cairo_t* cr, int width,
-                                 int height, gpointer user_data) {
+                                  int height, gpointer user_data) {
     auto* self = static_cast<WaveformView*>(user_data);
     (void)area;
 
@@ -176,7 +179,7 @@ void WaveformView::draw_callback(GtkDrawingArea* area, cairo_t* cr, int width,
 }
 
 void WaveformView::render(cairo_t* cr, int width, int height) {
-    // ── Background: flat dark surface (no circle) ──
+    // ── Background: flat dark surface ──
     cairo_set_source_rgb(cr, 0.12, 0.12, 0.16);
     cairo_rectangle(cr, 0, 0, width, height);
     cairo_fill(cr);
@@ -186,50 +189,110 @@ void WaveformView::render(cairo_t* cr, int width, int height) {
         return;
     }
 
-    // ── Real waveform ──
+    // ── Real wavy waveform ──
     const auto& samples = smoothed_samples_;
     size_t n = samples.size();
     if (n < 2) return;
 
     // Normalize against a fixed ceiling so the waveform height is stable
-    // across tracks (matches shell WaveVisualizer.qml behavior).
     constexpr float kMaxVisualizerValue = 1000.0f;
 
     float playhead_x = static_cast<float>(progress_ * width);
+    float mid_y = height * 0.5f;
+    float max_amplitude = height * 0.45f;
 
-    // ── Filled wave from bottom, split at playhead ──
-    // Left of playhead: saturated accent; right of playhead: dimmed accent.
+    // ── Draw wavy waveform as symmetric bars around center (like WaveVisualizer.qml) ──
+    // Left of playhead: saturated accent; right: dimmed accent
+    
+    // We'll draw as connected bars with wavy tops
+    // First, build the path for the upper wave
     cairo_new_path(cr);
-    cairo_move_to(cr, 0, height);
+    
+    // Upper wave (left of playhead - saturated)
+    cairo_move_to(cr, 0, mid_y);
     for (size_t i = 0; i < n; ++i) {
         double x = static_cast<double>(i) * width / (n - 1);
         double normalized = samples[i] / kMaxVisualizerValue;
         if (normalized > 1.0) normalized = 1.0;
-        double y = height - normalized * height * 0.95;
+        double y = mid_y - normalized * max_amplitude;
         cairo_line_to(cr, x, y);
     }
-    cairo_line_to(cr, width, height);
+    cairo_line_to(cr, width, mid_y);
     cairo_close_path(cr);
 
-    // Dimmed right portion first
-    cairo_save(cr);
-    if (playhead_x > 0.0) {
-        cairo_rectangle(cr, playhead_x, 0, width - playhead_x, height);
-        cairo_clip(cr);
-    }
-    cairo_set_source_rgba(cr, accent_r_, accent_g_, accent_b_,
-                          accent_a_ * 0.15);
-    cairo_fill(cr);
-    cairo_restore(cr);
-
-    // Saturated left portion
+    // Clip to left of playhead for saturated portion
     cairo_save(cr);
     if (playhead_x > 0.0) {
         cairo_rectangle(cr, 0, 0, playhead_x, height);
         cairo_clip(cr);
     }
-    cairo_set_source_rgba(cr, accent_r_, accent_g_, accent_b_,
-                          accent_a_ * 0.6);
+    cairo_set_source_rgba(cr, accent_r_, accent_g_, accent_b_, accent_a_ * 0.8);
+    cairo_fill(cr);
+    cairo_restore(cr);
+
+    // Lower wave (left of playhead - saturated)
+    cairo_new_path(cr);
+    cairo_move_to(cr, 0, mid_y);
+    for (size_t i = 0; i < n; ++i) {
+        double x = static_cast<double>(i) * width / (n - 1);
+        double normalized = samples[i] / kMaxVisualizerValue;
+        if (normalized > 1.0) normalized = 1.0;
+        double y = mid_y + normalized * max_amplitude;
+        cairo_line_to(cr, x, y);
+    }
+    cairo_line_to(cr, width, mid_y);
+    cairo_close_path(cr);
+
+    cairo_save(cr);
+    if (playhead_x > 0.0) {
+        cairo_rectangle(cr, 0, 0, playhead_x, height);
+        cairo_clip(cr);
+    }
+    cairo_set_source_rgba(cr, accent_r_, accent_g_, accent_b_, accent_a_ * 0.8);
+    cairo_fill(cr);
+    cairo_restore(cr);
+
+    // Dimmed right portion (upper)
+    cairo_new_path(cr);
+    cairo_move_to(cr, 0, mid_y);
+    for (size_t i = 0; i < n; ++i) {
+        double x = static_cast<double>(i) * width / (n - 1);
+        double normalized = samples[i] / kMaxVisualizerValue;
+        if (normalized > 1.0) normalized = 1.0;
+        double y = mid_y - normalized * max_amplitude;
+        cairo_line_to(cr, x, y);
+    }
+    cairo_line_to(cr, width, mid_y);
+    cairo_close_path(cr);
+
+    cairo_save(cr);
+    if (playhead_x < width) {
+        cairo_rectangle(cr, playhead_x, 0, width - playhead_x, height);
+        cairo_clip(cr);
+    }
+    cairo_set_source_rgba(cr, accent_r_, accent_g_, accent_b_, accent_a_ * 0.15);
+    cairo_fill(cr);
+    cairo_restore(cr);
+
+    // Dimmed right portion (lower)
+    cairo_new_path(cr);
+    cairo_move_to(cr, 0, mid_y);
+    for (size_t i = 0; i < n; ++i) {
+        double x = static_cast<double>(i) * width / (n - 1);
+        double normalized = samples[i] / kMaxVisualizerValue;
+        if (normalized > 1.0) normalized = 1.0;
+        double y = mid_y + normalized * max_amplitude;
+        cairo_line_to(cr, x, y);
+    }
+    cairo_line_to(cr, width, mid_y);
+    cairo_close_path(cr);
+
+    cairo_save(cr);
+    if (playhead_x < width) {
+        cairo_rectangle(cr, playhead_x, 0, width - playhead_x, height);
+        cairo_clip(cr);
+    }
+    cairo_set_source_rgba(cr, accent_r_, accent_g_, accent_b_, accent_a_ * 0.15);
     cairo_fill(cr);
     cairo_restore(cr);
 
@@ -242,9 +305,5 @@ void WaveformView::render(cairo_t* cr, int width, int height) {
         cairo_stroke(cr);
     }
 }
-
-// ---------------------------------------------------------------------------
-// End of namespace
-// ---------------------------------------------------------------------------
 
 } // namespace lollypop

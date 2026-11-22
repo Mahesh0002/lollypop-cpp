@@ -87,6 +87,9 @@ private:
     // Smoothed sample buffer (computed from raw samples)
     std::vector<float> smoothed_samples_;
 
+    // Animation phase for traveling wave effect
+    float animation_phase_ = 0.0f;
+
     // Start the frame-clock tick callback (only when playing).
     void start_tick();
     // Stop the frame-clock tick callback.

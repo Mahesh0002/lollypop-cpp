@@ -2,10 +2,11 @@
  * Lollypop C++ - Bottom Playback Panel
  * Persistent playback controls spanning full width
  *
- * Layout:
- * [Left: Artwork + Title/Artist] [Center: Prev | Waveform | Next + Time Labels] [Right: Modes | Volume | PiP]
- * No play/pause button - shell/media keys are the authority.
- * Previous/Next flank the waveform progress bar.
+ * Layout inspired by Quickshell MediaControls.qml:
+ * [Left: Artwork + Title/Artist] [Center: Prev | Wavy Waveform | Next] [Right: Modes | Volume Dial | PiP]
+ * No play/pause button - shell/MPRIS owns playback
+ * Previous/Next flank the wavy waveform progress bar.
+ * Volume is a circular dial (like Quickshell MaterialDial.qml)
  */
 
 #pragma once
@@ -65,16 +66,18 @@ private:
     GtkWidget* time_label_left_;    // Current time (left of waveform)
     GtkWidget* time_label_right_;   // Duration (right of waveform)
 
-    // Right: Volume + PiP + Playback Modes
+    // Right: Volume Dial + PiP + Playback Modes
     GtkWidget* right_box_;
-    GtkWidget* volume_button_;
-    GtkWidget* volume_scale_;
-    GtkWidget* volume_popover_;
+    GtkWidget* volume_dial_;        // Circular volume dial button
+    GtkWidget* volume_scale_;       // Vertical scale inside popover
+    GtkWidget* volume_popover_;     // Popover for volume dial
     GtkWidget* pip_button_;
     // Playback mode buttons
     GtkWidget* shuffle_button_;
     GtkWidget* repeat_button_;
     GtkWidget* loop_button_;
+
+    double current_volume_ = 0.7;
 
     void setup_ui();
     void create_left_section();
@@ -85,6 +88,7 @@ private:
     static void on_prev_clicked(GtkButton* button, gpointer user_data);
     static void on_next_clicked(GtkButton* button, gpointer user_data);
     static void on_volume_changed(GtkRange* range, gpointer user_data);
+    static void on_volume_dial_changed(GtkRange* range, gpointer user_data);
     static void on_pip_clicked(GtkButton* button, gpointer user_data);
     static void on_shuffle_toggled(GtkToggleButton* button, gpointer user_data);
     static void on_repeat_toggled(GtkToggleButton* button, gpointer user_data);

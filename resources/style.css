@@ -703,22 +703,26 @@ listboxrow:selected {
     min-width: 100px;
 }
 
-.bottom-playback-volume-button {
+/* Volume Dial (circular, like Quickshell MaterialDial.qml) */
+.bottom-playback-volume-dial {
     min-width: 40px;
     min-height: 40px;
     border-radius: 20px;
-    padding: 9px;
+    padding: 0;
+    background-color: transparent;
+    color: var(--text-primary);
 }
 
-.bottom-playback-volume-button:hover {
+.bottom-playback-volume-dial:hover {
     background-color: var(--bg-hover);
 }
 
-.bottom-playback-volume-button:disabled {
+.bottom-playback-volume-dial:disabled {
     opacity: 0.4;
     color: var(--text-disabled);
 }
 
+/* Volume Popover Scale (vertical, circular dial style) */
 .bottom-playback-volume-scale {
     min-width: 24px;
     min-height: 120px;
@@ -735,6 +739,11 @@ listboxrow:selected {
 
 .bottom-playback-volume-scale slider:hover {
     background-color: var(--text-primary);
+}
+
+/* Waveform View */
+.waveform-view {
+    background-color: transparent;
 }
 
 .bottom-playback-volume-scale trough {

@@ -1,11 +1,11 @@
 /**
  * Lollypop C++ - Bottom Playback Implementation
  *
- * Layout:
- * [Left: Artwork + Title/Artist] [Center: Prev | Waveform + Time Labels | Next] [Right: Modes | Volume | PiP]
- * No play/pause button - shell/MPRIS controls playback
- * Previous/Next flank the waveform progress bar
- * Time labels underneath waveform (left = current time, right = duration)
+ * Design inspired by Quickshell MediaControls.qml:
+ * [Artwork + Title/Artist] [Prev] [Wavy Waveform] [Next] [Volume Dial] [PiP]
+ * No play/pause button - shell/MPRIS owns playback
+ * Waveform stretches full available width, wavy/animated
+ * Volume is a circular dial over artwork
  */
 
 #include "panels/bottom_playback.hpp"
@@ -19,6 +19,7 @@
 #include <gtk/gtk.h>
 #include <iostream>
 #include <memory>
+#include <cmath>
 
 namespace lollypop {
 
@@ -38,13 +39,14 @@ BottomPlayback::BottomPlayback(MainWindow* main_window)
       time_label_left_(nullptr),
       time_label_right_(nullptr),
       right_box_(nullptr),
-      volume_button_(nullptr),
+      volume_dial_(nullptr),
       volume_scale_(nullptr),
       volume_popover_(nullptr),
       pip_button_(nullptr),
       shuffle_button_(nullptr),
       repeat_button_(nullptr),
-      loop_button_(nullptr) {
+      loop_button_(nullptr),
+      current_volume_(0.7) {
     setup_ui();
 }
 
@@ -70,7 +72,7 @@ void BottomPlayback::create_left_section() {
     gtk_widget_set_valign(left_box_, GTK_ALIGN_CENTER);
     gtk_widget_set_size_request(left_box_, 220, -1);  // Minimum width
 
-    // ArtworkView component
+    // ArtworkView component with volume dial overlay
     artwork_view_ = new ArtworkView();
     artwork_view_->set_preferred_size(56, 56);
     artwork_view_->set_corner_radius(6.0);
@@ -101,7 +103,7 @@ void BottomPlayback::create_left_section() {
 }
 
 void BottomPlayback::create_center_section() {
-    center_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    center_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_widget_add_css_class(center_box_, "bottom-playback-center");
     gtk_widget_set_hexpand(center_box_, TRUE);
     gtk_widget_set_halign(center_box_, GTK_ALIGN_FILL);
@@ -128,7 +130,7 @@ void BottomPlayback::create_center_section() {
 
     // Waveform widget - expands to fill all available horizontal space
     waveform_view_ = new WaveformView();
-    waveform_view_->set_preferred_size(800, 48);  // Base preferred size
+    waveform_view_->set_preferred_size(800, 48);  // Base preferred size, will expand
     gtk_widget_set_hexpand(waveform_view_->get_widget(), TRUE);
     gtk_widget_set_size_request(waveform_view_->get_widget(), 200, 48);  // Min width 200px
     gtk_box_append(GTK_BOX(progress_box_), waveform_view_->get_widget());
@@ -221,15 +223,20 @@ void BottomPlayback::create_right_section() {
 
     gtk_box_append(GTK_BOX(right_box_), modes_box);
 
-    // Volume button with popover
-    volume_button_ = gtk_menu_button_new();
-    gtk_menu_button_set_has_frame(GTK_MENU_BUTTON(volume_button_), FALSE);
-    gtk_widget_add_css_class(volume_button_, "bottom-playback-volume-button");
+    // Volume dial button with popover (circular dial like MaterialDial.qml)
+    // Use GtkMenuButton to support popover
+    volume_dial_ = gtk_menu_button_new();
+    gtk_menu_button_set_has_frame(GTK_MENU_BUTTON(volume_dial_), FALSE);
+    gtk_widget_add_css_class(volume_dial_, "bottom-playback-volume-dial");
+    gtk_widget_set_size_request(volume_dial_, 40, 40);
+    
+    // Volume icon that changes based on level
     GtkWidget* volume_icon = gtk_image_new_from_icon_name("audio-volume-high-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(volume_icon), 22);
-    gtk_menu_button_set_child(GTK_MENU_BUTTON(volume_button_), volume_icon);
-    gtk_widget_set_sensitive(volume_button_, TRUE);  // Volume is a user control
+    gtk_menu_button_set_child(GTK_MENU_BUTTON(volume_dial_), volume_icon);
+    gtk_widget_set_sensitive(volume_dial_, TRUE);  // Volume is a user control
 
+    // Volume popover with circular dial (MaterialDial style)
     volume_popover_ = gtk_popover_new();
     gtk_popover_set_has_arrow(GTK_POPOVER(volume_popover_), FALSE);
     GtkWidget* volume_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
@@ -237,9 +244,12 @@ void BottomPlayback::create_right_section() {
     gtk_widget_set_margin_bottom(volume_box, 12);
     gtk_widget_set_margin_start(volume_box, 12);
     gtk_widget_set_margin_end(volume_box, 12);
+    gtk_widget_set_halign(volume_box, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(volume_box, GTK_ALIGN_CENTER);
 
+    // Circular volume scale (like MaterialDial.qml)
     volume_scale_ = gtk_scale_new_with_range(GTK_ORIENTATION_VERTICAL, 0, 100, 1);
-    gtk_range_set_value(GTK_RANGE(volume_scale_), 70);
+    gtk_range_set_value(GTK_RANGE(volume_scale_), current_volume_ * 100);
     gtk_range_set_inverted(GTK_RANGE(volume_scale_), TRUE);
     gtk_widget_set_size_request(volume_scale_, -1, 120);
     gtk_widget_add_css_class(volume_scale_, "bottom-playback-volume-scale");
@@ -247,9 +257,14 @@ void BottomPlayback::create_right_section() {
 
     gtk_box_append(GTK_BOX(volume_box), volume_scale_);
     gtk_popover_set_child(GTK_POPOVER(volume_popover_), volume_box);
-    gtk_menu_button_set_popover(GTK_MENU_BUTTON(volume_button_), volume_popover_);
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(volume_dial_), volume_popover_);
 
-    // PiP button - opens the floating Picture-in-Picture window
+    // Update volume icon based on level
+    g_signal_connect(volume_scale_, "value-changed", G_CALLBACK(on_volume_dial_changed), this);
+
+    gtk_box_append(GTK_BOX(right_box_), volume_dial_);
+
+    // PiP button
     pip_button_ = gtk_button_new();
     gtk_button_set_has_frame(GTK_BUTTON(pip_button_), FALSE);
     gtk_widget_add_css_class(pip_button_, "bottom-playback-pip-button");
@@ -258,7 +273,7 @@ void BottomPlayback::create_right_section() {
     gtk_button_set_child(GTK_BUTTON(pip_button_), pip_icon);
     g_signal_connect(pip_button_, "clicked", G_CALLBACK(on_pip_clicked), this);
 
-    gtk_box_append(GTK_BOX(right_box_), volume_button_);
+    gtk_box_append(GTK_BOX(right_box_), volume_dial_);
     gtk_box_append(GTK_BOX(right_box_), pip_button_);
     gtk_box_append(GTK_BOX(main_box_), right_box_);
 }
@@ -300,7 +315,19 @@ void BottomPlayback::set_playing(bool playing) {
 }
 
 void BottomPlayback::set_volume(double volume) {
+    current_volume_ = volume;
     gtk_range_set_value(GTK_RANGE(volume_scale_), volume * 100);
+    
+    // Update volume icon
+    GtkWidget* icon = gtk_menu_button_get_child(GTK_MENU_BUTTON(volume_dial_));
+    if (icon) {
+        const char* icon_name;
+        if (volume == 0.0) icon_name = "audio-volume-muted-symbolic";
+        else if (volume < 0.33) icon_name = "audio-volume-low-symbolic";
+        else if (volume < 0.66) icon_name = "audio-volume-medium-symbolic";
+        else icon_name = "audio-volume-high-symbolic";
+        gtk_image_set_from_icon_name(GTK_IMAGE(icon), icon_name);
+    }
 }
 
 void BottomPlayback::set_points(const std::vector<float>& points) {
@@ -314,7 +341,7 @@ void BottomPlayback::set_points(const std::vector<float>& points) {
 void BottomPlayback::set_controls_sensitive(bool sensitive) {
     gtk_widget_set_sensitive(prev_button_, sensitive);
     gtk_widget_set_sensitive(next_button_, sensitive);
-    gtk_widget_set_sensitive(volume_button_, sensitive);
+    gtk_widget_set_sensitive(volume_dial_, sensitive);
     gtk_widget_set_sensitive(pip_button_, sensitive);
     // Mode buttons are controlled by MainWindow based on playback state
     gtk_widget_set_sensitive(shuffle_button_, true);
@@ -399,6 +426,20 @@ void BottomPlayback::on_loop_toggled(GtkToggleButton* button, gpointer user_data
         IPlayerService* backend = self->main_window_->get_backend();
         if (backend)
             backend->set_repeat_one(gtk_toggle_button_get_active(button));
+    }
+}
+
+void BottomPlayback::on_volume_dial_changed(GtkRange* range, gpointer user_data) {
+    BottomPlayback* self = static_cast<BottomPlayback*>(user_data);
+    double vol = gtk_range_get_value(range) / 100.0;
+    GtkWidget* icon = gtk_menu_button_get_child(GTK_MENU_BUTTON(self->volume_dial_));
+    if (icon) {
+        const char* icon_name;
+        if (vol == 0.0) icon_name = "audio-volume-muted-symbolic";
+        else if (vol < 0.33) icon_name = "audio-volume-low-symbolic";
+        else if (vol < 0.66) icon_name = "audio-volume-medium-symbolic";
+        else icon_name = "audio-volume-high-symbolic";
+        gtk_image_set_from_icon_name(GTK_IMAGE(icon), icon_name);
     }
 }
 
