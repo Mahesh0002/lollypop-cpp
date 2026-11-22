@@ -41,4 +41,4 @@ Thumbs.db
 
 # Package managers
 conan.lock
-vcpkg/
+vcpkg/build-asan/
