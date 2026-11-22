@@ -64,6 +64,7 @@ private:
     void update_active_state();
     void update_label_visibility();
     void update_sidebar_width();
+    void animate_labels();
 
     // Callbacks
     static void on_collapse_clicked(GtkButton* button, gpointer user_data);

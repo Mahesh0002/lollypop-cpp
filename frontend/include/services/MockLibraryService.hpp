@@ -59,7 +59,8 @@ public:
     // Database-backed sorting
     std::vector<std::string> get_sorted_track_ids(
         const std::string& sortColumn,
-        bool ascending) override;
+        bool ascending,
+        const std::string& genre_filter = "") override;
     std::vector<Track> get_tracks_by_ids(
         const std::vector<std::string>& trackIds) override;
 

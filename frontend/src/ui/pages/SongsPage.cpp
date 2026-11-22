@@ -21,7 +21,7 @@ struct SongsPageLoadData {
 
 SongsPage::SongsPage(MainWindow* main_window, ILibraryService* library_service)
     : main_window_(main_window), library_service_(library_service),
-      sort_column_("title"), sort_ascending_(true), generation_(0),
+      sort_column_("title"), sort_ascending_(true), genre_filter_(""), generation_(0),
       loading_(false), loaded_count_(0), total_count_(0) {
     setup_ui();
 }
@@ -82,6 +82,24 @@ void SongsPage::create_header(GtkWidget* main_box) {
     gtk_widget_set_margin_end(header_box_.get(), 12);
     gtk_widget_set_margin_top(header_box_.get(), 8);
     gtk_widget_set_margin_bottom(header_box_.get(), 8);
+
+    // Genre filter dropdown
+    if (library_service_) {
+        auto genres = library_service_->get_all_genres();
+        if (!genres.empty()) {
+            GtkStringList* string_list = gtk_string_list_new(nullptr);
+            gtk_string_list_append(string_list, "All Genres");
+            for (const auto& genre : genres) {
+                gtk_string_list_append(string_list, genre.c_str());
+            }
+
+            GtkWidget* genre_dropdown = gtk_drop_down_new(G_LIST_MODEL(string_list), nullptr);
+            gtk_widget_add_css_class(genre_dropdown, "songs-genre-filter");
+            gtk_widget_set_tooltip_text(genre_dropdown, "Filter by genre");
+            g_signal_connect(genre_dropdown, "notify::selected", G_CALLBACK(on_genre_changed), this);
+            gtk_box_append(GTK_BOX(header_box_.get()), genre_dropdown);
+        }
+    }
 
     const struct {
         const char* title;
@@ -153,8 +171,8 @@ void SongsPage::reload() {
     }
     track_rows_.clear();
 
-    // Get sorted track IDs
-    auto track_ids = library_service_->get_sorted_track_ids(sort_column_, sort_ascending_);
+    // Get sorted track IDs with genre filter
+    auto track_ids = library_service_->get_sorted_track_ids(sort_column_, sort_ascending_, genre_filter_);
     {
         std::lock_guard lock(ids_mutex_);
         sorted_ids_ = std::move(track_ids);
@@ -219,6 +237,27 @@ void SongsPage::on_scroll_changed(GtkAdjustment* adjustment, gpointer user_data)
             self->load_page(next_start);
         }
     }
+}
+
+void SongsPage::on_genre_changed(GtkDropDown* dropdown, gpointer user_data) {
+    (void)dropdown;
+    auto* self = static_cast<SongsPage*>(user_data);
+    guint selected = gtk_drop_down_get_selected(dropdown);
+    if (selected == GTK_INVALID_LIST_POSITION) return;
+    
+    const char* genre = gtk_string_list_get_string(GTK_STRING_LIST(gtk_drop_down_get_model(dropdown)), selected);
+    if (genre) {
+        if (std::string(genre) == "All Genres") {
+            self->set_genre_filter("");
+        } else {
+            self->set_genre_filter(genre);
+        }
+    }
+}
+
+void SongsPage::set_genre_filter(const std::string& genre) {
+    genre_filter_ = genre;
+    reload();
 }
 
 void SongsPage::on_track_played(const Track& track) {

@@ -26,6 +26,8 @@ public:
 
     // Schema management
     bool create_schema();
+    bool create_fts5_index();
+    bool create_triggers();
     bool migrate_schema(int from_version, int to_version);
     int get_schema_version() const;
 
@@ -40,6 +42,7 @@ public:
     std::vector<Track> get_recently_played(int limit);
     std::vector<Track> get_liked_tracks();
     std::vector<Track> search_tracks(const std::string& query);
+    std::vector<Track> search_tracks_fts(const std::string& query);
     Track get_track(const std::string& track_id);
     Track get_track_by_path(const std::string& file_path);
     bool add_track(const Track& track);
@@ -49,16 +52,21 @@ public:
     bool delete_tracks_under_path(const std::string& directory_path);
     std::vector<std::string> prune_orphaned_entities();
     bool toggle_like(const std::string& track_id);
+    bool is_track_liked(const std::string& track_id);
     void update_play_count(const std::string& track_id);
     void update_last_played(const std::string& track_id);
+    bool insert_tracks_batch(const std::vector<Track>& tracks);
+    std::vector<Track> get_tracks_by_ids(const std::vector<std::string>& track_ids);
 
     // Album operations
     std::vector<Album> get_all_albums();
     std::vector<Album> get_albums_by_artist(const std::string& artist_id);
     Album get_album(const std::string& album_id);
+    std::vector<Album> get_favourite_albums();
     bool add_album(const Album& album);
     bool update_album(const Album& album);
     bool toggle_favorite_album(const std::string& album_id);
+    bool is_album_favorited(const std::string& album_id);
 
     // Artist operations
     std::vector<Artist> get_all_artists();
@@ -147,6 +155,10 @@ private:
     Album row_to_album(sqlite3_stmt* stmt);
     Artist row_to_artist(sqlite3_stmt* stmt);
     Playlist row_to_playlist(sqlite3_stmt* stmt);
+    std::vector<Track> get_tracks_by_album(const std::string& album_id);
+    void backfill_library_index(sqlite3* db);
+    bool insert_track(const Track& track);
+    std::string lower_hex_randomblob(int bytes);
 };
 
 } // namespace lollypop

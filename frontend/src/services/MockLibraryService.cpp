@@ -112,7 +112,8 @@ bool MockLibraryService::is_album_favorited(const std::string& /*album_id*/) {
 
 std::vector<std::string> MockLibraryService::get_sorted_track_ids(
     const std::string& /*sortColumn*/,
-    bool /*ascending*/) {
+    bool /*ascending*/,
+    const std::string& /*genre_filter*/) {
     return {};
 }
 

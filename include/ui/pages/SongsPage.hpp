@@ -52,6 +52,7 @@ private:
     std::vector<std::string> sorted_ids_;
     std::string sort_column_ = "title";
     bool sort_ascending_ = true;
+    std::string genre_filter_;
     uint64_t generation_ = 0;
     bool loading_ = false;
     size_t loaded_count_ = 0;
@@ -67,12 +68,14 @@ private:
     void reload();
     void load_page(size_t start);
     void append_tracks(std::vector<Track>&& tracks);
+    void set_genre_filter(const std::string& genre);
 
     void on_track_played(const Track& track);
     void on_track_liked(const Track& track, bool liked);
 
     static void on_sort_header_clicked(GtkButton* button, gpointer user_data);
     static void on_scroll_changed(GtkAdjustment* adjustment, gpointer user_data);
+    static void on_genre_changed(GtkDropDown* dropdown, gpointer user_data);
 };
 
 } // namespace lollypop
