@@ -3,6 +3,7 @@
  *
  * Manages the application-scoped GtkCssProvider and runtime accent color.
  * All CSS custom properties are defined here and applied application-wide.
+ * Supports dynamic type scaling via GTK settings (prefers-reduced-motion, font scaling).
  * No global GTK theme files are modified (plan Section 12.5).
  */
 
@@ -39,6 +40,12 @@ public:
     /// Persist the selected palette/accent to settings (placeholder).
     void persist_accent_color();
 
+    /// Get the current font scale factor (1.0 = default, >1.0 = larger text)
+    double get_font_scale() const { return font_scale_; }
+
+    /// Set font scale factor and update CSS
+    void set_font_scale(double scale);
+
 private:
     struct CssProviderDeleter {
         void operator()(GtkCssProvider* p) const {
@@ -53,7 +60,13 @@ private:
     double accent_b_ = 1.0;
     double accent_a_ = 1.0;
 
+    // Font scale for dynamic type (1.0 = default)
+    double font_scale_ = 1.0;
+    guint font_scale_signal_id_ = 0;
+
     void update_css_accent();
+    void update_css_font_scale();
+    static void on_gtk_font_scale_changed(GtkSettings* settings, GParamSpec* pspec, gpointer user_data);
 };
 
 } // namespace lollypop

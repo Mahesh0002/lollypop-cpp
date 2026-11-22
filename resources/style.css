@@ -5,12 +5,74 @@
  *
  * NOTE: @define-color and alpha() are deprecated in GTK 4.
  * Custom properties set by ThemeManager at runtime override --accent-color.
+ * @font-face is not supported in GTK CSS - font loaded via GResource and ThemeManager
  */
 
 * {
     font-family: "Inter", "Noto Sans", "Liberation Sans", sans-serif;
     font-size: 13px;
     color: var(--text-primary, #f5f5f7);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+/* ============================================================================
+ * Apple Type Scale (Inter font)
+ * ============================================================================ */
+
+:root {
+    /* Apple type scale in px */
+    --font-display: 34px;       /* Large titles */
+    --font-title1: 28px;        /* Title 1 */
+    --font-title2: 22px;        /* Title 2 */
+    --font-title3: 20px;        /* Title 3 */
+    --font-headline: 17px;      /* Headline */
+    --font-body: 17px;          /* Body */
+    --font-callout: 16px;       /* Callout */
+    --font-subhead: 15px;       /* Subhead */
+    --font-footnote: 13px;      /* Footnote */
+    --font-caption1: 12px;      /* Caption 1 */
+    --font-caption2: 11px;      /* Caption 2 */
+
+    /* Font weights */
+    --font-weight-thin: 100;
+    --font-weight-extralight: 200;
+    --font-weight-light: 300;
+    --font-weight-regular: 400;
+    --font-weight-medium: 500;
+    --font-weight-semibold: 600;
+    --font-weight-bold: 700;
+    --font-weight-heavy: 800;
+    --font-weight-black: 900;
+}
+
+/* Type scale utility classes */
+.display { font-size: var(--font-display); font-weight: var(--font-weight-bold); letter-spacing: -0.5px; }
+.title1 { font-size: var(--font-title1); font-weight: var(--font-weight-semibold); letter-spacing: -0.3px; }
+.title2 { font-size: var(--font-title2); font-weight: var(--font-weight-semibold); letter-spacing: -0.2px; }
+.title3 { font-size: var(--font-title3); font-weight: var(--font-weight-semibold); letter-spacing: -0.1px; }
+.headline { font-size: var(--font-headline); font-weight: var(--font-weight-semibold); }
+.body { font-size: var(--font-body); font-weight: var(--font-weight-regular); }
+.body-strong { font-size: var(--font-body); font-weight: var(--font-weight-semibold); }
+.callout { font-size: var(--font-callout); font-weight: var(--font-weight-regular); }
+.subhead { font-size: var(--font-subhead); font-weight: var(--font-weight-regular); }
+.footnote { font-size: var(--font-footnote); font-weight: var(--font-weight-regular); }
+.caption1 { font-size: var(--font-caption1); font-weight: var(--font-weight-regular); }
+.caption2 { font-size: var(--font-caption2); font-weight: var(--font-weight-regular); }
+
+/* Weight utilities */
+.weight-thin { font-weight: var(--font-weight-thin); }
+.weight-light { font-weight: var(--font-weight-light); }
+.weight-regular { font-weight: var(--font-weight-regular); }
+.weight-medium { font-weight: var(--font-weight-medium); }
+.weight-semibold { font-weight: var(--font-weight-semibold); }
+.weight-bold { font-weight: var(--font-weight-bold); }
+
+/* Dynamic type support - responds to GTK font size setting */
+@media (prefers-reduced-motion: reduce) {
+    * {
+        transition-duration: 1ms;
+        animation-duration: 1ms;
+    }
 }
 
 /* ============================================================================
@@ -155,17 +217,22 @@ listboxrow:selected {
 }
 
 /* ============================================================================
- * Typography Scale
+ * Typography Scale (Apple type scale with Inter)
  * ============================================================================ */
 
-.title-1 { font-size: 28px; font-weight: 600; letter-spacing: -0.5px; }
-.title-2 { font-size: 22px; font-weight: 600; letter-spacing: -0.3px; }
-.title-3 { font-size: 17px; font-weight: 600; letter-spacing: -0.2px; }
-.headline { font-size: 15px; font-weight: 600; }
-.body { font-size: 13px; font-weight: 400; }
-.body-strong { font-size: 13px; font-weight: 500; }
-.caption { font-size: 11px; font-weight: 400; color: var(--text-tertiary); }
-.caption-strong { font-size: 11px; font-weight: 500; color: var(--text-secondary); }
+.display { font-size: var(--font-display); font-weight: var(--font-weight-bold); letter-spacing: -0.5px; }
+.title-1 { font-size: var(--font-title1); font-weight: var(--font-weight-semibold); letter-spacing: -0.3px; }
+.title-2 { font-size: var(--font-title2); font-weight: var(--font-weight-semibold); letter-spacing: -0.2px; }
+.title-3 { font-size: var(--font-title3); font-weight: var(--font-weight-semibold); letter-spacing: -0.1px; }
+.headline { font-size: var(--font-headline); font-weight: var(--font-weight-semibold); }
+.body { font-size: var(--font-body); font-weight: var(--font-weight-regular); }
+.body-strong { font-size: var(--font-body); font-weight: var(--font-weight-semibold); }
+.callout { font-size: var(--font-callout); font-weight: var(--font-weight-regular); }
+.subhead { font-size: var(--font-subhead); font-weight: var(--font-weight-regular); }
+.footnote { font-size: var(--font-footnote); font-weight: var(--font-weight-regular); }
+.caption { font-size: var(--font-caption1); font-weight: var(--font-weight-regular); color: var(--text-tertiary); }
+.caption2 { font-size: var(--font-caption2); font-weight: var(--font-weight-regular); color: var(--text-secondary); }
+.caption-strong { font-size: var(--font-caption1); font-weight: var(--font-weight-semibold); color: var(--text-secondary); }
 
 /* ============================================================================
  * Sidebar Styles

@@ -1,0 +1,1192 @@
+/**
+ * Lollypop C++ - GTK4 CSS Stylesheet
+ * Apple Music-inspired design with custom playback areas
+ * GTK4 compatible - uses CSS custom properties (GTK 4.16+)
+ *
+ * NOTE: @define-color and alpha() are deprecated in GTK 4.
+ * Custom properties set by ThemeManager at runtime override --accent-color.
+ * @font-face is not supported in GTK CSS - font loaded via GResource and ThemeManager
+ */
+
+* {
+    font-family: "Inter", "Noto Sans", "Liberation Sans", sans-serif;
+    font-size: 13px;
+    color: var(--text-primary, #f5f5f7);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+/* ============================================================================
+ * Apple Type Scale (Inter font)
+ * ============================================================================ */
+
+:root {
+    /* Apple type scale in px */
+    --font-display: 34px;       /* Large titles */
+    --font-title1: 28px;        /* Title 1 */
+    --font-title2: 22px;        /* Title 2 */
+    --font-title3: 20px;        /* Title 3 */
+    --font-headline: 17px;      /* Headline */
+    --font-body: 17px;          /* Body */
+    --font-callout: 16px;       /* Callout */
+    --font-subhead: 15px;       /* Subhead */
+    --font-footnote: 13px;      /* Footnote */
+    --font-caption1: 12px;      /* Caption 1 */
+    --font-caption2: 11px;      /* Caption 2 */
+
+    /* Font weights */
+    --font-weight-thin: 100;
+    --font-weight-extralight: 200;
+    --font-weight-light: 300;
+    --font-weight-regular: 400;
+    --font-weight-medium: 500;
+    --font-weight-semibold: 600;
+    --font-weight-bold: 700;
+    --font-weight-heavy: 800;
+    --font-weight-black: 900;
+}
+
+/* Type scale utility classes */
+.display { font-size: var(--font-display); font-weight: var(--font-weight-bold); letter-spacing: -0.5px; }
+.title1 { font-size: var(--font-title1); font-weight: var(--font-weight-semibold); letter-spacing: -0.3px; }
+.title2 { font-size: var(--font-title2); font-weight: var(--font-weight-semibold); letter-spacing: -0.2px; }
+.title3 { font-size: var(--font-title3); font-weight: var(--font-weight-semibold); letter-spacing: -0.1px; }
+.headline { font-size: var(--font-headline); font-weight: var(--font-weight-semibold); }
+.body { font-size: var(--font-body); font-weight: var(--font-weight-regular); }
+.body-strong { font-size: var(--font-body); font-weight: var(--font-weight-semibold); }
+.callout { font-size: var(--font-callout); font-weight: var(--font-weight-regular); }
+.subhead { font-size: var(--font-subhead); font-weight: var(--font-weight-regular); }
+.footnote { font-size: var(--font-footnote); font-weight: var(--font-weight-regular); }
+.caption1 { font-size: var(--font-caption1); font-weight: var(--font-weight-regular); }
+.caption2 { font-size: var(--font-caption2); font-weight: var(--font-weight-regular); }
+
+/* Weight utilities */
+.weight-thin { font-weight: var(--font-weight-thin); }
+.weight-light { font-weight: var(--font-weight-light); }
+.weight-regular { font-weight: var(--font-weight-regular); }
+.weight-medium { font-weight: var(--font-weight-medium); }
+.weight-semibold { font-weight: var(--font-weight-semibold); }
+.weight-bold { font-weight: var(--font-weight-bold); }
+
+/* Dynamic type support - responds to GTK font size setting */
+@media (prefers-reduced-motion: reduce) {
+    * {
+        transition-duration: 1ms;
+        animation-duration: 1ms;
+    }
+}
+
+/* ============================================================================
+ * Color Variables (defaults; overridden by ThemeManager at runtime)
+ * ============================================================================ */
+
+:root {
+    --bg-primary: #111116;
+    --bg-secondary: #1a1a22;
+    --bg-tertiary: #22222c;
+    --bg-hover: #2a2a36;
+    --bg-active: #333340;
+    --bg-selected: #3a3a4a;
+
+    --text-primary: #f5f5f7;
+    --text-secondary: #a3a3ad;
+    --text-tertiary: #7a7a8a;
+    --text-disabled: #555565;
+
+    --accent-color: #a78bfa;          /* Overridden by ThemeManager */
+    --accent-soft: rgba(167, 139, 250, 0.18);
+    --accent-hover: #8b5cf6;
+
+    --border-subtle: #2a2a36;
+    --border-focus: var(--accent-color);
+
+    --shadow-strong: rgba(0, 0, 0, 0.5);
+    --shadow-subtle: rgba(0, 0, 0, 0.2);
+
+    /* ========================================================================
+     * Glass Material System (GTK 4.14+ backdrop-filter)
+     * ======================================================================== */
+    --glass-ultra-thin-bg: rgba(255, 255, 255, 0.04);
+    --glass-ultra-thin-border: rgba(255, 255, 255, 0.06);
+    --glass-ultra-thin-blur: 10px;
+
+    --glass-thin-bg: rgba(255, 255, 255, 0.06);
+    --glass-thin-border: rgba(255, 255, 255, 0.08);
+    --glass-thin-blur: 20px;
+
+    --glass-regular-bg: rgba(255, 255, 255, 0.08);
+    --glass-regular-border: rgba(255, 255, 255, 0.12);
+    --glass-regular-blur: 30px;
+
+    --glass-thick-bg: rgba(255, 255, 255, 0.12);
+    --glass-thick-border: rgba(255, 255, 255, 0.16);
+    --glass-thick-blur: 40px;
+
+    --glass-radius-sm: 8px;
+    --glass-radius-md: 12px;
+    --glass-radius-lg: 16px;
+    --glass-radius-xl: 24px;
+}
+
+/* ============================================================================
+ * Base Styles
+ * ============================================================================ */
+
+window {
+    background-color: var(--bg-primary);
+}
+
+button {
+    border: none;
+    border-radius: 8px;
+    padding: 6px 12px;
+    background-color: transparent;
+    color: var(--text-primary);
+}
+
+button:hover {
+    background-color: var(--bg-hover);
+}
+
+button:active {
+    background-color: var(--bg-active);
+}
+
+button:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--border-focus);
+}
+
+button:disabled {
+    color: var(--text-disabled);
+    background-color: transparent;
+}
+
+label {
+    color: var(--text-primary);
+}
+
+entry, searchentry {
+    border: 1px solid var(--border-subtle);
+    border-radius: 20px;
+    padding: 8px 16px;
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+entry:focus, searchentry:focus {
+    border-color: var(--border-focus);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--border-focus), transparent 70%);
+}
+
+scrolledwindow {
+    background-color: transparent;
+}
+
+separator {
+    background-color: var(--border-subtle);
+    min-height: 1px;
+    min-width: 1px;
+}
+
+popover {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px var(--shadow-strong);
+}
+
+popover button {
+    border-radius: 6px;
+    padding: 8px 16px;
+}
+
+popover button:hover {
+    background-color: var(--bg-hover);
+}
+
+listbox {
+    background-color: transparent;
+}
+
+listboxrow {
+    background-color: transparent;
+}
+
+listboxrow:selected {
+    background-color: transparent;
+}
+
+/* ============================================================================
+ * Typography Scale (Apple type scale with Inter)
+ * ============================================================================ */
+
+.display { font-size: var(--font-display); font-weight: var(--font-weight-bold); letter-spacing: -0.5px; }
+.title-1 { font-size: var(--font-title1); font-weight: var(--font-weight-semibold); letter-spacing: -0.3px; }
+.title-2 { font-size: var(--font-title2); font-weight: var(--font-weight-semibold); letter-spacing: -0.2px; }
+.title-3 { font-size: var(--font-title3); font-weight: var(--font-weight-semibold); letter-spacing: -0.1px; }
+.headline { font-size: var(--font-headline); font-weight: var(--font-weight-semibold); }
+.body { font-size: var(--font-body); font-weight: var(--font-weight-regular); }
+.body-strong { font-size: var(--font-body); font-weight: var(--font-weight-semibold); }
+.callout { font-size: var(--font-callout); font-weight: var(--font-weight-regular); }
+.subhead { font-size: var(--font-subhead); font-weight: var(--font-weight-regular); }
+.footnote { font-size: var(--font-footnote); font-weight: var(--font-weight-regular); }
+.caption { font-size: var(--font-caption1); font-weight: var(--font-weight-regular); color: var(--text-tertiary); }
+.caption2 { font-size: var(--font-caption2); font-weight: var(--font-weight-regular); color: var(--text-secondary); }
+.caption-strong { font-size: var(--font-caption1); font-weight: var(--font-weight-semibold); color: var(--text-secondary); }
+
+/* ============================================================================
+ * Sidebar Styles
+ * ============================================================================ */
+
+.sidebar {
+    background-color: var(--bg-secondary);
+    border-right: 1px solid var(--border-subtle);
+    min-width: 42px;
+}
+
+.sidebar-header {
+    background-color: transparent;
+}
+
+.sidebar-menu-button,
+.sidebar-action-button {
+    min-width: 40px;
+    min-height: 40px;
+    border-radius: 10px;
+    padding: 8px;
+}
+
+.sidebar-menu-button:hover,
+.sidebar-action-button:hover {
+    background-color: var(--bg-hover);
+}
+
+.sidebar-nav {
+    margin-top: 8px;
+}
+
+.sidebar-nav-item {
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin: 2px 8px;
+}
+
+.sidebar-nav-item:hover {
+    background-color: var(--bg-hover);
+}
+
+.sidebar-nav-item.active {
+    background-color: var(--bg-selected);
+}
+
+.sidebar-nav-item.active .sidebar-nav-icon {
+    color: var(--accent-color);
+}
+
+.sidebar-nav-item.active .sidebar-nav-label {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.sidebar-nav-icon {
+    color: var(--text-secondary);
+    min-width: 22px;
+    min-height: 22px;
+}
+
+.sidebar-nav-label {
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 400;
+}
+
+/* Collapse button (chevron) */
+.sidebar-collapse-button {
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 18px;
+    padding: 8px;
+}
+
+.sidebar-collapse-button:hover {
+    background-color: var(--bg-hover);
+}
+
+/* Menu button (hamburger) */
+.sidebar-menu-button {
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 18px;
+    padding: 8px;
+}
+
+.sidebar-menu-button:hover {
+    background-color: var(--bg-hover);
+}
+
+/* Compact sidebar mode */
+.sidebar.compact {
+    min-width: 42px;
+}
+
+/* Compact sidebar nav items - icon only, centered */
+.sidebar.compact .sidebar-nav-item {
+    margin: 0;
+    padding: 10px;
+    border-radius: 0;
+}
+
+.sidebar.compact .sidebar-nav-item:hover {
+    background-color: var(--bg-hover);
+}
+
+.sidebar.compact .sidebar-nav-item .sidebar-nav-icon {
+    color: var(--text-secondary);
+}
+
+.sidebar.compact .sidebar-nav-item.active .sidebar-nav-icon {
+    color: var(--accent-color);
+}
+
+/* Compact header - smaller buttons */
+.sidebar.compact .sidebar-header {
+    min-height: 42px;
+}
+
+.sidebar.compact .sidebar-collapse-button {
+    min-width: 22px;
+    min-height: 22px;
+    border-radius: 11px;
+    padding: 10px;
+}
+
+/* ============================================================================
+ * Middle Library Styles
+ * ============================================================================ */
+
+.middle-library {
+    background-color: var(--bg-primary);
+}
+
+.library-header {
+    background-color: transparent;
+}
+
+.library-search {
+    min-width: 300px;
+}
+
+.library-menu-button {
+    min-width: 40px;
+    min-height: 40px;
+    border-radius: 10px;
+    padding: 8px;
+}
+
+.library-menu-button:hover {
+    background-color: var(--bg-hover);
+}
+
+.library-page {
+    background-color: transparent;
+}
+
+.library-page-title {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+    margin-bottom: 16px;
+}
+
+.library-placeholder {
+    color: var(--text-tertiary);
+    font-size: 13px;
+}
+
+.library-scrolled {
+    background-color: transparent;
+}
+
+/* Album/Artist Cards */
+.album-card, .artist-card {
+    background-color: var(--bg-secondary);
+    border-radius: 12px;
+    padding: 12px;
+}
+
+.album-card:hover, .artist-card:hover {
+    background-color: var(--bg-hover);
+}
+
+.album-card:selected, .artist-card:selected {
+    background-color: var(--bg-selected);
+    box-shadow: 0 0 0 2px var(--border-focus);
+}
+
+.album-artwork, .artist-artwork {
+    border-radius: 8px;
+    min-width: 140px;
+    min-height: 140px;
+}
+
+.album-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-top: 8px;
+}
+
+.album-artist {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-tertiary);
+    margin-top: 2px;
+}
+
+/* Horizontal scrolling sections */
+.horizontal-section {
+    margin-bottom: 32px;
+}
+
+.section-title {
+    font-size: 17px;
+    font-weight: 600;
+    margin-bottom: 16px;
+}
+
+/* ============================================================================
+ * ArtworkView Component
+ * ============================================================================ */
+
+.artwork-view {
+    background-color: transparent;
+}
+
+.artwork-view-image {
+    border-radius: 12px;
+    box-shadow: 0 16px 48px var(--shadow-strong);
+}
+
+.artwork-view-fallback {
+    color: var(--text-secondary);
+}
+
+/* ============================================================================
+ * Empty / Loading / Error States
+ * ============================================================================ */
+
+.empty-state,
+.loading-state,
+.error-state {
+    background-color: transparent;
+}
+
+.empty-state-icon,
+.error-state-icon {
+    color: var(--text-tertiary);
+}
+
+.empty-state-title,
+.error-state-title {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.empty-state-description,
+.error-state-description {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.loading-state-spinner {
+    color: var(--accent-color);
+}
+
+.loading-state-message {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.error-state-retry {
+    margin-top: 12px;
+}
+
+/* ============================================================================
+ * Right Now Playing Styles
+ * ============================================================================ */
+
+.right-now-playing {
+    background-color: var(--bg-secondary);
+    border-left: 1px solid var(--border-subtle);
+}
+
+.now-playing-scrolled {
+    background-color: transparent;
+}
+
+.now-playing-content {
+    background-color: transparent;
+}
+
+.now-playing-artwork {
+    margin-bottom: 24px;
+}
+
+.now-playing-artwork-image {
+    border-radius: 12px;
+    box-shadow: 0 16px 48px var(--shadow-strong);
+    min-width: 280px;
+    min-height: 280px;
+}
+
+.now-playing-track-info {
+    margin-bottom: 16px;
+}
+
+.now-playing-title {
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.2px;
+    color: var(--text-primary);
+}
+
+.now-playing-artist {
+    font-size: 15px;
+    font-weight: 400;
+    color: var(--text-secondary);
+    margin-top: 4px;
+}
+
+.now-playing-waveform {
+    margin-top: 8px;
+}
+
+.now-playing-time {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-tertiary);
+    font-variant-numeric: tabular-nums;
+}
+
+.waveform-view,
+.waveform-stub {
+    background-color: transparent;
+    border-radius: 8px;
+    transition: height 200ms ease-out, min-height 200ms ease-out;
+}
+
+.waveform-playing {
+    /* Animation state handled by renderer */
+}
+
+.now-playing-control-button {
+    min-width: 44px;
+    min-height: 44px;
+    border-radius: 22px;
+    padding: 10px;
+}
+
+.now-playing-control-button:hover {
+    background-color: var(--bg-hover);
+}
+
+.now-playing-control-button:disabled {
+    opacity: 0.4;
+    color: var(--text-disabled);
+}
+
+.now-playing-modes {
+    margin-top: 8px;
+}
+
+.now-playing-mode-button {
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 18px;
+    padding: 8px;
+    color: var(--text-tertiary);
+}
+
+.now-playing-mode-button:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-secondary);
+}
+
+.now-playing-mode-button:checked {
+    color: var(--accent-color);
+    background-color: var(--accent-soft);
+}
+
+.now-playing-tabs {
+    margin-top: 16px;
+}
+
+.now-playing-tab-buttons {
+    background-color: var(--bg-tertiary);
+    border-radius: 10px;
+    padding: 4px;
+}
+
+.now-playing-tab-button {
+    border-radius: 8px;
+    padding: 8px 20px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-tertiary);
+    background-color: transparent;
+}
+
+.now-playing-tab-button:hover {
+    color: var(--text-secondary);
+    background-color: transparent;
+}
+
+.now-playing-tab-button.active {
+    color: var(--text-primary);
+    background-color: var(--bg-secondary);
+    box-shadow: 0 2px 8px var(--shadow-subtle);
+}
+
+.now-playing-lyrics {
+    background-color: transparent;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+}
+
+.now-playing-lyrics .current-line {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.now-playing-queue {
+    background-color: transparent;
+}
+
+.queue-item-art {
+    border-radius: 6px;
+    min-width: 40px;
+    min-height: 40px;
+}
+
+.queue-item-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.queue-item-artist {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--text-tertiary);
+}
+
+/* ============================================================================
+ * Bottom Playback Styles
+ * ============================================================================ */
+
+.bottom-playback {
+    background-color: var(--bg-secondary);
+    border-top: 1px solid var(--border-subtle);
+    min-height: 80px;
+}
+
+.bottom-playback-separator {
+    background-color: var(--border-subtle);
+    min-height: 1px;
+}
+
+.bottom-playback-left {
+    min-width: 300px;
+}
+
+.bottom-playback-artwork {
+    border-radius: 6px;
+    min-width: 56px;
+    min-height: 56px;
+    box-shadow: 0 4px 16px var(--shadow-subtle);
+}
+
+.bottom-playback-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.bottom-playback-artist {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-tertiary);
+}
+
+.bottom-playback-center {
+    /* flex-grow handled by GTK layout */
+}
+
+.bottom-playback-control-button {
+    min-width: 44px;
+    min-height: 44px;
+    border-radius: 22px;
+    padding: 10px;
+    color: var(--text-primary);
+    transition: background-color 100ms ease-out, transform 50ms ease-out;
+}
+
+.bottom-playback-control-button:hover {
+    background-color: var(--bg-hover);
+}
+
+.bottom-playback-control-button:active {
+    background-color: var(--bg-active);
+    transform: scale(0.92);
+}
+
+.bottom-playback-control-button:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--accent-color);
+}
+
+.bottom-playback-control-button:disabled {
+    opacity: 0.4;
+    color: var(--text-disabled);
+}
+
+.bottom-playback-play-button {
+    min-width: 56px;
+    min-height: 56px;
+    border-radius: 28px;
+    padding: 14px;
+    background-color: var(--text-primary);
+    color: var(--bg-primary);
+    box-shadow: 0 4px 16px var(--shadow-subtle);
+}
+
+.bottom-playback-play-button:hover {
+    background-color: var(--text-primary);
+    box-shadow: 0 6px 24px var(--shadow-strong);
+}
+
+.bottom-playback-play-button:active {
+    background-color: var(--text-primary);
+}
+
+.bottom-playback-play-button:disabled {
+    opacity: 0.4;
+}
+
+.bottom-playback-progress {
+    margin-top: 8px;
+}
+
+/* New center section: Prev | Waveform + Time Labels | Next */
+.bottom-playback-center {
+    /* No min-width - expands to fill available space between prev/next */
+}
+
+.bottom-playback-progress {
+    /* No min-width - expands to fill available space */
+}
+
+/* Time labels underneath waveform */
+.bottom-playback-time-labels {
+    /* No min-width - expands to fill available space */
+}
+
+.bottom-playback-time {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-tertiary);
+    font-variant-numeric: tabular-nums;
+    min-width: 50px;
+}
+
+.bottom-playback-right {
+    min-width: 100px;
+}
+
+/* Volume Dial (circular, like Quickshell MaterialDial.qml) */
+.bottom-playback-volume-dial {
+    min-width: 40px;
+    min-height: 40px;
+    border-radius: 20px;
+    padding: 0;
+    background-color: transparent;
+    color: var(--text-primary);
+}
+
+.bottom-playback-volume-dial:hover {
+    background-color: var(--bg-hover);
+}
+
+.bottom-playback-volume-dial:disabled {
+    opacity: 0.4;
+    color: var(--text-disabled);
+}
+
+/* Volume Popover Scale (vertical, circular dial style) */
+.bottom-playback-volume-scale {
+    min-width: 24px;
+    min-height: 120px;
+}
+
+.bottom-playback-volume-scale slider {
+    min-width: 14px;
+    min-height: 14px;
+    border-radius: 7px;
+    background-color: var(--text-primary);
+    border: none;
+    box-shadow: 0 2px 8px var(--shadow-subtle);
+}
+
+.bottom-playback-volume-scale slider:hover {
+    background-color: var(--text-primary);
+}
+
+/* Waveform View */
+.waveform-view {
+    background-color: transparent;
+}
+
+.bottom-playback-volume-scale trough {
+    min-width: 4px;
+    border-radius: 2px;
+    background-color: var(--bg-tertiary);
+}
+
+.bottom-playback-volume-scale highlight {
+    background-color: var(--accent-color);
+    border-radius: 2px;
+}
+
+.bottom-playback-pip-button {
+    min-width: 40px;
+    min-height: 40px;
+    border-radius: 20px;
+    padding: 9px;
+}
+
+.bottom-playback-pip-button:hover {
+    background-color: var(--bg-hover);
+}
+
+.bottom-playback-pip-button:disabled {
+    opacity: 0.4;
+    color: var(--text-disabled);
+}
+
+/* ============================================================================
+ * Scrollbar Styles (GTK4)
+ * ============================================================================ */
+
+scrollbar {
+    background-color: transparent;
+}
+
+scrollbar slider {
+    background-color: var(--bg-tertiary);
+    border-radius: 4px;
+    min-width: 8px;
+    min-height: 8px;
+    margin: 2px;
+}
+
+scrollbar slider:hover {
+    background-color: var(--text-tertiary);
+}
+
+scrollbar slider:active {
+    background-color: var(--text-secondary);
+}
+
+scrollbar button {
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    background-color: transparent;
+}
+
+/* ============================================================================
+ * PiP (Picture-in-Picture) Window Styles
+ * ============================================================================ */
+
+.pip-content {
+    background-color: var(--bg-secondary);
+    border-radius: 16px;
+    box-shadow: 0 16px 48px var(--shadow-strong);
+}
+
+.pip-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.pip-artist {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-secondary);
+}
+
+.pip-control-button {
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 18px;
+    padding: 8px;
+    color: var(--text-primary);
+}
+
+.pip-control-button:hover {
+    background-color: var(--bg-hover);
+}
+
+.pip-control-button:disabled {
+    opacity: 0.4;
+    color: var(--text-disabled);
+}
+
+.pip-volume-button {
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 18px;
+    padding: 8px;
+    color: var(--text-primary);
+}
+
+.pip-volume-button:hover {
+    background-color: var(--bg-hover);
+}
+
+.pip-volume-scale {
+    min-width: 24px;
+    min-height: 100px;
+}
+
+.pip-volume-scale slider {
+    min-width: 14px;
+    min-height: 14px;
+    border-radius: 7px;
+    background-color: var(--text-primary);
+    border: none;
+    box-shadow: 0 2px 8px var(--shadow-subtle);
+}
+
+.pip-volume-scale slider:hover {
+    background-color: var(--text-primary);
+}
+
+.pip-volume-scale trough {
+    min-width: 4px;
+    border-radius: 2px;
+    background-color: var(--bg-tertiary);
+}
+
+.pip-volume-scale highlight {
+    background-color: var(--accent-color);
+    border-radius: 2px;
+}
+
+.pip-close-button {
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 18px;
+    padding: 8px;
+    color: var(--text-tertiary);
+}
+
+.pip-close-button:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+/* ============================================================================
+ * Animations & Transitions
+ * ============================================================================ */
+
+* {
+    transition-property: background-color, color, border-color, box-shadow;
+    transition-duration: 150ms;
+    transition-timing-function: ease-out;
+}
+
+button:active,
+.toggle-button:active {
+    transition-duration: 50ms;
+}
+
+/* ============================================================================
+ * Glass Material System (GTK 4.14+ backdrop-filter)
+ * ============================================================================ */
+
+.glass-ultra-thin {
+    background-color: var(--glass-ultra-thin-bg);
+    border: 1px solid var(--glass-ultra-thin-border);
+    backdrop-filter: blur(var(--glass-ultra-thin-blur));
+    border-radius: var(--glass-radius-md);
+}
+
+.glass-thin {
+    background-color: var(--glass-thin-bg);
+    border: 1px solid var(--glass-thin-border);
+    backdrop-filter: blur(var(--glass-thin-blur));
+    border-radius: var(--glass-radius-md);
+}
+
+.glass-regular {
+    background-color: var(--glass-regular-bg);
+    border: 1px solid var(--glass-regular-border);
+    backdrop-filter: blur(var(--glass-regular-blur));
+    border-radius: var(--glass-radius-lg);
+}
+
+.glass-thick {
+    background-color: var(--glass-thick-bg);
+    border: 1px solid var(--glass-thick-border);
+    backdrop-filter: blur(var(--glass-thick-blur));
+    border-radius: var(--glass-radius-xl);
+}
+
+/* Glass panel variants */
+.glass-panel {
+    background-color: var(--glass-regular-bg);
+    border: 1px solid var(--glass-regular-border);
+    backdrop-filter: blur(var(--glass-regular-blur));
+    border-radius: var(--glass-radius-lg);
+}
+
+.glass-panel-sm {
+    background-color: var(--glass-regular-bg);
+    border: 1px solid var(--glass-regular-border);
+    backdrop-filter: blur(var(--glass-regular-blur));
+    border-radius: var(--glass-radius-sm);
+}
+
+.glass-panel-lg {
+    background-color: var(--glass-thick-bg);
+    border: 1px solid var(--glass-thick-border);
+    backdrop-filter: blur(var(--glass-thick-blur));
+    border-radius: var(--glass-radius-xl);
+}
+
+/* Glass card for album/artist */
+.glass-card {
+    background-color: var(--glass-regular-bg);
+    border: 1px solid var(--glass-regular-border);
+    backdrop-filter: blur(var(--glass-regular-blur));
+    border-radius: var(--glass-radius-md);
+    box-shadow: 0 4px 16px var(--shadow-subtle);
+    transition: transform 200ms ease-out, box-shadow 200ms ease-out;
+}
+
+.glass-card:hover {
+    transform: scale(1.02);
+    box-shadow: 0 8px 32px var(--shadow-strong);
+    background-color: var(--glass-thin-bg);
+    border-color: var(--glass-thin-border);
+}
+
+.glass-card:active {
+    transform: scale(0.98);
+}
+
+/* Glass toolbar */
+.glass-toolbar {
+    background-color: var(--glass-thin-bg);
+    border-top: 1px solid var(--glass-thin-border);
+    backdrop-filter: blur(var(--glass-thin-blur));
+}
+
+/* Glass popover */
+.glass-popover {
+    background-color: var(--glass-regular-bg);
+    border: 1px solid var(--glass-regular-border);
+    backdrop-filter: blur(var(--glass-regular-blur));
+    border-radius: var(--glass-radius-lg);
+    box-shadow: 0 8px 32px var(--shadow-strong);
+}
+
+/* Glass sidebar */
+.glass-sidebar {
+    background-color: var(--glass-thin-bg);
+    border-right: 1px solid var(--glass-thin-border);
+    backdrop-filter: blur(var(--glass-thin-blur));
+}
+
+/* Glass card variants for different contexts */
+.glass-album-card {
+    background-color: var(--glass-regular-bg);
+    border: 1px solid var(--glass-regular-border);
+    backdrop-filter: blur(var(--glass-regular-blur));
+    border-radius: var(--glass-radius-md);
+    box-shadow: 0 4px 16px var(--shadow-subtle);
+    transition: transform 200ms ease-out, box-shadow 200ms ease-out;
+}
+
+.glass-album-card:hover {
+    transform: scale(1.02);
+    box-shadow: 0 8px 32px var(--shadow-strong);
+    background-color: var(--glass-thin-bg);
+    border-color: var(--glass-thin-border);
+}
+
+.glass-artist-card {
+    background-color: var(--glass-regular-bg);
+    border: 1px solid var(--glass-regular-border);
+    backdrop-filter: blur(var(--glass-regular-blur));
+    border-radius: var(--glass-radius-md);
+    box-shadow: 0 4px 16px var(--shadow-subtle);
+    transition: transform 200ms ease-out, box-shadow 200ms ease-out;
+}
+
+.glass-artist-card:hover {
+    transform: scale(1.02);
+    box-shadow: 0 8px 32px var(--shadow-strong);
+    background-color: var(--glass-thin-bg);
+    border-color: var(--glass-thin-border);
+}
+
+/* Hover elevation for cards */
+.card-elevate:hover {
+    transform: translateY(-4px) scale(1.02);
+    box-shadow: 0 16px 48px var(--shadow-strong);
+}
+
+/* Focus states for accessibility */
+.glass-card:focus-visible,
+.glass-panel:focus-visible,
+.glass-toolbar:focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+    .glass-card,
+    .glass-panel,
+    .card-elevate {
+        transition: none;
+    }
+}
+
+/* High contrast mode */
+@media (prefers-contrast: more) {
+    :root {
+        --glass-regular-bg: rgba(255, 255, 255, 0.15);
+        --glass-regular-border: rgba(255, 255, 255, 0.3);
+        --glass-thin-bg: rgba(255, 255, 255, 0.1);
+        --glass-thin-border: rgba(255, 255, 255, 0.2);
+        --glass-thick-bg: rgba(255, 255, 255, 0.2);
+        --glass-thick-border: rgba(255, 255, 255, 0.4);
+    }
+}
+
+/* ============================================================================
+ * Accessibility
+ * ============================================================================ */
+
+*:focus {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
+}
+
+/* Reduced motion - GTK handles this via settings */
