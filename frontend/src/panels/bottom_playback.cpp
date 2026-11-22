@@ -117,7 +117,8 @@ void BottomPlayback::create_center_section() {
     gtk_image_set_pixel_size(GTK_IMAGE(prev_icon), 24);
     gtk_button_set_child(GTK_BUTTON(prev_button_), prev_icon);
     g_signal_connect(prev_button_, "clicked", G_CALLBACK(on_prev_clicked), this);
-    gtk_widget_set_sensitive(prev_button_, FALSE);  // read-only; shell owns playback
+    // Enable for visual feedback (hover/ripple), shell still controls playback via callback
+    gtk_widget_set_sensitive(prev_button_, TRUE);
     gtk_box_append(GTK_BOX(center_box_), prev_button_);
 
     // Progress container: vertical box with waveform on top, time labels underneath
@@ -168,7 +169,8 @@ void BottomPlayback::create_center_section() {
     gtk_image_set_pixel_size(GTK_IMAGE(next_icon), 24);
     gtk_button_set_child(GTK_BUTTON(next_button_), next_icon);
     g_signal_connect(next_button_, "clicked", G_CALLBACK(on_next_clicked), this);
-    gtk_widget_set_sensitive(next_button_, FALSE);  // read-only; shell owns playback
+    // Enable for visual feedback (hover/ripple), shell still controls playback via callback
+    gtk_widget_set_sensitive(next_button_, TRUE);
     gtk_box_append(GTK_BOX(center_box_), next_button_);
 
     gtk_box_append(GTK_BOX(main_box_), center_box_);

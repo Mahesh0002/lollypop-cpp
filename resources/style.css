@@ -639,10 +639,21 @@ listboxrow:selected {
     border-radius: 22px;
     padding: 10px;
     color: var(--text-primary);
+    transition: background-color 100ms ease-out, transform 50ms ease-out;
 }
 
 .bottom-playback-control-button:hover {
     background-color: var(--bg-hover);
+}
+
+.bottom-playback-control-button:active {
+    background-color: var(--bg-active);
+    transform: scale(0.92);
+}
+
+.bottom-playback-control-button:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--accent-color);
 }
 
 .bottom-playback-control-button:disabled {
