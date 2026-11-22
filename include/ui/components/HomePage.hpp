@@ -25,6 +25,15 @@ class MainWindow;
 
 class HomePage : public LibraryPage {
 public:
+    // Animation data structs for staggered spring animations
+    struct TrackAnimData {
+        GtkWidget* widget;
+    };
+    
+    struct AlbumAnimData {
+        GtkWidget* widget;
+    };
+
     HomePage(MainWindow* main_window, ILibraryService* library_service);
     ~HomePage();
 
@@ -34,6 +43,11 @@ public:
     GtkWidget* get_widget() const { return widget_.get(); }
     void refresh() override;
     std::string get_page_id() const override { return "home"; }
+
+    // Navigation callbacks for "View all" buttons
+    void set_recently_added_callback(std::function<void()> cb);
+    void set_recently_played_callback(std::function<void()> cb);
+    void set_favourite_albums_callback(std::function<void()> cb);
 
 private:
     struct WidgetDeleter {
@@ -48,7 +62,10 @@ private:
         std::function<void(const Track&)> play_cb;
         std::function<void(const Track&, bool)> like_cb;
         GtkWidget* list_box = nullptr;
+        GtkWidget* view_all_button = nullptr;
+        std::function<void()> view_all_cb;
         std::vector<std::unique_ptr<TrackRow>> track_rows;
+        std::vector<guint> anim_timeout_ids;
     };
 
     struct AlbumSectionData {
@@ -57,7 +74,10 @@ private:
         std::function<void(const Album&)> play_cb;
         std::function<void(const Album&)> click_cb;
         GtkWidget* grid = nullptr;
+        GtkWidget* view_all_button = nullptr;
+        std::function<void()> view_all_cb;
         std::vector<std::unique_ptr<AlbumCard>> album_cards;
+        std::vector<guint> anim_timeout_ids;
     };
 
     std::unique_ptr<GtkWidget, WidgetDeleter> widget_;
@@ -66,6 +86,10 @@ private:
     MainWindow* main_window_ = nullptr;
     ILibraryService* library_service_ = nullptr;
     bool initialized_ = false;
+
+    std::function<void()> recently_added_cb_;
+    std::function<void()> recently_played_cb_;
+    std::function<void()> favourite_albums_cb_;
 
     std::vector<std::unique_ptr<SectionData>> sections_data_;
     std::vector<std::unique_ptr<AlbumSectionData>> album_sections_data_;
@@ -76,15 +100,21 @@ private:
     GtkWidget* create_section(const std::string& title,
                               std::function<std::vector<Track>()> fetcher,
                               std::function<void(const Track&)> play_cb,
-                              std::function<void(const Track&, bool)> like_cb);
+                              std::function<void(const Track&, bool)> like_cb,
+                              std::function<void()> view_all_cb = nullptr);
 
     GtkWidget* create_album_section(const std::string& title,
                                     std::function<std::vector<Album>()> fetcher,
                                     std::function<void(const Album&)> play_cb,
-                                    std::function<void(const Album&)> click_cb);
+                                    std::function<void(const Album&)> click_cb,
+                                    std::function<void()> view_all_cb = nullptr);
 
     void refresh_track_section(SectionData* data);
     void refresh_album_section(AlbumSectionData* data);
+
+    // Static callbacks for staggered animations
+    static gboolean on_track_anim_timeout(gpointer data);
+    static gboolean on_album_anim_timeout(gpointer data);
 
     void on_track_played(const Track& track);
     void on_track_liked(const Track& track, bool liked);

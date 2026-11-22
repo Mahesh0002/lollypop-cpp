@@ -53,6 +53,8 @@ private:
     GTask* decode_task_ = nullptr;
     GCancellable* cancellable_ = nullptr;
     std::string current_path_;
+    int preferred_width_ = 56;
+    int preferred_height_ = 56;
     bool has_artwork_ = false;
     double corner_radius_ = 12.0;
 

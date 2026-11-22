@@ -1,7 +1,7 @@
 /**
  * Lollypop C++ - Main Window
  * Four-panel layout: Left Sidebar, Middle Library, Right Now Playing, Bottom Playback
- * Uses AdwApplicationWindow (libadwaita) as the window base.
+ * Uses AdwToolbarView + AdwHeaderBar (libadwaita) for native toolbar.
  */
 
 #pragma once
@@ -24,6 +24,7 @@ class IPlayerService;
 class ThemeManager;
 class ILibraryService;
 class ILyricsService;
+class VolumeDial;
 
 class MainWindow {
 public:
@@ -48,10 +49,16 @@ public:
     // Application accessor
     Application* get_application() const { return app_; }
 
+    // Volume dial accessor
+    VolumeDial* get_volume_dial() const;
+
 private:
     Application* app_;
     GtkWidget* window_;
-    GtkWidget* main_grid_;
+    GtkWidget* toolbar_view_;
+    GtkWidget* header_bar_;
+    GtkWidget* main_box_;
+    GtkWidget* content_grid_;
 
     // Four panels
     std::unique_ptr<LeftSidebar> left_sidebar_;
@@ -66,13 +73,15 @@ private:
     std::unique_ptr<MockLyricsService> lyrics_service_;
 
     void setup_window();
+    void setup_toolbar();
     void setup_layout();
     void setup_css();
     void connect_signals();
     void connect_backend();
+    void disconnect_backend();
 
     // Callbacks
-    static void on_window_close(GtkWindow* window, gpointer user_data);
+    static gboolean on_window_close(GtkWindow* window, gpointer user_data);
 };
 
 } // namespace lollypop

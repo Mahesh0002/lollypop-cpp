@@ -706,11 +706,12 @@ Request one independent tee pad for each branch.
 
 Use `gst_element_request_pad_simple()`.
 
-### Bug A5 — Appsink callback missing
+### Bug A5 — Appsink callback missing (RETIRED - see R-01 design)
 
-Connect the `new-sample` callback and pull samples.
-
-The callback must not perform expensive FFT calculations.
+The old approach of connecting `new-sample` with `Impl*`/`AudioEngine*` cast was retired (see critique.md BUG-02).
+Current design (R-01): Connect safely with `Impl*`/owner, lifetime token, main-context marshalling.
+VisualizerEngine or CavaVisualizer should be constructed in BackendController::initialize() and
+connected to the appsink with proper lifetime guards.
 
 ### Bug A6 — Element creation failures
 

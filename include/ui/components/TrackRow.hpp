@@ -3,6 +3,7 @@
  *
  * Shared track row component used by Songs, Album details, Artist details,
  * Liked Music, and Queue pages (plan Sections 5.7, 5.9, 5.10, 5.11).
+ * Spring animations for hover/press states.
  */
 
 #pragma once
@@ -13,6 +14,7 @@
 #include <functional>
 
 #include "types.hpp"
+#include "ui/animation/SpringAnimation.hpp"
 
 namespace lollypop {
 
@@ -68,6 +70,10 @@ private:
                              double y, gpointer user_data);
     static gboolean on_leave(GtkEventControllerMotion* controller,
                              gpointer user_data);
+    static gboolean on_pressed(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data);
+    static gboolean on_released(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data);
+    void animate_hover(bool hover);
+    void animate_press(bool press);
 };
 
 } // namespace lollypop

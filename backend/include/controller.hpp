@@ -40,7 +40,6 @@ class Dispatcher;
 #include "cava_visualizer.hpp"
 #include "visualizer_engine.hpp"
 #include "cache_manager.hpp"
-#include "artwork_manager.hpp"
 #include "queue_manager.hpp"
 #include "playback_source_manager.hpp"
 
@@ -197,28 +196,59 @@ public:
     CavaVisualizer* get_cava_visualizer() const { return cava_visualizer_.get(); }
     VisualizerEngine* get_visualizer_engine() const { return visualizer_engine_.get(); }
     CacheManager* get_cache_manager() const { return cache_manager_.get(); }
-    ArtworkManager* get_artwork_manager() const { return artwork_manager_.get(); }
     QueueManager* get_queue_manager() const { return queue_manager_.get(); }
     PlaybackSourceManager* get_playback_source_manager() const { return playback_source_manager_.get(); }
 
-    // Callbacks for UI updates
+    // Callbacks for UI updates (multicast - multiple observers supported)
     using TrackChangedCallback = std::function<void(const Track&)>;
     using PositionChangedCallback = std::function<void(double position, double duration)>;
     using PlaybackStateChangedCallback = std::function<void(bool playing)>;
     using QueueChangedCallback = std::function<void(const std::vector<std::string>&)>;
     using VisualizationCallback = std::function<void(const std::vector<float>&)>;
 
-    void set_track_changed_callback(TrackChangedCallback cb) { track_changed_cb_ = std::move(cb); }
-    void set_position_changed_callback(PositionChangedCallback cb) { position_changed_cb_ = std::move(cb); }
-    void set_playback_state_changed_callback(PlaybackStateChangedCallback cb) { playback_state_changed_cb_ = std::move(cb); }
-    void set_queue_changed_callback(QueueChangedCallback cb) { queue_changed_cb_ = std::move(cb); }
-    void set_visualization_changed_callback(VisualizationCallback cb) { visualization_cb_ = std::move(cb); }
+    void add_track_changed_callback(TrackChangedCallback cb) {
+        track_changed_callbacks_.push_back(std::move(cb));
+    }
+    void add_position_changed_callback(PositionChangedCallback cb) {
+        position_changed_callbacks_.push_back(std::move(cb));
+    }
+    void add_playback_state_changed_callback(PlaybackStateChangedCallback cb) {
+        playback_state_changed_callbacks_.push_back(std::move(cb));
+    }
+    void add_queue_changed_callback(QueueChangedCallback cb) {
+        queue_changed_callbacks_.push_back(std::move(cb));
+    }
+    void add_visualization_changed_callback(VisualizationCallback cb) {
+        visualization_callbacks_.push_back(std::move(cb));
+    }
+    void add_library_changed_callback(std::function<void()> cb) {
+        library_changed_callbacks_.push_back(std::move(cb));
+    }
 
-    // Library changed notification - single implementation overrides both
-    // IPlayerService::set_library_changed_callback and
-    // ILibraryService::set_library_changed_callback (same signature).
+    // Legacy single-callback setters (for backward compatibility with IPlayerService)
+    void set_track_changed_callback(TrackChangedCallback cb) override {
+        track_changed_callbacks_.clear();
+        if (cb) track_changed_callbacks_.push_back(std::move(cb));
+    }
+    void set_position_changed_callback(PositionChangedCallback cb) override {
+        position_changed_callbacks_.clear();
+        if (cb) position_changed_callbacks_.push_back(std::move(cb));
+    }
+    void set_playback_state_changed_callback(PlaybackStateChangedCallback cb) override {
+        playback_state_changed_callbacks_.clear();
+        if (cb) playback_state_changed_callbacks_.push_back(std::move(cb));
+    }
+    void set_queue_changed_callback(QueueChangedCallback cb) override {
+        queue_changed_callbacks_.clear();
+        if (cb) queue_changed_callbacks_.push_back(std::move(cb));
+    }
+    void set_visualization_changed_callback(VisualizationCallback cb) override {
+        visualization_callbacks_.clear();
+        if (cb) visualization_callbacks_.push_back(std::move(cb));
+    }
     void set_library_changed_callback(std::function<void()> cb) override {
-        library_changed_cb_ = std::move(cb);
+        library_changed_callbacks_.clear();
+        if (cb) library_changed_callbacks_.push_back(std::move(cb));
     }
 
 private:
@@ -231,7 +261,6 @@ private:
     std::unique_ptr<CavaVisualizer> cava_visualizer_;
     std::unique_ptr<VisualizerEngine> visualizer_engine_;
     std::unique_ptr<CacheManager> cache_manager_;
-    std::unique_ptr<ArtworkManager> artwork_manager_;
     std::unique_ptr<LibraryManager> library_manager_;
     std::unique_ptr<LyricsManager> lyrics_manager_;
 
@@ -240,12 +269,12 @@ private:
     std::unique_ptr<QueueManager> queue_manager_;
     std::unique_ptr<PlaybackSourceManager> playback_source_manager_;
 
-    TrackChangedCallback track_changed_cb_;
-    PositionChangedCallback position_changed_cb_;
-    PlaybackStateChangedCallback playback_state_changed_cb_;
-    QueueChangedCallback queue_changed_cb_;
-    VisualizationCallback visualization_cb_;
-    std::function<void()> library_changed_cb_;
+    std::vector<TrackChangedCallback> track_changed_callbacks_;
+    std::vector<PositionChangedCallback> position_changed_callbacks_;
+    std::vector<PlaybackStateChangedCallback> playback_state_changed_callbacks_;
+    std::vector<QueueChangedCallback> queue_changed_callbacks_;
+    std::vector<VisualizationCallback> visualization_callbacks_;
+    std::vector<std::function<void()>> library_changed_callbacks_;
     ILyricsService::LyricsCallback lyrics_callback_;
 
     // Lyrics result dispatcher (marshals async lyrics to GTK main thread).
@@ -325,6 +354,7 @@ private:
     void emit_position_changed(double position, double duration);
     void emit_playback_state_changed(bool playing);
     void emit_queue_changed();
+    void emit_visualization_changed(const std::vector<float>& points);
     void emit_library_changed();
 };
 

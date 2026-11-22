@@ -1,11 +1,14 @@
 /**
  * Lollypop C++ - AlbumCard Implementation
+ * Spring animations for hover/press states.
  */
 
 #include "ui/components/AlbumCard.hpp"
 #include "main_window.hpp"
+#include "ui/animation/SpringAnimation.hpp"
 
 #include <gtk/gtk.h>
+#include <algorithm>
 #include <iostream>
 
 namespace lollypop {
@@ -24,13 +27,16 @@ void AlbumCard::setup_ui() {
     gtk_widget_add_css_class(widget_.get(), "album-card");
     gtk_widget_set_hexpand(widget_.get(), FALSE);
     gtk_widget_set_valign(widget_.get(), GTK_ALIGN_START);
-    gtk_widget_set_size_request(widget_.get(), 160, 220);
+    // Album cards are square artwork tiles; metadata is intentionally hidden.
+    gtk_widget_set_size_request(widget_.get(), 160, 160);
+    // Consistent spacing on all four sides.
+    gtk_widget_set_margin_start(widget_.get(), 10);
+    gtk_widget_set_margin_end(widget_.get(), 10);
+    gtk_widget_set_margin_top(widget_.get(), 10);
+    gtk_widget_set_margin_bottom(widget_.get(), 10);
+    gtk_widget_set_visible(widget_.get(), TRUE);
 
-    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-    gtk_widget_set_margin_top(box, 8);
-    gtk_widget_set_margin_bottom(box, 8);
-    gtk_widget_set_margin_start(box, 8);
-    gtk_widget_set_margin_end(box, 8);
+    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 
     // Artwork
     artwork_image_.reset(gtk_picture_new());
@@ -38,48 +44,40 @@ void AlbumCard::setup_ui() {
     gtk_picture_set_content_fit(GTK_PICTURE(artwork_image_.get()),
                                 GTK_CONTENT_FIT_COVER);
     gtk_widget_add_css_class(artwork_image_.get(), "album-artwork");
-    gtk_widget_set_size_request(artwork_image_.get(), 140, 140);
+    gtk_widget_set_size_request(artwork_image_.get(), 160, 160);
     if (!album_.artwork_path.empty()) {
-        GFile* file = g_file_new_for_path(album_.artwork_path.c_str());
-        gtk_picture_set_file(GTK_PICTURE(artwork_image_.get()), file);
-        g_object_unref(file);
+        // Scale to the tile size before giving it to GtkPicture: its natural
+        // size otherwise comes from the full-resolution cover and breaks the
+        // square card grid.
+        GError* error = nullptr;
+        GdkPixbuf* source = gdk_pixbuf_new_from_file(album_.artwork_path.c_str(), &error);
+        if (source) {
+            int width = gdk_pixbuf_get_width(source);
+            int height = gdk_pixbuf_get_height(source);
+            int side = std::min(width, height);
+            if (side > 0) {
+                GdkPixbuf* square = gdk_pixbuf_new_subpixbuf(
+                    source, (width - side) / 2, (height - side) / 2, side, side);
+                GdkPixbuf* scaled = gdk_pixbuf_scale_simple(
+                    square, 160, 160, GDK_INTERP_BILINEAR);
+                GdkTexture* texture = gdk_texture_new_for_pixbuf(scaled);
+                gtk_picture_set_paintable(GTK_PICTURE(artwork_image_.get()),
+                                          GDK_PAINTABLE(texture));
+                g_object_unref(texture);
+                g_object_unref(scaled);
+                g_object_unref(square);
+            }
+            g_object_unref(source);
+        } else if (error) {
+            g_error_free(error);
+        }
     }
+    gtk_widget_set_visible(artwork_image_.get(), TRUE);
     gtk_box_append(GTK_BOX(box), artwork_image_.get());
 
-    // Title
-    title_label_.reset(gtk_label_new(album_.title.c_str()));
-    g_object_ref_sink(title_label_.get());
-    gtk_widget_add_css_class(title_label_.get(), "album-title");
-    gtk_label_set_xalign(GTK_LABEL(title_label_.get()), 0.5);
-    gtk_label_set_ellipsize(GTK_LABEL(title_label_.get()),
-                            PANGO_ELLIPSIZE_END);
-    gtk_label_set_width_chars(GTK_LABEL(title_label_.get()), 14);
-    gtk_box_append(GTK_BOX(box), title_label_.get());
-
-    // Artist
-    artist_label_.reset(gtk_label_new(album_.artist.c_str()));
-    g_object_ref_sink(artist_label_.get());
-    gtk_widget_add_css_class(artist_label_.get(), "album-artist");
-    gtk_label_set_xalign(GTK_LABEL(artist_label_.get()), 0.5);
-    gtk_label_set_ellipsize(GTK_LABEL(artist_label_.get()),
-                            PANGO_ELLIPSIZE_END);
-    gtk_label_set_width_chars(GTK_LABEL(artist_label_.get()), 14);
-    gtk_box_append(GTK_BOX(box), artist_label_.get());
-
-    // Play button (revealed on hover/focus)
-    play_button_.reset(gtk_button_new());
-    g_object_ref_sink(play_button_.get());
-    gtk_button_set_has_frame(GTK_BUTTON(play_button_.get()), FALSE);
-    gtk_widget_add_css_class(play_button_.get(), "album-play-button");
-    GtkWidget* play_icon = gtk_image_new_from_icon_name(
-        "media-playback-start-symbolic");
-    gtk_image_set_pixel_size(GTK_IMAGE(play_icon), 20);
-    gtk_button_set_child(GTK_BUTTON(play_button_.get()), play_icon);
-    gtk_widget_set_halign(play_button_.get(), GTK_ALIGN_CENTER);
-    gtk_widget_set_visible(play_button_.get(), FALSE);
-    g_signal_connect(play_button_.get(), "clicked",
-                     G_CALLBACK(on_play_clicked), this);
-    gtk_box_append(GTK_BOX(box), play_button_.get());
+    // The design calls for pure square artwork: no title/artist lines and no
+    // inline play button that would change the card's aspect ratio. Hover
+    // feedback is provided by CSS instead.
 
     gtk_button_set_child(GTK_BUTTON(widget_.get()), box);
 
@@ -93,6 +91,13 @@ void AlbumCard::setup_ui() {
     g_signal_connect(motion_ctrl, "enter", G_CALLBACK(on_enter), this);
     g_signal_connect(motion_ctrl, "leave", G_CALLBACK(on_leave), this);
     gtk_widget_add_controller(widget_.get(), motion_ctrl);
+
+    // Press gesture for spring animation
+    auto* click_gesture = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click_gesture), 0); // All buttons
+    g_signal_connect(click_gesture, "pressed", G_CALLBACK(on_pressed), this);
+    g_signal_connect(click_gesture, "released", G_CALLBACK(on_released), this);
+    gtk_widget_add_controller(widget_.get(), GTK_EVENT_CONTROLLER(click_gesture));
 }
 
 void AlbumCard::set_active(bool active) {
@@ -120,7 +125,8 @@ gboolean AlbumCard::on_enter(GtkEventControllerMotion* controller, double x,
                              double y, gpointer user_data) {
     (void)controller; (void)x; (void)y;
     AlbumCard* self = static_cast<AlbumCard*>(user_data);
-    gtk_widget_set_visible(self->play_button_.get(), TRUE);
+    if (self->play_button_) gtk_widget_set_visible(self->play_button_.get(), TRUE);
+    self->animate_hover(true);
     return FALSE;
 }
 
@@ -128,8 +134,39 @@ gboolean AlbumCard::on_leave(GtkEventControllerMotion* controller,
                              gpointer user_data) {
     (void)controller;
     AlbumCard* self = static_cast<AlbumCard*>(user_data);
-    gtk_widget_set_visible(self->play_button_.get(), FALSE);
+    if (self->play_button_) gtk_widget_set_visible(self->play_button_.get(), FALSE);
+    self->animate_hover(false);
     return FALSE;
+}
+
+gboolean AlbumCard::on_pressed(GtkGestureClick* gesture, int n_press,
+                               double x, double y, gpointer user_data) {
+    (void)gesture; (void)n_press; (void)x; (void)y;
+    AlbumCard* self = static_cast<AlbumCard*>(user_data);
+    self->animate_press(true);
+    return FALSE;
+}
+
+gboolean AlbumCard::on_released(GtkGestureClick* gesture, int n_press,
+                                double x, double y, gpointer user_data) {
+    (void)gesture; (void)n_press; (void)x; (void)y;
+    AlbumCard* self = static_cast<AlbumCard*>(user_data);
+    self->animate_press(false);
+    return FALSE;
+}
+
+void AlbumCard::animate_hover(bool hover) {
+    // GTK widgets have no animatable "scale" property; CSS :hover/:active
+    // handles the visual feedback instead.
+    if (hover) {
+        gtk_widget_add_css_class(widget_.get(), "hover");
+    } else {
+        gtk_widget_remove_css_class(widget_.get(), "hover");
+    }
+}
+
+void AlbumCard::animate_press(bool /*press*/) {
+    // Handled by .album-card:active in CSS.
 }
 
 } // namespace lollypop

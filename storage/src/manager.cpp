@@ -79,7 +79,7 @@ namespace lollypop {
 struct StorageManager::Impl {
     sqlite3* db = nullptr;
     std::string db_path;
-    int schema_version = 4;
+    int schema_version = 5;
 
     std::mutex ro_mutex;
     std::vector<sqlite3*> read_only_connections;
@@ -309,6 +309,20 @@ bool StorageManager::migrate_schema(int from_version, int to_version) {
         }
     }
 
+    if (from_version < 5) {
+        const char* sql = R"(
+            ALTER TABLE albums ADD COLUMN favorite INTEGER DEFAULT 0;
+            ALTER TABLE playlists ADD COLUMN is_smart INTEGER DEFAULT 0;
+            ALTER TABLE playlists ADD COLUMN smart_criteria TEXT DEFAULT '';
+        )";
+        char* error = nullptr;
+        if (sqlite3_exec(impl_->db, sql, nullptr, nullptr, &error) != SQLITE_OK) {
+            std::cerr << "Schema migration v5 failed: " << (error ? error : "unknown") << std::endl;
+            sqlite3_free(error);
+            return false;
+        }
+    }
+
     if (sqlite3_exec(impl_->db,
                      ("PRAGMA user_version = " + std::to_string(to_version) + ";").c_str(),
                      nullptr, nullptr, nullptr) != SQLITE_OK) {
@@ -439,11 +453,25 @@ void StorageManager::backfill_library_index(sqlite3* db) {
 
 bool StorageManager::insert_track(const Track& track) {
     const char* sql = R"(
-        INSERT OR REPLACE INTO tracks (id, title, artist, album, album_artist, genre,
-                                       track_number, disc_number, year, duration,
-                                       file_path, artwork_path, embedded_lyrics, liked, play_count,
-                                       last_played, date_added)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        INSERT INTO tracks (id, title, artist, album, album_artist, genre,
+                            track_number, disc_number, year, duration,
+                            file_path, artwork_path, embedded_lyrics, liked, play_count,
+                            last_played, date_added)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(file_path) DO UPDATE SET
+            title=excluded.title,
+            artist=excluded.artist,
+            album=excluded.album,
+            album_artist=excluded.album_artist,
+            genre=excluded.genre,
+            track_number=excluded.track_number,
+            disc_number=excluded.disc_number,
+            year=excluded.year,
+            duration=excluded.duration,
+            artwork_path=excluded.artwork_path,
+            embedded_lyrics=excluded.embedded_lyrics
+        -- Do NOT update: id, liked, play_count, last_played, date_added
+        ;
     )";
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
@@ -475,11 +503,25 @@ bool StorageManager::insert_tracks_batch(const std::vector<Track>& tracks) {
     if (tracks.empty()) return true;
 
     const char* sql = R"(
-        INSERT OR REPLACE INTO tracks (id, title, artist, album, album_artist, genre,
-                                       track_number, disc_number, year, duration,
-                                       file_path, artwork_path, embedded_lyrics, liked, play_count,
-                                       last_played, date_added)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        INSERT INTO tracks (id, title, artist, album, album_artist, genre,
+                            track_number, disc_number, year, duration,
+                            file_path, artwork_path, embedded_lyrics, liked, play_count,
+                            last_played, date_added)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(file_path) DO UPDATE SET
+            title=excluded.title,
+            artist=excluded.artist,
+            album=excluded.album,
+            album_artist=excluded.album_artist,
+            genre=excluded.genre,
+            track_number=excluded.track_number,
+            disc_number=excluded.disc_number,
+            year=excluded.year,
+            duration=excluded.duration,
+            artwork_path=excluded.artwork_path,
+            embedded_lyrics=excluded.embedded_lyrics
+        -- Do NOT update: id, liked, play_count, last_played, date_added
+        ;
     )";
 
     sqlite3_exec(impl_->db, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
@@ -654,7 +696,10 @@ std::vector<Track> StorageManager::get_tracks_by_genre(const std::string& genre)
 
 std::vector<Track> StorageManager::get_smart_playlist_tracks(const std::string& playlist_id) {
     std::vector<Track> tracks;
-    std::string sql_str = std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks WHERE id IN (SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position);";
+    // Join playlist_tracks and ORDER BY playlist_tracks.position
+    std::string sql_str = std::string("SELECT ") + kTrackColumnsQualified +
+        " FROM tracks t JOIN playlist_tracks pt ON t.id = pt.track_id "
+        "WHERE pt.playlist_id = ? ORDER BY pt.position;";
     const char* sql = sql_str.c_str();
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
@@ -672,7 +717,11 @@ std::vector<Track> StorageManager::search_tracks_fts(const std::string& query) {
     std::string fts_query = build_fts_query(query);
     if (fts_query.empty()) return tracks;
 
-    std::string sql_str = std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks WHERE id IN (SELECT rowid FROM tracks_fts WHERE tracks_fts MATCH ?) ORDER BY bm25(tracks_fts);";
+    // Join FTS table explicitly: tracks.rowid = tracks_fts.rowid
+    // Use alias for MATCH and bm25() to avoid "no such column" error
+    std::string sql_str = std::string("SELECT ") + kTrackColumnsQualified +
+        " FROM tracks t JOIN tracks_fts f ON t.rowid = f.rowid "
+        "WHERE f MATCH ? ORDER BY bm25(f);";
     const char* sql = sql_str.c_str();
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
@@ -689,13 +738,15 @@ std::vector<Track> StorageManager::get_tracks_by_ids(const std::vector<std::stri
     std::vector<Track> tracks;
     if (track_ids.empty()) return tracks;
 
-    std::string placeholders;
+    // Use VALUES CTE with ordinal to preserve input order
+    std::string sql = "WITH input_ids(id, ord) AS (VALUES ";
     for (size_t i = 0; i < track_ids.size(); ++i) {
-        if (i > 0) placeholders += ",";
-        placeholders += "?";
+        if (i > 0) sql += ", ";
+        sql += "(?, " + std::to_string(i) + ")";
     }
+    sql += ") SELECT " + std::string(kTrackColumnsQualified) +
+           " FROM tracks t JOIN input_ids i ON t.id = i.id ORDER BY i.ord;";
 
-    std::string sql = "SELECT " + std::string(kTrackColumnsQualified) + " FROM tracks WHERE id IN (" + placeholders + ");";
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
         for (size_t i = 0; i < track_ids.size(); ++i) {
@@ -711,6 +762,22 @@ std::vector<Track> StorageManager::get_tracks_by_ids(const std::vector<std::stri
 
 std::vector<Album> StorageManager::get_all_albums() {
     std::vector<Album> albums;
+
+    // Load all tracks once and group by album title to avoid N+1 queries.
+    // Previously we called get_tracks_by_album() per album (N extra queries).
+    std::unordered_map<std::string, std::vector<std::string>> tracks_by_album_title;
+    const char* track_sql = "SELECT id, album FROM tracks ORDER BY track_number;";
+    sqlite3_stmt* track_stmt;
+    if (sqlite3_prepare_v2(impl_->db, track_sql, -1, &track_stmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(track_stmt) == SQLITE_ROW) {
+            std::string track_id = column_text(track_stmt, 0);
+            std::string album_title = column_text(track_stmt, 1);
+            tracks_by_album_title[album_title].push_back(track_id);
+        }
+        sqlite3_finalize(track_stmt);
+    }
+
+    // Load all albums.
     const char* sql = "SELECT id, title, artist, year, artwork_path, date_added FROM albums ORDER BY title;";
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
@@ -722,8 +789,15 @@ std::vector<Album> StorageManager::get_all_albums() {
             album.year = sqlite3_column_int(stmt, 3);
             album.artwork_path = column_text(stmt, 4);
             album.date_added = sqlite3_column_int64(stmt, 5);
-            auto tracks = get_tracks_by_album(album.id);
-            for (const auto& t : tracks) album.track_ids.push_back(t.id);
+
+            // Look up tracks already loaded in memory (matched by album title,
+            // same as get_tracks_by_album() does internally).
+            auto it = tracks_by_album_title.find(album.title);
+            if (it != tracks_by_album_title.end()) {
+                for (const auto& tid : it->second) {
+                    album.track_ids.push_back(tid);
+                }
+            }
             albums.push_back(std::move(album));
         }
         sqlite3_finalize(stmt);
@@ -733,7 +807,25 @@ std::vector<Album> StorageManager::get_all_albums() {
 
 std::vector<Album> StorageManager::get_albums_by_artist(const std::string& artist_id) {
     std::vector<Album> albums;
-    const char* sql = "SELECT id, title, artist, year, artwork_path, date_added FROM albums WHERE artist = ? ORDER BY year, title;";
+    // Resolve artist id -> name first, then join artist_albums
+    std::string artist_name;
+    {
+        const char* sql = "SELECT name FROM artists WHERE id = ?;";
+        sqlite3_stmt* stmt;
+        if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, artist_id.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                artist_name = column_text(stmt, 0);
+            }
+            sqlite3_finalize(stmt);
+        }
+    }
+    if (artist_name.empty()) return albums;
+
+    // Get albums via artist_albums join
+    const char* sql = "SELECT a.id, a.title, a.artist, a.year, a.artwork_path, a.date_added "
+                      "FROM albums a JOIN artist_albums aa ON a.id = aa.album_id "
+                      "WHERE aa.artist_id = ? ORDER BY a.year, a.title;";
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         sqlite3_bind_text(stmt, 1, artist_id.c_str(), -1, SQLITE_TRANSIENT);
@@ -800,7 +892,10 @@ std::vector<Album> StorageManager::get_favourite_albums() {
 
 std::vector<Track> StorageManager::get_tracks_by_album(const std::string& album_id) {
     std::vector<Track> tracks;
-    std::string sql_str = std::string("SELECT ") + kTrackColumnsQualified + " FROM tracks WHERE album = (SELECT title FROM albums WHERE id = ?) ORDER BY track_number;";
+    // Join album_tracks to get tracks for this album_id (not just by title)
+    std::string sql_str = std::string("SELECT ") + kTrackColumnsQualified +
+        " FROM tracks t JOIN album_tracks at ON t.id = at.track_id "
+        "WHERE at.album_id = ? ORDER BY t.track_number;";
     const char* sql = sql_str.c_str();
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
@@ -815,6 +910,23 @@ std::vector<Track> StorageManager::get_tracks_by_album(const std::string& album_
 
 std::vector<Artist> StorageManager::get_all_artists() {
     std::vector<Artist> artists;
+
+    // Load all albums once and group by artist name to avoid N+1 queries.
+    // Previously we called get_albums_by_artist() per artist (N extra queries),
+    // which itself called get_tracks_by_album() per album (N*N extra queries).
+    std::unordered_map<std::string, std::vector<std::string>> albums_by_artist_name;
+    const char* album_sql = "SELECT id, title, artist FROM albums ORDER BY title;";
+    sqlite3_stmt* album_stmt;
+    if (sqlite3_prepare_v2(impl_->db, album_sql, -1, &album_stmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(album_stmt) == SQLITE_ROW) {
+            std::string album_id = column_text(album_stmt, 0);
+            std::string artist_name = column_text(album_stmt, 2);
+            albums_by_artist_name[artist_name].push_back(album_id);
+        }
+        sqlite3_finalize(album_stmt);
+    }
+
+    // Load all artists.
     const char* sql = "SELECT id, name, date_added FROM artists ORDER BY name;";
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
@@ -823,8 +935,14 @@ std::vector<Artist> StorageManager::get_all_artists() {
             artist.id = column_text(stmt, 0);
             artist.name = column_text(stmt, 1);
             artist.date_added = sqlite3_column_int64(stmt, 2);
-            auto albums = get_albums_by_artist(artist.id);
-            for (const auto& a : albums) artist.album_ids.push_back(a.id);
+
+            // Look up albums already loaded in memory (matched by artist name).
+            auto it = albums_by_artist_name.find(artist.name);
+            if (it != albums_by_artist_name.end()) {
+                for (const auto& aid : it->second) {
+                    artist.album_ids.push_back(aid);
+                }
+            }
             artists.push_back(std::move(artist));
         }
         sqlite3_finalize(stmt);
@@ -1074,20 +1192,37 @@ bool StorageManager::add_genre_edge(const std::string& parent, const std::string
 
 std::vector<std::string> StorageManager::get_library_roots() const {
     std::vector<std::string> roots;
-    const char* sql = "SELECT DISTINCT file_path FROM tracks;";
+    // First, try to get stored library roots from preferences
+    const char* sql = "SELECT value FROM preferences WHERE key LIKE 'library_root_%' ORDER BY key;";
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
         while (sqlite3_step(stmt) == SQLITE_ROW) {
             std::string path = column_text(stmt, 0);
-            auto pos = path.find_last_of('/');
-            if (pos != std::string::npos) {
-                path = path.substr(0, pos);
-            }
-            if (std::find(roots.begin(), roots.end(), path) == roots.end()) {
+            if (!path.empty() &&
+                std::find(roots.begin(), roots.end(), path) == roots.end()) {
                 roots.push_back(path);
             }
         }
         sqlite3_finalize(stmt);
+    }
+    
+    // Fallback: derive from tracks if no stored roots
+    if (roots.empty()) {
+        const char* fallback_sql = "SELECT DISTINCT file_path FROM tracks;";
+        if (sqlite3_prepare_v2(impl_->db, fallback_sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                std::string path = column_text(stmt, 0);
+                auto pos = path.find_last_of('/');
+                if (pos != std::string::npos) {
+                    path = path.substr(0, pos);
+                }
+                if (!path.empty() &&
+                    std::find(roots.begin(), roots.end(), path) == roots.end()) {
+                    roots.push_back(path);
+                }
+            }
+            sqlite3_finalize(stmt);
+        }
     }
     return roots;
 }
@@ -1267,9 +1402,25 @@ bool StorageManager::is_library_root(const std::string& path) const {
 }
 
 bool StorageManager::delete_tracks_under_path(const std::string& directory_path) {
-    const char* sql = "DELETE FROM tracks WHERE file_path LIKE ?;";
+    // Normalize path: ensure it ends with a separator
+    std::string normalized = directory_path;
+    if (!normalized.empty() && normalized.back() != '/') {
+        normalized += '/';
+    }
+    
+    // Escape special LIKE characters (% and _)
+    std::string pattern;
+    pattern.reserve(normalized.size() + 2);
+    for (char c : normalized) {
+        if (c == '%' || c == '_' || c == '\\') {
+            pattern += '\\';
+        }
+        pattern += c;
+    }
+    pattern += '%';
+
+    const char* sql = "DELETE FROM tracks WHERE file_path LIKE ? ESCAPE '\\';";
     sqlite3_stmt* stmt;
-    std::string pattern = directory_path + "%";
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
     sqlite3_bind_text(stmt, 1, pattern.c_str(), -1, SQLITE_TRANSIENT);
     int rc = sqlite3_step(stmt);

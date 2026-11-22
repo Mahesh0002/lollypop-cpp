@@ -43,7 +43,9 @@ private:
     std::unique_ptr<GtkWidget, WidgetDeleter> scrolled_window_;
     std::unique_ptr<GtkWidget, WidgetDeleter> list_box_;
     std::unique_ptr<GtkWidget, WidgetDeleter> header_box_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> query_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> empty_state_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> empty_desc_;
 
     MainWindow* main_window_;
     ILibraryService* library_service_;
@@ -57,9 +59,9 @@ private:
     std::vector<Track> remaining_tracks_;
 
     std::mutex load_mutex_;
+    guint idle_source_id_ = 0;
 
     void setup_ui();
-    void create_header(GtkWidget* main_box);
     void do_search(const std::string& query, uint64_t generation);
     void append_tracks(std::vector<Track>&& tracks);
     void show_empty_state(const std::string& message);

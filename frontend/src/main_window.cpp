@@ -1,7 +1,7 @@
 /**
  * Lollypop C++ - Main Window Implementation
  * Four-panel layout as per design specification.
- * Uses AdwApplicationWindow (libadwaita) as the window base.
+ * Uses AdwToolbarView + AdwHeaderBar (libadwaita) for native toolbar.
  */
 
 #include "main_window.hpp"
@@ -15,7 +15,10 @@
 #include "services/ILibraryService.hpp"
 #include "services/MockLibraryService.hpp"
 #include "services/MockLyricsService.hpp"
+#include "ui/components/VolumeDial.hpp"
+#include "config/i18n.hpp"
 
+#include <adwaita.h>
 #include <gtk/gtk.h>
 #include <iostream>
 #include <vector>
@@ -25,7 +28,10 @@ namespace lollypop {
 MainWindow::MainWindow(Application* app)
     : app_(app),
       window_(nullptr),
-      main_grid_(nullptr) {
+      toolbar_view_(nullptr),
+      header_bar_(nullptr),
+      main_box_(nullptr),
+      content_grid_(nullptr) {
     setup_window();
     setup_layout();
     setup_css();
@@ -34,35 +40,79 @@ MainWindow::MainWindow(Application* app)
 }
 
 MainWindow::~MainWindow() {
-    // The callback captures `this`; clear it before the window's child
-    // widgets are destroyed. The backend may outlive the window.
-    if (app_) {
-        if (auto* library_service =
-                dynamic_cast<ILibraryService*>(app_->get_backend())) {
-            library_service->set_library_changed_callback(nullptr);
-        }
-    }
+    // Disconnect all backend callbacks before window/widgets are destroyed.
+    // The backend may outlive MainWindow, so raw `this` captures would dangle.
+    disconnect_backend();
+
     if (window_) {
         g_object_unref(window_);
     }
 }
 
+void MainWindow::disconnect_backend() {
+    IPlayerService* backend = app_->get_backend();
+    if (!backend) return;
+
+    // Clear every callback set in connect_backend() using legacy setters
+    // which will clear the multicast lists
+    backend->set_track_changed_callback(nullptr);
+    backend->set_position_changed_callback(nullptr);
+    backend->set_visualization_changed_callback(nullptr);
+    backend->set_playback_state_changed_callback(nullptr);
+    backend->set_queue_changed_callback(nullptr);
+
+    if (auto* library_service =
+            dynamic_cast<ILibraryService*>(app_->get_backend())) {
+        library_service->set_library_changed_callback(nullptr);
+    }
+}
+
 void MainWindow::setup_window() {
-    window_ = gtk_application_window_new(GTK_APPLICATION(app_->get_gtk_application()));
-    gtk_window_set_title(GTK_WINDOW(window_), "Lollypop");
+    window_ = adw_application_window_new(GTK_APPLICATION(app_->get_gtk_application()));
+    // No window title - keep the header bar clean (no "lollypop-cpp" text).
+    gtk_window_set_title(GTK_WINDOW(window_), "");
     gtk_window_set_default_size(GTK_WINDOW(window_), 1440, 900);
     gtk_window_set_decorated(GTK_WINDOW(window_), TRUE);
+    gtk_widget_set_visible(window_, TRUE);
 
-    // Set content child
-    GtkWidget* content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_window_set_child(GTK_WINDOW(window_), content);
+    // Create toolbar view
+    toolbar_view_ = adw_toolbar_view_new();
+    gtk_widget_set_hexpand(toolbar_view_, TRUE);
+    gtk_widget_set_vexpand(toolbar_view_, TRUE);
+    gtk_widget_set_visible(toolbar_view_, TRUE);
 
-    main_grid_ = gtk_grid_new();
-    gtk_grid_set_row_homogeneous(GTK_GRID(main_grid_), FALSE);
-    gtk_grid_set_column_homogeneous(GTK_GRID(main_grid_), FALSE);
-    gtk_widget_set_hexpand(main_grid_, TRUE);
-    gtk_widget_set_vexpand(main_grid_, TRUE);
-    gtk_box_append(GTK_BOX(content), main_grid_);
+    // Create header bar
+    header_bar_ = adw_header_bar_new();
+    gtk_widget_add_css_class(header_bar_, "main-header-bar");
+    gtk_widget_set_visible(header_bar_, TRUE);
+
+    // Add header bar to toolbar view
+    adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar_view_), header_bar_);
+
+    // Main content container
+    main_box_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_hexpand(main_box_, TRUE);
+    gtk_widget_set_vexpand(main_box_, TRUE);
+    gtk_widget_set_visible(main_box_, TRUE);
+    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view_), main_box_);
+
+    // Content grid
+    content_grid_ = gtk_grid_new();
+    gtk_grid_set_row_homogeneous(GTK_GRID(content_grid_), FALSE);
+    gtk_grid_set_column_homogeneous(GTK_GRID(content_grid_), FALSE);
+    gtk_widget_set_hexpand(content_grid_, TRUE);
+    gtk_widget_set_vexpand(content_grid_, TRUE);
+    gtk_widget_set_visible(content_grid_, TRUE);
+    gtk_box_append(GTK_BOX(main_box_), content_grid_);
+
+    // Set toolbar view as window content (AdwApplicationWindow specific)
+    adw_application_window_set_content(ADW_APPLICATION_WINDOW(window_), toolbar_view_);
+}
+
+void MainWindow::setup_toolbar() {
+    // Window title is already set in setup_window()
+    // The header bar shows the window title by default
+    // Sidebar toggle is handled within the sidebar itself
 }
 
 void MainWindow::setup_layout() {
@@ -78,6 +128,9 @@ void MainWindow::setup_layout() {
     right_now_playing_ = std::make_unique<RightNowPlaying>(this, lyrics_service, library_service);
     bottom_playback_ = std::make_unique<BottomPlayback>(this);
 
+    // Setup toolbar after panels are created
+    setup_toolbar();
+
     // Get panel widgets
     GtkWidget* left_widget = left_sidebar_->get_widget();
     GtkWidget* middle_widget = middle_library_->get_widget();
@@ -87,13 +140,13 @@ void MainWindow::setup_layout() {
     // Attach to grid: 3 columns (left, middle, right), 2 rows (main, bottom)
     // Row 0: Left | Middle | Right
     // Row 1: Bottom (spans all 3 columns)
-    gtk_grid_attach(GTK_GRID(main_grid_), left_widget, 0, 0, 1, 1);
-    gtk_grid_attach(GTK_GRID(main_grid_), middle_widget, 1, 0, 1, 1);
-    gtk_grid_attach(GTK_GRID(main_grid_), right_widget, 2, 0, 1, 1);
-    gtk_grid_attach(GTK_GRID(main_grid_), bottom_widget, 0, 1, 3, 1);
+    gtk_grid_attach(GTK_GRID(content_grid_), left_widget, 0, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(content_grid_), middle_widget, 1, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(content_grid_), right_widget, 2, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(content_grid_), bottom_widget, 0, 1, 3, 1);
 
     // Set column expansion: middle gets most space
-    gtk_grid_set_column_homogeneous(GTK_GRID(main_grid_), FALSE);
+    gtk_grid_set_column_homogeneous(GTK_GRID(content_grid_), FALSE);
 
     // Left sidebar: fixed width controlled by LeftSidebar (compact 42px, expanded 220px)
     gtk_widget_set_hexpand(left_widget, FALSE);
@@ -102,21 +155,19 @@ void MainWindow::setup_layout() {
     gtk_widget_set_hexpand(middle_widget, TRUE);
     gtk_widget_set_vexpand(middle_widget, TRUE);
 
-    // Right panel: ~25% width, minimum 300px
-    gtk_widget_set_size_request(right_widget, 300, -1);
+    // Right panel: fixed comfortable width; its contents expand to fill it and
+    // adapt to the panel's real allocation via RightNowPlaying's size monitor.
+    gtk_widget_set_size_request(right_widget, 340, -1);
     gtk_widget_set_hexpand(right_widget, FALSE);
     gtk_widget_set_vexpand(right_widget, TRUE);
 
-    // Initialize adaptive artwork sizing for default window height (900)
-    right_now_playing_->set_panel_height(900);
-
-    // Bottom panel: full width, fixed height ~104 px (per plan)
-    gtk_widget_set_size_request(bottom_widget, -1, 104);
+    // Bottom panel: full width, compact fixed height matching its 56px artwork.
+    gtk_widget_set_size_request(bottom_widget, -1, 76);
     gtk_widget_set_hexpand(bottom_widget, TRUE);
     gtk_widget_set_vexpand(bottom_widget, FALSE);
 
     // Set row expansion
-    gtk_grid_set_row_homogeneous(GTK_GRID(main_grid_), FALSE);
+    gtk_grid_set_row_homogeneous(GTK_GRID(content_grid_), FALSE);
 }
 
 void MainWindow::setup_css() {
@@ -140,7 +191,7 @@ void MainWindow::connect_backend() {
     if (!backend) return;
 
     // Track changed → update both playback panels + request lyrics
-    backend->set_track_changed_callback([this](const Track& track) {
+    backend->add_track_changed_callback([this](const Track& track) {
         bottom_playback_->update_track_info(track.title, track.artist,
                                             track.artwork_path);
         right_now_playing_->update_track_info(track.title, track.artist,
@@ -150,26 +201,26 @@ void MainWindow::connect_backend() {
     });
 
     // Position changed → update both playback panels
-    backend->set_position_changed_callback([this](double position,
+    backend->add_position_changed_callback([this](double position,
                                                    double duration) {
         bottom_playback_->update_playback_position(position, duration);
         right_now_playing_->update_playback_position(position, duration);
     });
 
-    // Visualization changed → update waveform widgets in both panels
-    backend->set_visualization_changed_callback([this](const std::vector<float>& points) {
-        bottom_playback_->set_points(points);
+    // Visualization changed → update the now-playing panel only. The bottom
+    // bar uses a deterministic sine wave and deliberately has no visualizer.
+    backend->add_visualization_changed_callback([this](const std::vector<float>& points) {
         right_now_playing_->set_points(points);
     });
 
     // Playback state changed → update both panels
-    backend->set_playback_state_changed_callback([this](bool playing) {
+    backend->add_playback_state_changed_callback([this](bool playing) {
         bottom_playback_->set_playing(playing);
         right_now_playing_->set_playing(playing);
     });
 
     // Queue changed → update RightNowPlaying queue view
-    backend->set_queue_changed_callback([this](const std::vector<std::string>& queue_ids) {
+    backend->add_queue_changed_callback([this](const std::vector<std::string>& queue_ids) {
         right_now_playing_->set_queue(queue_ids);
     });
 
@@ -184,7 +235,7 @@ void MainWindow::connect_backend() {
     // Library changed (scan finished, file watcher event, like/favourite
     // change) → refresh the page the user is currently looking at.
     if (auto* library_service = dynamic_cast<ILibraryService*>(backend)) {
-        library_service->set_library_changed_callback([this]() {
+        library_service->add_library_changed_callback([this]() {
             if (middle_library_) middle_library_->refresh_active_page();
         });
     }
@@ -192,12 +243,9 @@ void MainWindow::connect_backend() {
     // Enable playback mode buttons (shuffle/repeat/loop) - they control the backend
     right_now_playing_->set_controls_sensitive(true);
 
-    // Shell media controls are the playback authority for transport (play/pause/next/prev/seek/volume).
-    // GTK transport buttons stay insensitive; mode buttons (shuffle/repeat/loop) are active.
-    bottom_playback_->set_controls_sensitive(false);
-    // RightNowPlaying transport buttons stay insensitive; mode buttons are active.
-    // We'll enable only the mode buttons, not prev/next.
-    right_now_playing_->set_transport_controls_sensitive(false);
+    // Bottom transport buttons now work (play/pause, prev, next, seek).
+    bottom_playback_->set_controls_sensitive(true);
+    right_now_playing_->set_transport_controls_sensitive(true);
 
     std::cout << "MainWindow: Backend callbacks connected" << std::endl;
 }
@@ -208,10 +256,11 @@ void MainWindow::present() {
     }
 }
 
-void MainWindow::on_window_close(GtkWindow* window, gpointer user_data) {
+gboolean MainWindow::on_window_close(GtkWindow* window, gpointer user_data) {
+    (void)window;
     MainWindow* self = static_cast<MainWindow*>(user_data);
     // Allow close, cleanup happens in destructor
-    return;
+    return FALSE;
 }
 
 IPlayerService* MainWindow::get_backend() const {
@@ -220,6 +269,10 @@ IPlayerService* MainWindow::get_backend() const {
 
 ThemeManager* MainWindow::get_theme_manager() const {
     return app_ ? app_->get_theme_manager() : nullptr;
+}
+
+VolumeDial* MainWindow::get_volume_dial() const {
+    return bottom_playback_ ? bottom_playback_->get_volume_dial() : nullptr;
 }
 
 } // namespace lollypop

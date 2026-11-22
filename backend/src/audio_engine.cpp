@@ -1,23 +1,19 @@
 /**
  * Lollypop C++ - Audio Engine Implementation
- * GStreamer-based audio playback with visualization support
+ * GStreamer-based audio playback with visualization support.
  *
- * Pipeline layout (custom audio sink wrapped in a GstBin):
+ * Simple pipeline (no playbin wrapper, which caused heap-use-free crashes):
  *
- *   playbin --(audio-sink)-->
- *     +-- bin "audio-sink-bin"
- *         +-- tee "tee"
- *             |-- (src pad 1) -- queue "viz-queue" (leaky=downstream)
- *             |             -- audioconvert -- audioresample -- capsfilter
- *             |             -- appsink "viz-sink" (max-buffers=1, drop=true, sync=false)
- *             |-- (src pad 2) -- queue "audio-queue"
- *             |             -- volume "audio-volume" (post-tee, so the
- *             |                visualizer always sees raw unscaled audio)
- *             |             -- autoaudiosink "audio-sink"
+ *   filesrc "filesrc" -- decodebin "decodebin" -- audioconvert -- audioresample
+ *       -- tee "tee"
+ *           |-- (src pad 1) -- queue "viz-queue" (leaky=downstream)
+ *           |             -- audioconvert -- audioresample -- capsfilter
+ *           |             -- appsink "viz-sink" (max-buffers=1, drop=true)
+ *           |-- (src pad 2) -- queue "audio-queue"
+ *           |             -- volume "audio-volume"
+ *           |             -- autoaudiosink "audio-sink"
  *
- * Volume is controlled via a post-tee volume element on the output branch,
- * not via playbin's volume property. That keeps the visualization branch
- * fed with full-scale audio even at low playback volume.
+ * Volume is controlled via a post-tee volume element on the output branch.
  */
 
 #include "audio_engine.hpp"
@@ -26,32 +22,37 @@
 #include <gst/audio/audio.h>
 #include <gst/app/gstappsink.h>
 #include <glib.h>
+#include <unistd.h>
 #include <iostream>
 #include <algorithm>
-#include <atomic>
 #include <mutex>
 #include <optional>
 #include <vector>
+#include <atomic>
 
 namespace lollypop {
 
 struct AudioEngine::Impl {
     GstElement* pipeline = nullptr;
-    GstElement* playbin = nullptr;
-
-    // Custom audio sink bin elements
-    GstElement* sink_bin = nullptr;
-    GstElement* tee = nullptr;
-    GstElement* viz_queue = nullptr;
-    GstElement* audio_queue = nullptr;
+    GstElement* filesrc = nullptr;
+    GstElement* decodebin = nullptr;
     GstElement* audioconvert = nullptr;
     GstElement* audioresample = nullptr;
-    GstElement* capsfilter = nullptr;
+    GstElement* tee = nullptr;
+
+    // Visualization branch
+    GstElement* viz_queue = nullptr;
+    GstElement* viz_audioconvert = nullptr;
+    GstElement* viz_audioresample = nullptr;
+    GstElement* viz_capsfilter = nullptr;
     GstElement* appsink = nullptr;
+
+    // Audio output branch
+    GstElement* audio_queue = nullptr;
     GstElement* volume_element = nullptr;
     GstElement* autoaudiosink = nullptr;
 
-    // Requested tee source pads (released during shutdown)
+    // Requested tee source pads
     GstPad* tee_viz_pad = nullptr;
     GstPad* tee_audio_pad = nullptr;
 
@@ -61,45 +62,42 @@ struct AudioEngine::Impl {
     // Callback storage (protected by callback_mutex for thread safety)
     std::mutex callback_mutex;
     std::function<void(double position, double duration)> position_cb;
-    std::function<void(AudioEngine::PlaybackState)> state_cb;
+    std::function<void(PlaybackState)> state_cb;
     std::function<void()> eos_cb;
     std::function<void(const std::string&)> error_cb;
     std::function<void(const float*, size_t)> viz_cb;
 
-    // Playback state machine. Seeking and Buffering are orthogonal flags,
-    // not states. Allowed transitions are enforced via kAllowed below.
-    // current_state and the buffering bookkeeping are guarded by callback_mutex
-    // (callbacks are always invoked *without* holding the lock to avoid
-    // deadlocks when a callback re-enters a locking API).
-    AudioEngine::PlaybackState current_state = AudioEngine::PlaybackState::Stopped;
-    bool seeking = false;
+    // Playback state
+    PlaybackState current_state = PlaybackState::Stopped;
     bool buffering = false;
-    // The meaningful state (Playing/Paused) to restore to when buffering ends.
-    AudioEngine::PlaybackState state_before_buffering = AudioEngine::PlaybackState::Stopped;
+    PlaybackState state_before_buffering = PlaybackState::Stopped;
     double volume_ = 0.7;
     bool initialized = false;
 
-    // Pipeline edges declared explicitly so every link is checked in a loop
-    // and reachability can be verified before PLAYING.
-    struct Edge { GstElement* src; GstElement* dst; };
+    // Generation token for load/seek operations
+    std::atomic<uint64_t> load_generation{0};
+    std::atomic<uint64_t> seek_generation{0};
+    std::atomic<gint64> pending_seek_position{0};
+    std::atomic<bool> seek_pending{false};
+
+    // Audio pad linked flag
+    bool audio_pad_linked = false;
 
     static gboolean bus_callback(GstBus* bus, GstMessage* msg, gpointer user_data);
     static gboolean position_timeout(gpointer user_data);
     void handle_message(GstMessage* msg);
     void update_position();
-    bool set_gst_state(AudioEngine::PlaybackState state);
+    bool set_gst_state(PlaybackState state);
 
-    bool build_pipeline();
+    bool build_pipeline(const std::string& uri);
     void destroy_pipeline();
+    static void on_decodebin_pad_added(GstElement* decodebin, GstPad* pad,
+                                       gpointer user_data);
     GstPad* request_tee_pad(const char* pad_name);
-    bool verify_reachability();
 };
 
 // ---------------------------------------------------------------------------
-// Playback state transition table (Bug 8)
-//
-// Rows/cols: Stopped, Playing, Paused, Buffering, Error
-// Seeking and Buffering are flags, not states.
+// Playback state transition table
 // ---------------------------------------------------------------------------
 constexpr bool kAllowedTransitions[5][5] = {
     // from Stopped
@@ -114,9 +112,7 @@ constexpr bool kAllowedTransitions[5][5] = {
     { true,  false, false, false, true },
 };
 
-bool AudioEngine::Impl::set_gst_state(AudioEngine::PlaybackState state) {
-    // Enforce the transition table. Buffering/Seeking are handled as flags
-    // elsewhere and never transition through here as states.
+bool AudioEngine::Impl::set_gst_state(PlaybackState state) {
     {
         std::lock_guard<std::mutex> lock(callback_mutex);
         const size_t from = static_cast<size_t>(current_state);
@@ -131,30 +127,28 @@ bool AudioEngine::Impl::set_gst_state(AudioEngine::PlaybackState state) {
 
     GstState gst_state;
     switch (state) {
-        case AudioEngine::PlaybackState::Playing:
+        case PlaybackState::Playing:
             gst_state = GST_STATE_PLAYING;
             break;
-        case AudioEngine::PlaybackState::Paused:
+        case PlaybackState::Paused:
             gst_state = GST_STATE_PAUSED;
             break;
-        case AudioEngine::PlaybackState::Stopped:
+        case PlaybackState::Stopped:
             gst_state = GST_STATE_NULL;
             break;
-        case AudioEngine::PlaybackState::Buffering:
-        case AudioEngine::PlaybackState::Error:
-            // These are flag-driven or terminal; do not drive the pipeline
-            // directly from here.
+        case PlaybackState::Buffering:
+        case PlaybackState::Error:
             return false;
     }
-    // Release callback_mutex before driving the pipeline: gst_element_set_state
-    // can synchronously emit GST_MESSAGE_STATE_CHANGED, which re-acquires
-    // callback_mutex in handle_message(). Holding it here would deadlock.
+
     GstStateChangeReturn ret =
-        gst_element_set_state(pipeline, gst_state);
+        gst_element_set_state(GST_ELEMENT(pipeline), gst_state);
     if (ret == GST_STATE_CHANGE_FAILURE) {
-        std::cerr << "AudioEngine: Failed to set pipeline state" << std::endl;
+        std::cerr << "AudioEngine: Failed to set pipeline state to "
+                  << static_cast<int>(state) << std::endl;
         return false;
     }
+
     {
         std::lock_guard<std::mutex> lock(callback_mutex);
         current_state = state;
@@ -177,67 +171,48 @@ bool AudioEngine::initialize() {
         gst_init(nullptr, nullptr);
     }
 
-    if (impl_->initialized) {
+    Impl* impl = impl_.get();
+    if (impl->initialized) {
         return true;
     }
 
-    impl_->pipeline = gst_pipeline_new("audio-pipeline");
-    if (!impl_->pipeline) {
+    // Create the pipeline (NOT playbin - playbin wrapper caused crashes).
+    impl->pipeline = gst_pipeline_new("audio-pipeline");
+    if (!impl->pipeline) {
         std::cerr << "AudioEngine: Failed to create pipeline" << std::endl;
         return false;
     }
 
-    impl_->playbin = gst_element_factory_make("playbin", "player");
-    if (!impl_->playbin) {
-        std::cerr << "AudioEngine: Failed to create playbin" << std::endl;
-        gst_object_unref(impl_->pipeline);
-        impl_->pipeline = nullptr;
-        return false;
-    }
-
-    // Add playbin to the pipeline.
-    gst_bin_add(GST_BIN(impl_->pipeline), impl_->playbin);
-
-    // Build the custom audio sink bin (tee + queues + appsink + autoaudiosink).
-    if (!impl_->build_pipeline()) {
-        std::cerr << "AudioEngine: Failed to build custom audio sink pipeline"
-                  << std::endl;
-        impl_->destroy_pipeline();
-        return false;
-    }
-
-    // Set playbin's audio-sink to our custom bin.
-    g_object_set(impl_->playbin, "audio-sink", impl_->sink_bin, nullptr);
-
     // Bus watch for messages.
-    GstBus* bus = gst_pipeline_get_bus(GST_PIPELINE(impl_->pipeline));
-    impl_->bus_watch_id = gst_bus_add_watch(bus, Impl::bus_callback, this);
+    GstBus* bus = gst_pipeline_get_bus(GST_PIPELINE(impl->pipeline));
+    impl->bus_watch_id = gst_bus_add_watch(bus, Impl::bus_callback, this);
     gst_object_unref(bus);
 
-    // Position polling timer (100ms = 10fps). Runs regardless of state so we
-    // can report progress while loading, paused, or transitioning.
-    impl_->position_timeout_id = g_timeout_add(100, Impl::position_timeout, this);
+    // Position polling timer (100ms = 10fps).
+    impl->position_timeout_id = g_timeout_add(100, Impl::position_timeout,
+                                              this);
 
-    // Set pipeline to READY state. In headless/CI environments without an
-    // audio device this may fail; treat it as a warning rather than a hard
-    // failure so the engine can still be constructed and tested. The actual
-    // playback state transition is validated when load_track()/play() runs.
-    GstStateChangeReturn ret =
-        gst_element_set_state(impl_->pipeline, GST_STATE_READY);
-    if (ret == GST_STATE_CHANGE_FAILURE) {
-        std::cerr << "AudioEngine: Warning: could not set pipeline to READY "
-                     "(no audio device available). Playback may fail."
-                  << std::endl;
+    // Build the pipeline elements.
+    if (!impl->build_pipeline("")) {
+        return false;
     }
 
-    impl_->initialized = true;
-    impl_->current_state = AudioEngine::PlaybackState::Stopped;
+    impl->initialized = true;
+    impl->current_state = PlaybackState::Stopped;
     return true;
 }
 
 void AudioEngine::shutdown() {
     Impl* impl = impl_.get();
     if (!impl) return;
+
+    // Stop any ongoing playback first
+    if (impl->pipeline) {
+        gst_element_set_state(GST_ELEMENT(impl->pipeline), GST_STATE_NULL);
+        // Wait for the state change to complete (with timeout)
+        GstState state, pending;
+        gst_element_get_state(GST_ELEMENT(impl->pipeline), &state, &pending, 2 * GST_SECOND);
+    }
 
     // Remove the position timer first so no more callbacks fire.
     if (impl->position_timeout_id) {
@@ -257,41 +232,16 @@ void AudioEngine::shutdown() {
         g_object_set(impl->appsink, "emit-signals", FALSE, nullptr);
     }
 
-    // Release requested tee pads.
-    if (impl->tee_viz_pad) {
-        gst_object_unref(impl->tee_viz_pad);
-        impl->tee_viz_pad = nullptr;
-    }
-    if (impl->tee_audio_pad) {
-        gst_object_unref(impl->tee_audio_pad);
-        impl->tee_audio_pad = nullptr;
+    // Disconnect decodebin pad-added handler
+    if (impl->decodebin) {
+        g_signal_handlers_disconnect_by_func(impl->decodebin,
+                                             reinterpret_cast<gpointer>(
+                                                 G_CALLBACK(Impl::on_decodebin_pad_added)),
+                                             impl);
     }
 
-    // Detach the sink bin from playbin. playbin owns a reference to the sink
-    // bin via the "audio-sink" property, so we must NOT unref the bin itself —
-    // playbin will handle cleanup when the pipeline is set to NULL and playbin
-    // is unref'd.
-    if (impl->playbin) {
-        g_object_set(impl->playbin, "audio-sink", nullptr, nullptr);
-    }
-
-    // Set pipeline to NULL and unref. This will also unref playbin, which in
-    // turn unrefs the sink bin and all its children.
-    if (impl->pipeline) {
-        gst_element_set_state(impl->pipeline, GST_STATE_NULL);
-        gst_object_unref(impl->pipeline);
-        impl->pipeline = nullptr;
-    }
-
-    impl->playbin = nullptr;
-    impl->tee = nullptr;
-    impl->viz_queue = nullptr;
-    impl->audio_queue = nullptr;
-    impl->audioconvert = nullptr;
-    impl->audioresample = nullptr;
-    impl->capsfilter = nullptr;
-    impl->appsink = nullptr;
-    impl->autoaudiosink = nullptr;
+    // Destroy the pipeline (releases requested tee pads, unrefs elements).
+    impl->destroy_pipeline();
 
     // Reset callbacks.
     {
@@ -303,7 +253,7 @@ void AudioEngine::shutdown() {
         impl->viz_cb = nullptr;
     }
 
-    impl->current_state = AudioEngine::PlaybackState::Stopped;
+    impl->current_state = PlaybackState::Stopped;
     impl->initialized = false;
 }
 
@@ -311,89 +261,159 @@ void AudioEngine::shutdown() {
 // Pipeline construction
 // ---------------------------------------------------------------------------
 
-bool AudioEngine::Impl::build_pipeline() {
-    // Create the bin that will serve as playbin's audio-sink.
-    sink_bin = gst_bin_new("audio-sink-bin");
-    if (!sink_bin) {
-        std::cerr << "AudioEngine: Failed to create sink bin" << std::endl;
-        return false;
+void AudioEngine::Impl::on_decodebin_pad_added(GstElement* /*decodebin*/,
+                                               GstPad* new_pad,
+                                               gpointer user_data) {
+    Impl* impl = static_cast<Impl*>(user_data);
+
+    // Check if this pad has audio caps
+    GstCaps* caps = gst_pad_get_current_caps(new_pad);
+    if (!caps) {
+        caps = gst_pad_query_caps(new_pad, nullptr);
     }
 
+    bool is_audio = false;
+    if (caps) {
+        GstStructure* s = gst_caps_get_structure(caps, 0);
+        if (s) {
+            const gchar* name = gst_structure_get_name(s);
+            if (g_str_has_prefix(name, "audio/")) {
+                is_audio = true;
+            }
+        }
+    }
+
+    if (!is_audio) {
+        std::cerr << "AudioEngine: Ignoring non-audio pad from decodebin" << std::endl;
+        if (caps) gst_caps_unref(caps);
+        return;
+    }
+
+    GstPad* sink_pad =
+        gst_element_get_static_pad(impl->audioconvert, "sink");
+    if (!sink_pad) {
+        std::cerr << "AudioEngine: Failed to get audioconvert sink pad"
+                  << std::endl;
+        if (caps) gst_caps_unref(caps);
+        return;
+    }
+
+    if (gst_pad_link(new_pad, sink_pad) != GST_PAD_LINK_OK) {
+        std::cerr << "AudioEngine: Failed to link decodebin to audioconvert"
+                  << std::endl;
+    } else {
+        impl->audio_pad_linked = true;
+    }
+    gst_object_unref(sink_pad);
+    if (caps) gst_caps_unref(caps);
+}
+
+bool AudioEngine::Impl::build_pipeline(const std::string& uri) {
+    // filesrc
+    filesrc = gst_element_factory_make("filesrc", "filesrc");
+    if (!filesrc) {
+        std::cerr << "AudioEngine: Failed to create filesrc" << std::endl;
+        return false;
+    }
+    g_object_set(filesrc, "location", uri.c_str(), nullptr);
+
+    // decodebin
+    decodebin = gst_element_factory_make("decodebin", "decodebin");
+    if (!decodebin) {
+        std::cerr << "AudioEngine: Failed to create decodebin" << std::endl;
+        return false;
+    }
+    g_signal_connect(decodebin, "pad-added",
+                     G_CALLBACK(on_decodebin_pad_added), this);
+
+    // Common elements
+    audioconvert = gst_element_factory_make("audioconvert", "audioconvert");
+    audioresample = gst_element_factory_make("audioresample",
+                                             "audioresample");
     tee = gst_element_factory_make("tee", "tee");
+
+    // Visualization branch elements
     viz_queue = gst_element_factory_make("queue", "viz-queue");
+    viz_audioconvert = gst_element_factory_make("audioconvert",
+                                                "viz-audioconvert");
+    viz_audioresample = gst_element_factory_make("audioresample",
+                                                 "viz-audioresample");
+    viz_capsfilter = gst_element_factory_make("capsfilter",
+                                              "viz-capsfilter");
+    appsink = gst_element_factory_make("appsink", "viz-sink");
+
+    // Audio output branch elements
     audio_queue = gst_element_factory_make("queue", "audio-queue");
     volume_element = gst_element_factory_make("volume", "audio-volume");
-    audioconvert = gst_element_factory_make("audioconvert", "audioconvert");
-    audioresample = gst_element_factory_make("audioresample", "audioresample");
-    capsfilter = gst_element_factory_make("capsfilter", "viz-capsfilter");
-    appsink = gst_element_factory_make("appsink", "viz-sink");
-    autoaudiosink = gst_element_factory_make("autoaudiosink", "audio-sink");
-
-    // Validate every element before proceeding.
-    if (!tee) {
-        std::cerr << "AudioEngine: Failed to create tee" << std::endl;
-        return false;
-    }
-    if (!viz_queue) {
-        std::cerr << "AudioEngine: Failed to create viz queue" << std::endl;
-        return false;
-    }
-    if (!audio_queue) {
-        std::cerr << "AudioEngine: Failed to create audio queue" << std::endl;
-        return false;
-    }
-    if (!volume_element) {
-        std::cerr << "AudioEngine: Failed to create volume element" << std::endl;
-        return false;
-    }
-    if (!audioconvert) {
-        std::cerr << "AudioEngine: Failed to create audioconvert" << std::endl;
-        return false;
-    }
-    if (!audioresample) {
-        std::cerr << "AudioEngine: Failed to create audioresample" << std::endl;
-        return false;
-    }
-    if (!capsfilter) {
-        std::cerr << "AudioEngine: Failed to create capsfilter" << std::endl;
-        return false;
-    }
-    if (!appsink) {
-        std::cerr << "AudioEngine: Failed to create appsink" << std::endl;
-        return false;
-    }
+    // Use pulsesink directly: autoaudiosink falls back to fakesink in some
+    // environments (no real audio device detected), producing silent playback.
+    autoaudiosink = gst_element_factory_make("pulsesink", "audio-output");
     if (!autoaudiosink) {
-        std::cerr << "AudioEngine: Failed to create autoaudiosink" << std::endl;
+        // Fallback to autoaudiosink if pulsesink is unavailable.
+        autoaudiosink = gst_element_factory_make("autoaudiosink",
+                                                 "audio-output");
+    }
+
+    // Validate all elements
+    if (!filesrc || !decodebin || !audioconvert || !audioresample || !tee ||
+        !viz_queue || !viz_audioconvert || !viz_audioresample ||
+        !viz_capsfilter || !appsink || !audio_queue || !volume_element ||
+        !autoaudiosink) {
+        std::cerr << "AudioEngine: Failed to create one or more elements"
+                  << std::endl;
         return false;
     }
 
-    // Add all elements to the bin.
-    gst_bin_add_many(GST_BIN(sink_bin), tee, viz_queue, audio_queue,
-                     volume_element, audioconvert, audioresample, capsfilter,
-                     appsink, autoaudiosink, nullptr);
+    // Add all elements to the pipeline.
+    gst_bin_add_many(GST_BIN(pipeline),
+                     filesrc, decodebin, audioconvert, audioresample, tee,
+                     viz_queue, viz_audioconvert, viz_audioresample,
+                     viz_capsfilter, appsink, audio_queue, volume_element,
+                     autoaudiosink, nullptr);
 
-    // Link the visualization branch: viz_queue -> audioconvert ->
-    // audioresample -> capsfilter -> appsink.
-    if (!gst_element_link_many(viz_queue, audioconvert, audioresample,
-                               capsfilter, appsink, nullptr)) {
+    // Link the static chain: filesrc -> decodebin -> audioconvert ->
+    // audioresample -> tee
+    // Note: decodebin's source pads are added dynamically, so we link
+    // filesrc -> decodebin now, and decodebin -> audioconvert via
+    // the pad-added signal.
+    if (!gst_element_link(filesrc, decodebin)) {
+        std::cerr << "AudioEngine: Failed to link filesrc to decodebin"
+                  << std::endl;
+        return false;
+    }
+    if (!gst_element_link(audioconvert, audioresample)) {
+        std::cerr << "AudioEngine: Failed to link audioconvert to "
+                     "audioresample"
+                  << std::endl;
+        return false;
+    }
+    if (!gst_element_link(audioresample, tee)) {
+        std::cerr << "AudioEngine: Failed to link audioresample to tee"
+                  << std::endl;
+        return false;
+    }
+
+    // Visualization branch: viz_queue -> viz_audioconvert ->
+    // viz_audioresample -> viz_capsfilter -> appsink.
+    if (!gst_element_link_many(viz_queue, viz_audioconvert,
+                               viz_audioresample, viz_capsfilter,
+                               appsink, nullptr)) {
         std::cerr << "AudioEngine: Failed to link visualization branch"
                   << std::endl;
         return false;
     }
 
-    // Link the audio output branch: audio_queue -> volume -> autoaudiosink.
-    // Volume lives after the tee so the visualization branch sees raw,
-    // unscaled audio even at low playback volume.
-    if (!gst_element_link_many(audio_queue, volume_element, autoaudiosink,
-                               nullptr)) {
+    // Audio output branch: audio_queue -> volume_element -> autoaudiosink.
+    if (!gst_element_link_many(audio_queue, volume_element,
+                               autoaudiosink, nullptr)) {
         std::cerr << "AudioEngine: Failed to link audio output branch"
                   << std::endl;
         return false;
     }
 
     // Configure the visualization queue to drop buffers when the visualizer
-    // lags, so playback is never blocked by visualization.
-    g_object_set(viz_queue, "leaky", 2, nullptr);  // leaky=downstream
+    // lags.
+    g_object_set(viz_queue, "leaky", 2, nullptr);
 
     // Configure appsink: pull-based, emit signals, single buffered, drop.
     g_object_set(appsink, "emit-signals", TRUE, nullptr);
@@ -402,13 +422,10 @@ bool AudioEngine::Impl::build_pipeline() {
     g_object_set(appsink, "sync", FALSE, nullptr);
     g_object_set(appsink, "async", FALSE, nullptr);
 
-    // Configure tee: no special properties needed; we request source pads.
-
     // Set the post-tee volume to the initial level.
     g_object_set(volume_element, "volume", volume_, nullptr);
 
-    // Negotiate visualization caps: raw audio that appsink can consume.
-    // We request S16LE stereo at 44100 Hz as a common supported format.
+    // Negotiate visualization caps.
     GstCaps* caps = gst_caps_new_simple(
         "audio/x-raw",
         "format", G_TYPE_STRING, "S16LE",
@@ -421,80 +438,11 @@ bool AudioEngine::Impl::build_pipeline() {
                   << std::endl;
         return false;
     }
-    g_object_set(capsfilter, "caps", caps, nullptr);
-    // Release our reference; capsfilter takes its own.
+    g_object_set(viz_capsfilter, "caps", caps, nullptr);
     gst_caps_unref(caps);
 
-    // Connect the appsink new-sample callback before linking pads.
-    // Runs on the GStreamer streaming thread: pull the sample, convert to
-    // mono float, and hand it to the viz callback. No GTK, no blocking,
-    // no dynamic allocation after warmup (thread-local buffer reuse).
-    g_signal_connect(appsink, "new-sample",
-                     G_CALLBACK(+[](GstAppSink* sink, gpointer user_data) {
-                         AudioEngine* self = static_cast<AudioEngine*>(user_data);
-                         GstSample* sample = gst_app_sink_pull_sample(sink);
-                         if (!sample) return GST_FLOW_OK;
 
-                         GstBuffer* buffer = gst_sample_get_buffer(sample);
-                         if (buffer) {
-                             GstMapInfo map;
-                             if (gst_buffer_map(buffer, &map, GST_MAP_READ)) {
-                                 // Interpret as interleaved S16LE samples.
-                                 const gint16* samples =
-                                     reinterpret_cast<const gint16*>(map.data);
-                                 guint num_samples = map.size / sizeof(gint16);
-
-                                 // Convert interleaved S16LE to mono float.
-                                 // Reuse a thread-local buffer so the streaming
-                                 // callback does not malloc after warmup.
-                                 thread_local std::vector<float> floats;
-                                 floats.clear();
-                                 floats.reserve(num_samples / 2);
-                                 for (guint i = 0; i + 1 < num_samples; i += 2) {
-                                     float l = samples[i] / 32768.0f;
-                                     float r = samples[i + 1] / 32768.0f;
-                                     floats.push_back((l + r) * 0.5f);
-                                 }
-
-                                 std::lock_guard<std::mutex> lock(
-                                     self->impl_->callback_mutex);
-                                 if (self->impl_->viz_cb) {
-                                     self->impl_->viz_cb(floats.data(),
-                                                         floats.size());
-                                 }
-                                 gst_buffer_unmap(buffer, &map);
-                             }
-                         }
-                         gst_sample_unref(sample);
-                         return GST_FLOW_OK;
-                     }),
-                     this);
-
-    // Create a ghost pad for the bin's sink pad, linking it to the tee's sink
-    // pad. Store the tee sink pad, create the ghost pad, then release the
-    // original reference.
-    GstPad* tee_sink_pad = gst_element_get_static_pad(tee, "sink");
-    if (!tee_sink_pad) {
-        std::cerr << "AudioEngine: Failed to get tee sink pad" << std::endl;
-        return false;
-    }
-    GstPad* ghost_pad = gst_ghost_pad_new("sink", tee_sink_pad);
-    if (!ghost_pad) {
-        std::cerr << "AudioEngine: Failed to create ghost pad" << std::endl;
-        gst_object_unref(tee_sink_pad);
-        return false;
-    }
-    if (!gst_element_add_pad(sink_bin, ghost_pad)) {
-        std::cerr << "AudioEngine: Failed to add ghost pad to sink bin"
-                  << std::endl;
-        gst_object_unref(ghost_pad);
-        gst_object_unref(tee_sink_pad);
-        return false;
-    }
-    gst_object_unref(ghost_pad);
-    gst_object_unref(tee_sink_pad);
-
-    // Request two separate source pads from the tee, one for each branch.
+    // Request two separate source pads from the tee.
     tee_viz_pad = request_tee_pad("src_%u");
     tee_audio_pad = request_tee_pad("src_%u");
     if (!tee_viz_pad || !tee_audio_pad) {
@@ -519,7 +467,8 @@ bool AudioEngine::Impl::build_pipeline() {
     gst_object_unref(viz_queue_sink);
 
     // Link tee's audio source pad to audio_queue's sink pad.
-    GstPad* audio_queue_sink = gst_element_get_static_pad(audio_queue, "sink");
+    GstPad* audio_queue_sink =
+        gst_element_get_static_pad(audio_queue, "sink");
     if (!audio_queue_sink) {
         std::cerr << "AudioEngine: Failed to get audio queue sink pad"
                   << std::endl;
@@ -533,98 +482,49 @@ bool AudioEngine::Impl::build_pipeline() {
     }
     gst_object_unref(audio_queue_sink);
 
-    // Verify the pipeline graph is fully connected from tee source to both
-    // sinks before returning. Missing edges are a common defect class.
-    if (!verify_reachability()) {
-        std::cerr << "AudioEngine: Pipeline reachability check failed"
-                  << std::endl;
-        return false;
-    }
-
     return true;
 }
 
-bool AudioEngine::Impl::verify_reachability() {
-    // Build an explicit edge list for the bin and check that every element
-    // reachable from the tee's source pads can reach a sink.
-    std::vector<Edge> edges;
-    auto add_edge = [&](GstElement* a, GstElement* b) {
-        if (a && b) edges.push_back({a, b});
-    };
-
-    // Tee source -> branch heads (via requested pads). We can't easily
-    // introspect pad links here, so we declare the intended topology.
-    add_edge(tee, viz_queue);
-    add_edge(tee, audio_queue);
-    add_edge(viz_queue, audioconvert);
-    add_edge(audioconvert, audioresample);
-    add_edge(audioresample, capsfilter);
-    add_edge(capsfilter, appsink);
-    add_edge(audio_queue, volume_element);
-    add_edge(volume_element, autoaudiosink);
-
-    if (edges.empty()) return false;
-
-    // Reachability: mark everything reachable from tee, then confirm the two
-    // terminal sinks are reached.
-    std::vector<GstElement*> reachable;
-    reachable.push_back(tee);
-    size_t idx = 0;
-    while (idx < reachable.size()) {
-        GstElement* cur = reachable[idx++];
-        for (const auto& e : edges) {
-            if (e.src == cur) {
-                bool already = false;
-                for (GstElement* r : reachable) {
-                    if (r == e.dst) { already = true; break; }
-                }
-                if (!already) reachable.push_back(e.dst);
-            }
-        }
-    }
-
-    auto is_reached = [&](GstElement* e) {
-        for (GstElement* r : reachable) {
-            if (r == e) return true;
-        }
-        return false;
-    };
-
-    return is_reached(appsink) && is_reached(autoaudiosink);
-}
-
 void AudioEngine::Impl::destroy_pipeline() {
-    // Release requested tee pads.
-    if (tee_viz_pad) {
+    // Release requested tee pads before destroying the pipeline.
+    // Requested pads hold an extra reference that must be released.
+    if (tee && tee_viz_pad) {
+        gst_element_release_request_pad(tee, tee_viz_pad);
         gst_object_unref(tee_viz_pad);
         tee_viz_pad = nullptr;
     }
-    if (tee_audio_pad) {
+    if (tee && tee_audio_pad) {
+        gst_element_release_request_pad(tee, tee_audio_pad);
         gst_object_unref(tee_audio_pad);
         tee_audio_pad = nullptr;
     }
 
-    // Detach the sink bin from playbin. playbin owns a reference to the sink
-    // bin via the "audio-sink" property, so we must NOT unref the bin itself.
-    if (sink_bin && playbin) {
-        g_object_set(playbin, "audio-sink", nullptr, nullptr);
+    if (pipeline) {
+        gst_element_set_state(GST_ELEMENT(pipeline), GST_STATE_NULL);
+        gst_object_unref(pipeline);
+        pipeline = nullptr;
     }
 
-    tee = nullptr;
-    viz_queue = nullptr;
-    audio_queue = nullptr;
+    filesrc = nullptr;
+    decodebin = nullptr;
     audioconvert = nullptr;
     audioresample = nullptr;
-    capsfilter = nullptr;
+    tee = nullptr;
+    viz_queue = nullptr;
+    viz_audioconvert = nullptr;
+    viz_audioresample = nullptr;
+    viz_capsfilter = nullptr;
     appsink = nullptr;
+    audio_queue = nullptr;
     volume_element = nullptr;
     autoaudiosink = nullptr;
+    tee_viz_pad = nullptr;
+    tee_audio_pad = nullptr;
 }
 
 GstPad* AudioEngine::Impl::request_tee_pad(const char* pad_name) {
     GstPad* pad = gst_element_request_pad_simple(tee, pad_name);
     if (!pad) {
-        // Fall back to the older API if request_pad_simple is unavailable.
         pad = gst_element_get_request_pad(tee, pad_name);
     }
     return pad;
@@ -636,45 +536,106 @@ GstPad* AudioEngine::Impl::request_tee_pad(const char* pad_name) {
 
 bool AudioEngine::load_track(const std::string& file_path) {
     Impl* impl = impl_.get();
-    if (!impl || !impl->playbin) return false;
+    if (!impl || !impl->pipeline) return false;
 
-    // Validate the file path exists and is readable.
     if (file_path.empty()) {
         std::cerr << "AudioEngine: Empty file path" << std::endl;
         return false;
     }
 
-    // Convert to a URI, validating the result.
-    gchar* uri = gst_filename_to_uri(file_path.c_str(), nullptr);
-    if (!uri) {
-        std::cerr << "AudioEngine: Failed to convert path to URI: "
-                  << file_path << std::endl;
+    if (access(file_path.c_str(), F_OK) != 0) {
+        std::cerr << "AudioEngine: File does not exist: " << file_path
+                  << std::endl;
         return false;
     }
 
-    // Simply set the URI on playbin - playbin handles track changes internally.
-    // No need to set pipeline to NULL and re-request pads.
-    g_object_set(impl->playbin, "uri", uri, nullptr);
-    g_free(uri);
+    // Increment load generation to invalidate any pending callbacks
+    uint64_t gen = ++impl->load_generation;
 
-    // Move to PAUSED to preroll the new track.
-    GstStateChangeReturn ret =
-        gst_element_set_state(impl->pipeline, GST_STATE_PAUSED);
+    // Stop the pipeline first if it's running - wait for NULL to settle
+    GstStateChangeReturn ret = gst_element_set_state(GST_ELEMENT(impl->pipeline), GST_STATE_NULL);
+    if (ret == GST_STATE_CHANGE_FAILURE) {
+        std::cerr << "AudioEngine: Failed to set pipeline to NULL" << std::endl;
+        return false;
+    }
+    // Wait for the NULL state transition to complete
+    GstState state, pending;
+    ret = gst_element_get_state(GST_ELEMENT(impl->pipeline), &state, &pending, 2 * GST_SECOND);
+    if (ret == GST_STATE_CHANGE_FAILURE) {
+        std::cerr << "AudioEngine: Failed to reach NULL state" << std::endl;
+        return false;
+    }
+
+    // Check if generation changed (new load started)
+    if (gen != impl->load_generation) {
+        return false;
+    }
+
+    // Reset audio pad linked flag for new track
+    impl->audio_pad_linked = false;
+
+    // Set the file path on filesrc (filesrc expects a local path, not a URI).
+    g_object_set(impl->filesrc, "location", file_path.c_str(), nullptr);
+
+    // Move to PAUSED to preroll.
+    ret = gst_element_set_state(GST_ELEMENT(impl->pipeline), GST_STATE_PAUSED);
     if (ret == GST_STATE_CHANGE_FAILURE) {
         std::cerr << "AudioEngine: Failed to preroll track: " << file_path
                   << std::endl;
         return false;
     }
 
-    // Update state tracking.
+    // Wait for preroll to complete (or async)
+    ret = gst_element_get_state(GST_ELEMENT(impl->pipeline), &state, &pending, 5 * GST_SECOND);
+
+    // Check if generation changed while waiting
+    if (gen != impl->load_generation) {
+        return false;
+    }
+
+    switch (ret) {
+        case GST_STATE_CHANGE_SUCCESS:
+            // Preroll completed synchronously
+            break;
+        case GST_STATE_CHANGE_ASYNC:
+            // Still prerolling - will complete via ASYNC_DONE
+            break;
+        case GST_STATE_CHANGE_NO_PREROLL:
+            // Live source - treat as success
+            break;
+        case GST_STATE_CHANGE_FAILURE:
+        default:
+            std::cerr << "AudioEngine: Preroll failed for: " << file_path
+                      << std::endl;
+            return false;
+    }
+
+    // Verify we have a valid audio stream (audio pad was linked)
+    if (!impl->audio_pad_linked) {
+        // Wait a bit more for decodebin to process
+        ret = gst_element_get_state(GST_ELEMENT(impl->pipeline), &state, &pending, 2 * GST_SECOND);
+        if (!impl->audio_pad_linked) {
+            std::cerr << "AudioEngine: No audio stream found in: " << file_path
+                      << std::endl;
+            return false;
+        }
+    }
+
+    // Query duration to verify the track is playable
+    gint64 duration_ns = 0;
+    if (!gst_element_query_duration(GST_ELEMENT(impl->pipeline),
+                                    GST_FORMAT_TIME, &duration_ns) || duration_ns <= 0) {
+        std::cerr << "AudioEngine: Could not query duration for: " << file_path
+                  << std::endl;
+        return false;
+    }
+
     StateCallback state_cb_copy;
     {
         std::lock_guard<std::mutex> lock(impl->callback_mutex);
-        impl->current_state = AudioEngine::PlaybackState::Paused;
+        impl->current_state = PlaybackState::Paused;
         state_cb_copy = impl->state_cb;
     }
-    // Invoke outside the lock to avoid deadlock if the callback re-enters a
-    // locking API.
     if (state_cb_copy) state_cb_copy(impl->current_state);
 
     return true;
@@ -702,40 +663,57 @@ void AudioEngine::seek(double position_seconds) {
     Impl* impl = impl_.get();
     if (!impl || !impl->pipeline) return;
 
-    // Validate the requested position.
-    if (position_seconds < 0.0) position_seconds = 0.0;
+    GstState state = GST_STATE_NULL;
+    gst_element_get_state(GST_ELEMENT(impl->pipeline), &state,
+                          nullptr, GST_CLOCK_TIME_NONE);
+    if (state != GST_STATE_PAUSED && state != GST_STATE_PLAYING) return;
 
-    // Clamp to duration if known.
     gint64 duration_ns = 0;
-    if (gst_element_query_duration(impl->pipeline, GST_FORMAT_TIME,
-                                   &duration_ns)) {
-        gint64 max_ns = duration_ns;
-        gint64 target_ns =
-            static_cast<gint64>(position_seconds * GST_SECOND);
-        if (target_ns > max_ns) target_ns = max_ns;
-        position_seconds = static_cast<double>(target_ns) / GST_SECOND;
+    if (!gst_element_query_duration(GST_ELEMENT(impl->pipeline),
+                                    GST_FORMAT_TIME, &duration_ns)) {
+        return;
     }
+
+    if (position_seconds < 0.0) position_seconds = 0.0;
+    gint64 target_ns = static_cast<gint64>(position_seconds * GST_SECOND);
+    if (target_ns > duration_ns) target_ns = duration_ns;
+    position_seconds = static_cast<double>(target_ns) / GST_SECOND;
+
+    // Store pending seek with generation
+    uint64_t gen = ++impl->seek_generation;
+    impl->pending_seek_position.store(target_ns);
+    impl->seek_pending.store(true);
 
     GstSeekFlags flags = static_cast<GstSeekFlags>(
-        GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT);
-    gboolean result = gst_element_seek_simple(impl->pipeline, GST_FORMAT_TIME,
-                                              flags,
-                                              static_cast<gint64>(
-                                                  position_seconds * GST_SECOND));
+        GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT | GST_SEEK_FLAG_ACCURATE);
+    gboolean result = gst_element_seek_simple(
+        GST_ELEMENT(impl->pipeline), GST_FORMAT_TIME, flags, target_ns);
     if (!result) {
         std::cerr << "AudioEngine: Seek failed at " << position_seconds
-                  << " seconds" << std::endl;
+                  << " seconds (state=" << state << ")" << std::endl;
+        impl->seek_pending.store(false);
     }
+}
+
+bool AudioEngine::can_seek() const {
+    Impl* impl = impl_.get();
+    if (!impl || !impl->pipeline) return false;
+    GstState state = GST_STATE_NULL;
+    gst_element_get_state(GST_ELEMENT(impl->pipeline), &state,
+                          nullptr, GST_CLOCK_TIME_NONE);
+    if (state != GST_STATE_PAUSED && state != GST_STATE_PLAYING) return false;
+    gint64 duration_ns = 0;
+    return gst_element_query_duration(GST_ELEMENT(impl->pipeline),
+                                      GST_FORMAT_TIME, &duration_ns);
 }
 
 void AudioEngine::set_volume(double volume) {
     Impl* impl = impl_.get();
     if (!impl) return;
     impl->volume_ = std::clamp(volume, 0.0, 1.0);
-    // Volume is applied post-tee on the output branch so the visualizer
-    // branch always sees full-scale audio.
     if (impl->volume_element) {
-        g_object_set(impl->volume_element, "volume", impl->volume_, nullptr);
+        g_object_set(impl->volume_element, "volume", impl->volume_,
+                     nullptr);
     }
 }
 
@@ -757,7 +735,8 @@ std::optional<double> AudioEngine::get_position() const {
     if (!impl || !impl->pipeline) return std::nullopt;
 
     gint64 pos = 0;
-    if (!gst_element_query_position(impl->pipeline, GST_FORMAT_TIME, &pos)) {
+    if (!gst_element_query_position(GST_ELEMENT(impl->pipeline),
+                                    GST_FORMAT_TIME, &pos)) {
         return std::nullopt;
     }
     return static_cast<double>(pos) / GST_SECOND;
@@ -768,7 +747,8 @@ std::optional<double> AudioEngine::get_duration() const {
     if (!impl || !impl->pipeline) return std::nullopt;
 
     gint64 dur = 0;
-    if (!gst_element_query_duration(impl->pipeline, GST_FORMAT_TIME, &dur)) {
+    if (!gst_element_query_duration(GST_ELEMENT(impl->pipeline),
+                                    GST_FORMAT_TIME, &dur)) {
         return std::nullopt;
     }
     return static_cast<double>(dur) / GST_SECOND;
@@ -808,7 +788,8 @@ void AudioEngine::set_viz_samples_callback(VizSamplesCallback cb) {
 // ---------------------------------------------------------------------------
 
 gboolean AudioEngine::Impl::bus_callback(GstBus* bus, GstMessage* msg,
-                                          gpointer user_data) {
+                                         gpointer user_data) {
+    (void)bus;
     AudioEngine* self = static_cast<AudioEngine*>(user_data);
     self->impl_->handle_message(msg);
     return TRUE;
@@ -822,27 +803,24 @@ void AudioEngine::Impl::handle_message(GstMessage* msg) {
                 gst_message_parse_state_changed(msg, &old_state, &new_state,
                                                 &pending_state);
 
-                AudioEngine::PlaybackState new_playback_state =
-                    AudioEngine::PlaybackState::Stopped;
+                PlaybackState new_playback_state = PlaybackState::Stopped;
                 switch (new_state) {
                     case GST_STATE_PLAYING:
-                        new_playback_state = AudioEngine::PlaybackState::Playing;
+                        new_playback_state = PlaybackState::Playing;
                         break;
                     case GST_STATE_PAUSED:
-                        new_playback_state = AudioEngine::PlaybackState::Paused;
+                        new_playback_state = PlaybackState::Paused;
                         break;
                     case GST_STATE_READY:
                     case GST_STATE_NULL:
-                        new_playback_state =
-                            AudioEngine::PlaybackState::Stopped;
+                        new_playback_state = PlaybackState::Stopped;
                         break;
                     default:
                         break;
                 }
 
-                AudioEngine::StateCallback cb;
-                AudioEngine::PlaybackState emitted_state =
-                    AudioEngine::PlaybackState::Stopped;
+                StateCallback cb;
+                PlaybackState emitted_state = PlaybackState::Stopped;
                 bool emit = false;
                 {
                     std::lock_guard<std::mutex> lock(callback_mutex);
@@ -853,28 +831,47 @@ void AudioEngine::Impl::handle_message(GstMessage* msg) {
                         emit = true;
                     }
                 }
-                // Invoke outside the lock to avoid deadlock if the callback
-                // re-enters a locking API (e.g. set_state_callback).
                 if (emit && cb) cb(emitted_state);
             }
             break;
         }
         case GST_MESSAGE_ASYNC_DONE: {
-            // An asynchronous state change (e.g. preroll) has completed.
-            break;
-        }
-        case GST_MESSAGE_DURATION_CHANGED: {
-            // Duration may become known after preroll; notify position
-            // listeners so they can refresh duration.
+            // Only emit position if this is the current load generation
             double pos = 0.0, dur = 0.0;
             {
                 gint64 pos_ns = 0, dur_ns = 0;
-                if (gst_element_query_position(pipeline, GST_FORMAT_TIME,
-                                               &pos_ns)) {
+                if (gst_element_query_position(
+                        GST_ELEMENT(pipeline), GST_FORMAT_TIME, &pos_ns)) {
                     pos = static_cast<double>(pos_ns) / GST_SECOND;
                 }
-                if (gst_element_query_duration(pipeline, GST_FORMAT_TIME,
-                                               &dur_ns)) {
+                if (gst_element_query_duration(
+                        GST_ELEMENT(pipeline), GST_FORMAT_TIME, &dur_ns)) {
+                    dur = static_cast<double>(dur_ns) / GST_SECOND;
+                }
+            }
+            PositionCallback cb;
+            {
+                std::lock_guard<std::mutex> lock(callback_mutex);
+                cb = position_cb;
+            }
+            if (cb) cb(pos, dur);
+
+            // If a seek was pending, clear the pending flag
+            if (seek_pending.load()) {
+                seek_pending.store(false);
+            }
+            break;
+        }
+        case GST_MESSAGE_DURATION_CHANGED: {
+            double pos = 0.0, dur = 0.0;
+            {
+                gint64 pos_ns = 0, dur_ns = 0;
+                if (gst_element_query_position(
+                        GST_ELEMENT(pipeline), GST_FORMAT_TIME, &pos_ns)) {
+                    pos = static_cast<double>(pos_ns) / GST_SECOND;
+                }
+                if (gst_element_query_duration(
+                        GST_ELEMENT(pipeline), GST_FORMAT_TIME, &dur_ns)) {
                     dur = static_cast<double>(dur_ns) / GST_SECOND;
                 }
             }
@@ -905,7 +902,7 @@ void AudioEngine::Impl::handle_message(GstMessage* msg) {
             g_free(debug);
             {
                 std::lock_guard<std::mutex> lock(callback_mutex);
-                current_state = AudioEngine::PlaybackState::Error;
+                current_state = PlaybackState::Error;
             }
             ErrorCallback error_cb_copy;
             StateCallback state_cb_copy;
@@ -914,21 +911,16 @@ void AudioEngine::Impl::handle_message(GstMessage* msg) {
                 error_cb_copy = error_cb;
                 state_cb_copy = state_cb;
             }
-            // Invoke outside the lock.
             if (error_cb_copy) error_cb_copy(error);
-            if (state_cb_copy) state_cb_copy(AudioEngine::PlaybackState::Error);
-            break;
-        }
-        case GST_MESSAGE_TAG: {
-            // Metadata tags available (handled elsewhere via TagLib).
+            if (state_cb_copy)
+                state_cb_copy(PlaybackState::Error);
             break;
         }
         case GST_MESSAGE_BUFFERING: {
             gint percent = 0;
             gst_message_parse_buffering(msg, &percent);
-            AudioEngine::StateCallback cb;
-            AudioEngine::PlaybackState emitted_state =
-                AudioEngine::PlaybackState::Stopped;
+            StateCallback cb;
+            PlaybackState emitted_state = PlaybackState::Stopped;
             bool emit = false;
             {
                 std::lock_guard<std::mutex> lock(callback_mutex);
@@ -937,14 +929,11 @@ void AudioEngine::Impl::handle_message(GstMessage* msg) {
                         buffering = true;
                         state_before_buffering = current_state;
                     }
-                    current_state = AudioEngine::PlaybackState::Buffering;
+                    current_state = PlaybackState::Buffering;
                     emitted_state = current_state;
                     cb = state_cb;
                     emit = true;
                 } else {
-                    // Buffering complete: restore the previous meaningful
-                    // state (Playing or Paused) so the controller, which
-                    // ignores Buffering, can advance playback.
                     buffering = false;
                     current_state = state_before_buffering;
                     emitted_state = current_state;
@@ -955,13 +944,6 @@ void AudioEngine::Impl::handle_message(GstMessage* msg) {
             if (emit && cb) cb(emitted_state);
             break;
         }
-        case GST_MESSAGE_CLOCK_LOST:
-        case GST_MESSAGE_CLOCK_PROVIDE:
-        case GST_MESSAGE_LATENCY:
-        case GST_MESSAGE_STREAM_START:
-        case GST_MESSAGE_STREAM_COLLECTION:
-            // Informational messages; no action required.
-            break;
         default:
             break;
     }
@@ -974,18 +956,18 @@ gboolean AudioEngine::Impl::position_timeout(gpointer user_data) {
 }
 
 void AudioEngine::Impl::update_position() {
-    // Report position regardless of state so the UI can show progress while
-    // loading, paused, or transitioning.
     gint64 pos_ns = 0, dur_ns = 0;
-    bool have_pos =
-        pipeline && gst_element_query_position(pipeline, GST_FORMAT_TIME,
-                                               &pos_ns);
-    bool have_dur =
-        pipeline && gst_element_query_duration(pipeline, GST_FORMAT_TIME,
-                                               &dur_ns);
+    bool have_pos = pipeline &&
+        gst_element_query_position(GST_ELEMENT(pipeline), GST_FORMAT_TIME,
+                                   &pos_ns);
+    bool have_dur = pipeline &&
+        gst_element_query_duration(GST_ELEMENT(pipeline), GST_FORMAT_TIME,
+                                   &dur_ns);
 
-    double position = have_pos ? static_cast<double>(pos_ns) / GST_SECOND : 0.0;
-    double duration = have_dur ? static_cast<double>(dur_ns) / GST_SECOND : 0.0;
+    double position =
+        have_pos ? static_cast<double>(pos_ns) / GST_SECOND : 0.0;
+    double duration =
+        have_dur ? static_cast<double>(dur_ns) / GST_SECOND : 0.0;
 
     PositionCallback cb;
     {

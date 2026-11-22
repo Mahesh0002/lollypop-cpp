@@ -4,6 +4,7 @@
  * Album artwork card used by Albums and Favourite Albums pages.
  * Single click opens album detail page. Hover and keyboard focus
  * reveal Play button (plan Section 5.3).
+ * Spring animations for hover/press states.
  */
 
 #pragma once
@@ -14,6 +15,7 @@
 #include <functional>
 
 #include "types.hpp"
+#include "ui/animation/SpringAnimation.hpp"
 
 namespace lollypop {
 
@@ -62,6 +64,10 @@ private:
                              double y, gpointer user_data);
     static gboolean on_leave(GtkEventControllerMotion* controller,
                              gpointer user_data);
+    static gboolean on_pressed(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data);
+    static gboolean on_released(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data);
+    void animate_hover(bool hover);
+    void animate_press(bool press);
 };
 
 } // namespace lollypop

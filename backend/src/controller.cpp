@@ -98,6 +98,11 @@ bool BackendController::initialize() {
     playback_source_manager_ = std::make_unique<PlaybackSourceManager>(
         audio_engine_, mpris_manager_);
 
+    // Wire external MPRIS player callbacks if available.
+    if (mpris_manager_) {
+        setup_mpris_callbacks();
+    }
+
     // --- Stage 4: library scanner ---
     library_scanner_ = std::make_unique<LibraryScanner>();
 
@@ -129,6 +134,15 @@ bool BackendController::initialize() {
         });
     }
 
+    // --- Stage 6c: Cache manager (must come before LyricsManager) ---
+    cache_manager_ = std::make_unique<CacheManager>();
+    if (!cache_manager_->initialize(
+            "/tmp/lollypop-cpp-cache", 64ull * 1024 * 1024)) {
+        std::cerr << "BackendController: CacheManager initialization failed"
+                  << std::endl;
+        cache_manager_.reset();
+    }
+
     // --- Stage 5c: LyricsManager (retrieval, parse, sync) ---
     lyrics_manager_ = std::make_unique<LyricsManager>();
     if (!lyrics_manager_->initialize(
@@ -137,50 +151,6 @@ bool BackendController::initialize() {
         std::cerr << "BackendController: LyricsManager initialization failed"
                   << std::endl;
         lyrics_manager_.reset();
-    }
-
-    // --- Stage 6: CAVA visualizer (optional, system capture for MPRIS) ---
-    cava_visualizer_ = std::make_unique<CavaVisualizer>();
-    if (cava_visualizer_->is_available()) {
-        cava_visualizer_->start();
-        setup_cava_callbacks();
-    } else {
-        std::cerr << "BackendController: CAVA not available, visualization disabled"
-                  << std::endl;
-    }
-
-    // --- Stage 6b: GStreamer-based visualizer (primary for internal playback) ---
-    visualizer_engine_ = std::make_unique<VisualizerEngine>();
-    visualizer_engine_->set_audio_engine(audio_engine_.get());
-    visualizer_engine_->set_band_count(64);
-    visualizer_engine_->set_enabled(true);
-    visualizer_engine_->start();
-
-    // Subscribe to spectrum events via EventBus (thread-safe main-context
-    // delivery). The visualizer worker publishes conflated spectrum frames;
-    // the UI only sees the latest frame, never a backlog.
-    spectrum_subscription_id_ = EventBus::instance().subscribe(
-        "spectrum", [this](const Event& event) {
-            if (auto* frame = std::get_if<SpectrumFrame>(&event.payload)) {
-                if (visualization_cb_) visualization_cb_(frame->magnitudes);
-            }
-        });
-
-    // --- Stage 6c: Cache + Artwork managers ---
-    cache_manager_ = std::make_unique<CacheManager>();
-    if (!cache_manager_->initialize(
-            "/tmp/lollypop-cpp-cache", 64ull * 1024 * 1024)) {
-        std::cerr << "BackendController: CacheManager initialization failed"
-                  << std::endl;
-        cache_manager_.reset();
-    }
-    artwork_manager_ = std::make_unique<ArtworkManager>();
-    if (cache_manager_ &&
-        !artwork_manager_->initialize(
-            "/tmp/lollypop-cpp-cache/artwork", 32ull * 1024 * 1024)) {
-        std::cerr << "BackendController: ArtworkManager initialization failed"
-                  << std::endl;
-        artwork_manager_.reset();
     }
 
     // --- Stage 7: MPRIS server (Lollypop as an MPRIS player) ---
@@ -201,6 +171,42 @@ bool BackendController::initialize() {
     queue_manager_->set_repeat(repeat_one ? RepeatMode::Track :
                                            (repeat ? RepeatMode::Playlist :
                                                     RepeatMode::None));
+
+    // Restore saved queue on startup.
+    {
+        std::lock_guard<std::mutex> lock(storage_mutex_);
+        if (storage_) {
+            if (const auto saved_queue = storage_->get_preference("player.queue")) {
+                std::vector<std::string> ids;
+                std::string buf;
+                for (char c : *saved_queue) {
+                    if (c == '\n') {
+                        if (!buf.empty()) { ids.push_back(buf); buf.clear(); }
+                    } else {
+                        buf += c;
+                    }
+                }
+                if (!buf.empty()) ids.push_back(buf);
+                // Validate IDs exist in storage before adding
+                std::vector<std::string> valid_ids;
+                for (const auto& id : ids) {
+                    Track t = storage_->get_track(id);
+                    if (!t.id.empty()) valid_ids.push_back(id);
+                }
+                if (!valid_ids.empty()) {
+                    queue_manager_->set_queue(valid_ids, 0);
+                }
+            }
+            if (const auto saved_index = storage_->get_preference("player.queue_index")) {
+                try {
+                    size_t idx = static_cast<size_t>(std::stoul(*saved_index));
+                    queue_manager_->set_current_index(idx);
+                } catch (...) {
+                    // Ignore corrupt preference values.
+                }
+            }
+        }
+    }
 
     std::cout << "BackendController: Initialized successfully" << std::endl;
     return true;
@@ -226,9 +232,6 @@ void BackendController::shutdown() {
     }
     if (cava_visualizer_) {
         cava_visualizer_->stop();
-    }
-    if (artwork_manager_) {
-        artwork_manager_->shutdown();
     }
     if (cache_manager_) {
         cache_manager_->shutdown();
@@ -853,10 +856,12 @@ std::vector<Track> BackendController::get_tracks_by_ids(
 }
 
 void BackendController::play_track(const std::string& track_id) {
+    std::cerr << "BackendController: play_track(" << track_id << ")" << std::endl;
     play_tracks({track_id}, 0);
 }
 
 void BackendController::play_tracks(const std::vector<std::string>& track_ids, size_t start_index) {
+    std::cerr << "BackendController: play_tracks(" << track_ids.size() << " tracks, start=" << start_index << ")" << std::endl;
     if (track_ids.empty()) return;
 
     queue_manager_->set_queue(track_ids, start_index);
@@ -884,14 +889,18 @@ bool BackendController::start_queue_index(size_t index) {
     } else if (current_track_.file_path.empty()) {
         std::cerr << "BackendController: Track has no file path: "
                   << current_track_.title << std::endl;
-    } else if (audio_engine_->load_track(current_track_.file_path)) {
-        audio_engine_->set_volume(volume_);
-        audio_engine_->play();
-        set_playing(true);
-        update_play_statistics();
     } else {
-        std::cerr << "BackendController: Failed to load track: "
-                  << current_track_.file_path << std::endl;
+        std::cerr << "BackendController: Loading track: " << current_track_.file_path << std::endl;
+        if (audio_engine_->load_track(current_track_.file_path)) {
+            std::cerr << "BackendController: Track loaded, playing..." << std::endl;
+            audio_engine_->set_volume(volume_);
+            audio_engine_->play();
+            set_playing(true);
+            update_play_statistics();
+        } else {
+            std::cerr << "BackendController: Failed to load track: "
+                      << current_track_.file_path << std::endl;
+        }
     }
 
     emit_track_changed(current_track_);
@@ -1214,7 +1223,7 @@ void BackendController::sync_mpris_capabilities() {
 
 void BackendController::setup_cava_callbacks() {
     cava_visualizer_->set_points_callback([this](const std::vector<float>& points) {
-        if (visualization_cb_) visualization_cb_(points);
+        emit_visualization_changed(points);
     });
 }
 
@@ -1279,33 +1288,40 @@ void BackendController::setup_mpris_server_callbacks() {
 }
 
 void BackendController::emit_track_changed(const Track& track) {
-    if (track_changed_cb_) {
-        track_changed_cb_(track);
+    for (auto& cb : track_changed_callbacks_) {
+        if (cb) cb(track);
     }
 }
 
 void BackendController::emit_position_changed(double position, double duration) {
-    if (position_changed_cb_) {
-        position_changed_cb_(position, duration);
+    for (auto& cb : position_changed_callbacks_) {
+        if (cb) cb(position, duration);
     }
 }
 
 void BackendController::emit_playback_state_changed(bool playing) {
-    if (playback_state_changed_cb_) {
-        playback_state_changed_cb_(playing);
+    for (auto& cb : playback_state_changed_callbacks_) {
+        if (cb) cb(playing);
     }
 }
 
 void BackendController::emit_queue_changed() {
-    if (queue_changed_cb_) {
-        const auto& dq = queue_manager_->queue();
-        queue_changed_cb_(std::vector<std::string>(dq.begin(), dq.end()));
+    const auto& dq = queue_manager_->queue();
+    std::vector<std::string> queue_ids(dq.begin(), dq.end());
+    for (auto& cb : queue_changed_callbacks_) {
+        if (cb) cb(queue_ids);
+    }
+}
+
+void BackendController::emit_visualization_changed(const std::vector<float>& points) {
+    for (auto& cb : visualization_callbacks_) {
+        if (cb) cb(points);
     }
 }
 
 void BackendController::emit_library_changed() {
-    if (library_changed_cb_) {
-        library_changed_cb_();
+    for (auto& cb : library_changed_callbacks_) {
+        if (cb) cb();
     }
 }
 

@@ -66,6 +66,11 @@ void ErrorState::setup(const std::string& title,
         auto* retry_button = gtk_button_new_with_label("Retry");
         gtk_widget_add_css_class(retry_button, "error-state-retry");
         gtk_widget_set_halign(retry_button, GTK_ALIGN_CENTER);
+        // Consistent spacing on all four sides.
+        gtk_widget_set_margin_start(retry_button, 10);
+        gtk_widget_set_margin_end(retry_button, 10);
+        gtk_widget_set_margin_top(retry_button, 10);
+        gtk_widget_set_margin_bottom(retry_button, 10);
         g_signal_connect(retry_button, "clicked",
                          G_CALLBACK(retry_button_clicked), cb);
         // Note: cb is intentionally leaked; the button's lifetime is tied to

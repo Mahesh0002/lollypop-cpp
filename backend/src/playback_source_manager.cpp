@@ -94,7 +94,13 @@ void PlaybackSourceManager::play_pause() {
     if (impl_->current_source == PlaybackSource::External && impl_->mpris_manager) {
         impl_->mpris_manager->play_pause();
     } else if (impl_->audio_engine) {
-        // The controller tracks whether we're playing.
+        auto state = impl_->audio_engine->get_state();
+        if (state == AudioEngine::PlaybackState::Playing ||
+            state == AudioEngine::PlaybackState::Buffering) {
+            impl_->audio_engine->pause();
+        } else {
+            impl_->audio_engine->play();
+        }
     }
 }
 
@@ -123,7 +129,9 @@ void PlaybackSourceManager::seek_by(double offset_seconds) {
     if (impl_->current_source == PlaybackSource::External && impl_->mpris_manager) {
         impl_->mpris_manager->seek_by(offset_seconds);
     } else if (impl_->audio_engine) {
-        impl_->audio_engine->seek(offset_seconds);
+        auto pos = impl_->audio_engine->get_position();
+        double current = pos ? *pos : 0.0;
+        impl_->audio_engine->seek(current + offset_seconds);
     }
 }
 

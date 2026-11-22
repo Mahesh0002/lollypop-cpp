@@ -2,10 +2,15 @@
  * Lollypop C++ - Left Sidebar Panel
  * Compact/expandable navigation sidebar with icons and labels.
  *
- * Compact mode: 42px wide (icon only, 22px icon + 10px left/right padding)
- * Expanded mode: 220px wide (icon + label)
- * Toggle: '>' (pan-end-symbolic) to expand, '<' (pan-start-symbolic) to collapse
+ * Compact mode: 42px wide - only the '>' toggle button and 8 nav icons.
+ * Expanded mode: 220px wide - '<' toggle + settings icon + fullscreen icon
+ *   side by side in the header, then nav items with icon + text label.
+ * Toggle: '>' (pan-end-symbolic) to expand, '<' (pan-start-symbolic) to collapse.
  * No branding, no greetings - pure navigation.
+ *
+ * All buttons are centered with identical size (36x36) and identical margins
+ * (10px all sides). Icons never move position — only text labels appear/
+ * disappear via the GTK revealer widget.
  */
 
 #pragma once
@@ -30,7 +35,7 @@ class LeftSidebar {
 public:
     // Constants
     static constexpr int kIconSize = 22;
-    static constexpr int kCompactWidth = 42;   // 22px icon + 10px left + 10px right
+    static constexpr int kCompactWidth = 42;
     static constexpr int kExpandedWidth = 220;
 
     explicit LeftSidebar(MainWindow* main_window);
@@ -42,6 +47,9 @@ public:
     void toggle_expanded();
     bool is_expanded() const { return expanded_; }
 
+    // Get collapse button for header bar
+    GtkWidget* get_collapse_button() const { return collapse_button_; }
+
     // Persistence
     void load_sidebar_state();
     void save_sidebar_state();
@@ -50,13 +58,11 @@ private:
     MainWindow* main_window_;
     GtkWidget* sidebar_box_;
     GtkWidget* header_box_;
-    GtkWidget* collapse_button_;      // chevron - toggles width
-    GtkWidget* collapse_icon_;        // icon inside collapse_button_ (so we can swap it)
-    GtkWidget* menu_button_;          // hamburger - opens popover (hidden in compact)
-    GtkWidget* settings_button_;      // inside popover
-    GtkWidget* fullscreen_button_;    // inside popover
+    GtkWidget* collapse_button_;      // chevron - toggles width (always visible)
+    GtkWidget* collapse_icon_;        // icon inside collapse_button_ (to swap chevron)
+    GtkWidget* settings_button_;      // settings icon (shown in expanded mode only)
+    GtkWidget* fullscreen_button_;    // fullscreen icon (shown in expanded mode only)
     GtkWidget* nav_list_box_;
-    GtkWidget* menu_popover_;
 
     bool expanded_ = true;  // Default to expanded
     std::vector<NavigationItem> nav_items_;
@@ -73,10 +79,9 @@ private:
 
     // Callbacks
     static void on_collapse_clicked(GtkButton* button, gpointer user_data);
-    static void on_menu_clicked(GtkButton* button, gpointer user_data);
-    static void on_nav_item_clicked(GtkButton* button, gpointer user_data);
     static void on_settings_clicked(GtkButton* button, gpointer user_data);
     static void on_fullscreen_clicked(GtkButton* button, gpointer user_data);
+    static void on_nav_item_clicked(GtkButton* button, gpointer user_data);
 };
 
 } // namespace lollypop

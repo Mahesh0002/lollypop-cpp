@@ -18,9 +18,11 @@
 #include "ui/components/HomePage.hpp"
 #include "util/safe_gtk.hpp"
 
+#include <adwaita.h>
 #include <gtk/gtk.h>
 #include <gtk/gtkentry.h>
 #include <iostream>
+#include <string>
 
 namespace lollypop {
 
@@ -77,13 +79,21 @@ MiddleLibrary::MiddleLibrary(MainWindow* main_window,
     create_placeholder_pages();
 }
 
-MiddleLibrary::~MiddleLibrary() = default;
+MiddleLibrary::~MiddleLibrary() {
+    // Remove search timeout if pending
+    if (search_timeout_id_) {
+        g_source_remove(search_timeout_id_);
+        search_timeout_id_ = 0;
+    }
+    g_weak_ref_clear(&self_weak_ref_);
+}
 
 void MiddleLibrary::setup_ui() {
     main_box_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_add_css_class(main_box_, "middle-library");
     gtk_widget_set_vexpand(main_box_, TRUE);
     gtk_widget_set_hexpand(main_box_, TRUE);
+    gtk_widget_set_visible(main_box_, TRUE);
 
     create_header_bar();
     gtk_box_append(GTK_BOX(main_box_), header_bar_);
@@ -111,6 +121,7 @@ void MiddleLibrary::create_header_bar() {
     gtk_widget_set_margin_bottom(header_bar_, 8);
     gtk_widget_set_margin_start(header_bar_, 24);
     gtk_widget_set_margin_end(header_bar_, 24);
+    gtk_widget_set_visible(header_bar_, TRUE);
 
     search_entry_ = gtk_entry_new();
     gtk_widget_add_css_class(search_entry_, "library-search");
@@ -118,15 +129,22 @@ void MiddleLibrary::create_header_bar() {
     gtk_widget_set_size_request(search_entry_, 300, -1);
     gtk_entry_set_placeholder_text(GTK_ENTRY(search_entry_), "Search your library");
     gtk_entry_set_icon_from_icon_name(GTK_ENTRY(search_entry_), GTK_ENTRY_ICON_PRIMARY, "system-search-symbolic");
+    gtk_widget_set_visible(search_entry_, TRUE);
 
     // Connect search with debounce
     g_signal_connect(search_entry_, "changed", G_CALLBACK(on_search_changed), this);
 
     GtkWidget* menu_button = gtk_menu_button_new();
     gtk_widget_add_css_class(menu_button, "library-menu-button");
+    // Consistent spacing on all four sides.
+    gtk_widget_set_margin_start(menu_button, 10);
+    gtk_widget_set_margin_end(menu_button, 10);
+    gtk_widget_set_margin_top(menu_button, 10);
+    gtk_widget_set_margin_bottom(menu_button, 10);
     GtkWidget* menu_icon = gtk_image_new_from_icon_name("view-more-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(menu_icon), 20);
     gtk_menu_button_set_child(GTK_MENU_BUTTON(menu_button), menu_icon);
+    gtk_widget_set_visible(menu_button, TRUE);
 
     GtkWidget* popover = gtk_popover_new();
     GtkWidget* popover_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
@@ -134,6 +152,7 @@ void MiddleLibrary::create_header_bar() {
     gtk_widget_set_margin_bottom(popover_box, 8);
     gtk_widget_set_margin_start(popover_box, 8);
     gtk_widget_set_margin_end(popover_box, 8);
+    gtk_widget_set_visible(popover_box, TRUE);
 
     const char* menu_items[] = {"View Options", "Sort By", "Group By", "Settings"};
     for (const char* item : menu_items) {
@@ -141,6 +160,12 @@ void MiddleLibrary::create_header_bar() {
         gtk_button_set_has_frame(GTK_BUTTON(btn), FALSE);
         gtk_widget_set_halign(btn, GTK_ALIGN_START);
         gtk_widget_set_hexpand(btn, TRUE);
+        // Consistent spacing on all four sides.
+        gtk_widget_set_margin_start(btn, 10);
+        gtk_widget_set_margin_end(btn, 10);
+        gtk_widget_set_margin_top(btn, 10);
+        gtk_widget_set_margin_bottom(btn, 10);
+        gtk_widget_set_visible(btn, TRUE);
         gtk_box_append(GTK_BOX(popover_box), btn);
     }
     gtk_popover_set_child(GTK_POPOVER(popover), popover_box);
@@ -212,6 +237,15 @@ void MiddleLibrary::create_placeholder_pages() {
     safe_stack_add_named(GTK_STACK(stack_), ardw, "artist_detail");
     pages_["artist_detail"] = std::move(artist_detail);
 
+    // Set up HomePage navigation callbacks now that all pages exist
+    if (auto it = pages_.find("home"); it != pages_.end()) {
+        if (auto* home = dynamic_cast<HomePage*>(it->second.get())) {
+            home->set_recently_added_callback([this]() { set_active_page("songs"); });
+            home->set_recently_played_callback([this]() { set_active_page("songs"); });
+            home->set_favourite_albums_callback([this]() { set_active_page("favorites"); });
+        }
+    }
+
     // Show home page by default
     set_active_page("home");
 }
@@ -258,12 +292,10 @@ void MiddleLibrary::open_artist_detail(const std::string& artist_id) {
 }
 
 void MiddleLibrary::show_genre(const std::string& genre) {
-    // For now, switch to songs page and filter by genre
-    // In a full implementation, we'd create a genre-filtered view
+    // Switch to songs page and filter by genre
     if (auto it = pages_.find("songs"); it != pages_.end()) {
         if (auto* songs = dynamic_cast<SongsPage*>(it->second.get())) {
-            // TODO: Add genre filter to SongsPage
-            // songs->set_genre_filter(genre);
+            songs->set_genre_filter(genre);
         }
     }
     set_active_page("songs");
@@ -277,11 +309,19 @@ void MiddleLibrary::on_search_changed(GtkEditable* editable, gpointer user_data)
     // Cancel previous timeout
     if (self->search_timeout_id_) {
         g_source_remove(self->search_timeout_id_);
+        self->search_timeout_id_ = 0;
+    }
+
+    // Initialize weak ref if not already
+    if (!g_weak_ref_get(&self->self_weak_ref_)) {
+        g_weak_ref_init(&self->self_weak_ref_, self);
     }
 
     // Debounce: wait 250ms before searching
     self->search_timeout_id_ = g_timeout_add(250, [](gpointer data) -> gboolean {
-        auto* self = static_cast<MiddleLibrary*>(data);
+        auto* self = static_cast<MiddleLibrary*>(g_weak_ref_get(&((MiddleLibrary*)data)->self_weak_ref_));
+        if (!self) return G_SOURCE_REMOVE;
+        
         self->search_timeout_id_ = 0;
         uint64_t gen = ++self->search_generation_;
         const char* query_text = gtk_editable_get_text(GTK_EDITABLE(self->search_entry_));

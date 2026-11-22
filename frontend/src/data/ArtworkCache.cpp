@@ -81,7 +81,8 @@ void ArtworkCache::store(const std::string& key, GdkTexture* texture_ref,
     if (existing != entries_.end()) {
         if (existing->second.texture) {
             g_object_unref(existing->second.texture);
-            memory_usage_ -= 64 * 64 * 4;
+            // Subtract the actual byte size of the old entry
+            memory_usage_ -= existing->second.byte_size;
         }
         lru_order_.erase(existing->second.lru_it);
         entries_.erase(existing);
@@ -96,7 +97,8 @@ void ArtworkCache::store(const std::string& key, GdkTexture* texture_ref,
 
     gint tw = gdk_texture_get_width(texture_ref);
     gint th = gdk_texture_get_height(texture_ref);
-    memory_usage_ += static_cast<size_t>(tw) * th * 4;
+    entry.byte_size = static_cast<size_t>(tw) * th * 4;
+    memory_usage_ += entry.byte_size;
 
     lru_order_.push_back(key);
     entry.lru_it = std::prev(lru_order_.end());
@@ -118,7 +120,8 @@ void ArtworkCache::evict(const std::string& key) {
     if (it == entries_.end()) return;
     if (it->second.texture) {
         g_object_unref(it->second.texture);
-        memory_usage_ -= 64 * 64 * 4;
+        // Subtract the actual byte size
+        memory_usage_ -= it->second.byte_size;
     }
     lru_order_.erase(it->second.lru_it);
     entries_.erase(it);
@@ -131,7 +134,8 @@ void ArtworkCache::evict_lru() {
         if (it != entries_.end()) {
             if (it->second.texture) {
                 g_object_unref(it->second.texture);
-                memory_usage_ -= 64 * 64 * 4;
+                // Subtract the actual byte size
+                memory_usage_ -= it->second.byte_size;
             }
             lru_order_.pop_front();
             entries_.erase(it);

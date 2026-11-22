@@ -7,9 +7,24 @@
 
 #include <gtk/gtk.h>
 #include <glib.h>
+#include <algorithm>
 #include <iostream>
 
 namespace lollypop {
+
+namespace {
+struct DecodeData {
+    ArtworkView* view;
+    GObject* widget;  // holds a ref so the callback cannot outlive the widget
+    std::string path;
+    int width;
+    int height;
+};
+
+void free_decode_data(gpointer data) {
+    delete static_cast<DecodeData*>(data);
+}
+} // namespace
 
 ArtworkView::ArtworkView()
     : decode_task_(nullptr), cancellable_(nullptr), has_artwork_(false) {
@@ -18,6 +33,8 @@ ArtworkView::ArtworkView()
     gtk_widget_set_hexpand(widget_.get(), FALSE);
     gtk_widget_set_vexpand(widget_.get(), FALSE);
     gtk_widget_add_css_class(widget_.get(), "artwork-view");
+    gtk_widget_set_visible(widget_.get(), TRUE);
+    g_object_set_data(G_OBJECT(widget_.get()), "artwork-view-owner", this);
 
     // Artwork image
     artwork_image_.reset(gtk_picture_new());
@@ -27,6 +44,7 @@ ArtworkView::ArtworkView()
     gtk_widget_add_css_class(artwork_image_.get(), "artwork-view-image");
     gtk_widget_set_halign(artwork_image_.get(), GTK_ALIGN_CENTER);
     gtk_widget_set_valign(artwork_image_.get(), GTK_ALIGN_CENTER);
+    gtk_widget_set_visible(artwork_image_.get(), FALSE);
 
     // Fallback (music note symbol)
     fallback_image_.reset(gtk_image_new_from_icon_name("audio-x-generic-symbolic"));
@@ -34,7 +52,8 @@ ArtworkView::ArtworkView()
     gtk_widget_add_css_class(fallback_image_.get(), "artwork-view-fallback");
     gtk_widget_set_halign(fallback_image_.get(), GTK_ALIGN_CENTER);
     gtk_widget_set_valign(fallback_image_.get(), GTK_ALIGN_CENTER);
-    gtk_image_set_pixel_size(GTK_IMAGE(fallback_image_.get()), 64);
+    gtk_image_set_pixel_size(GTK_IMAGE(fallback_image_.get()), 32);
+    gtk_widget_set_visible(fallback_image_.get(), TRUE);
 
     gtk_box_append(GTK_BOX(widget_.get()), artwork_image_.get());
     gtk_box_append(GTK_BOX(widget_.get()), fallback_image_.get());
@@ -43,13 +62,16 @@ ArtworkView::ArtworkView()
 }
 
 ArtworkView::~ArtworkView() {
-    // Cancel any pending decode task via GCancellable
+    // The completion callback runs on the main loop. Clear the owner marker
+    // first so a cancelled task can never touch this destroyed object.
+    if (widget_) {
+        g_object_set_data(G_OBJECT(widget_.get()), "artwork-view-owner", nullptr);
+    }
     if (cancellable_) {
         g_cancellable_cancel(cancellable_);
         g_object_unref(cancellable_);
         cancellable_ = nullptr;
     }
-    // Also clean up task reference if still present
     if (decode_task_) {
         g_object_unref(decode_task_);
         decode_task_ = nullptr;
@@ -78,9 +100,15 @@ void ArtworkView::set_artwork_path(const std::string& path) {
         // Create new cancellable for this load
         cancellable_ = g_cancellable_new();
 
-        // Start async decode in thread pool
-        decode_task_ = g_task_new(nullptr, cancellable_, on_decode_done, this);
-        g_task_set_task_data(decode_task_, g_strdup(path.c_str()), g_free);
+        // Start async decode. The task data owns a widget ref so a late
+        // callback can safely check whether this ArtworkView is still alive.
+        auto* data = new DecodeData{this,
+                                    G_OBJECT(g_object_ref(widget_.get())),
+                                    path,
+                                    preferred_width_,
+                                    preferred_height_};
+        decode_task_ = g_task_new(nullptr, cancellable_, on_decode_done, nullptr);
+        g_task_set_task_data(decode_task_, data, free_decode_data);
         g_task_run_in_thread(decode_task_, decode_thread_func);
     } else {
         // No path - show fallback immediately
@@ -91,56 +119,98 @@ void ArtworkView::set_artwork_path(const std::string& path) {
 }
 
 void ArtworkView::decode_thread_func(GTask* task, gpointer /*source_object*/, gpointer /*task_data*/, GCancellable* cancellable) {
-    const char* path = static_cast<const char*>(g_task_get_task_data(task));
+    auto* data = static_cast<DecodeData*>(g_task_get_task_data(task));
+    if (!data) return;
+
     GError* error = nullptr;
-    
-    // Check cancellation before starting
     if (g_cancellable_is_cancelled(cancellable)) {
         g_task_return_error(task, g_error_new(G_IO_ERROR, G_IO_ERROR_CANCELLED, "Cancelled"));
         return;
     }
-    
-    GdkTexture* texture = gdk_texture_new_from_filename(path, &error);
-    if (error) {
-        g_task_return_error(task, error);
-        g_error_free(error);
-    } else {
-        g_task_return_pointer(task, texture, [](gpointer p) { g_object_unref(G_OBJECT(p)); });
+
+    // Decode to an exact-size texture. GtkPicture advertises a texture's
+    // natural size, so loading a full-resolution image made every container
+    // that displayed it grow. Crop to a square and scale before handing it
+    // over to the UI thread.
+    GdkPixbuf* source = gdk_pixbuf_new_from_file(data->path.c_str(), &error);
+    if (error || !source) {
+        if (error) {
+            g_task_return_error(task, error);  // takes ownership
+        } else {
+            g_task_return_error(task, g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
+                                                  "Could not decode artwork: %s",
+                                                  data->path.c_str()));
+        }
+        return;
     }
+
+    const int width = gdk_pixbuf_get_width(source);
+    const int height = gdk_pixbuf_get_height(source);
+    const int side = std::min(width, height);
+    if (side <= 0) {
+        g_object_unref(source);
+        g_task_return_error(task, g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
+                                              "Invalid artwork: %s",
+                                              data->path.c_str()));
+        return;
+    }
+
+    GdkPixbuf* square = gdk_pixbuf_new_subpixbuf(source,
+                                                 (width - side) / 2,
+                                                 (height - side) / 2,
+                                                 side, side);
+    GdkPixbuf* scaled = gdk_pixbuf_scale_simple(square,
+                                                std::max(1, data->width),
+                                                std::max(1, data->height),
+                                                GDK_INTERP_BILINEAR);
+    GdkTexture* texture = gdk_texture_new_for_pixbuf(scaled);
+
+    g_object_unref(scaled);
+    g_object_unref(square);
+    g_object_unref(source);
+
+    g_task_return_pointer(task, texture, [](gpointer p) { g_object_unref(G_OBJECT(p)); });
 }
 
-void ArtworkView::on_decode_done(GObject* /*source*/, GAsyncResult* res, gpointer user_data) {
-    ArtworkView* self = static_cast<ArtworkView*>(user_data);
+void ArtworkView::on_decode_done(GObject* /*source*/, GAsyncResult* res, gpointer /*user_data*/) {
+    auto* task = G_TASK(res);
+    auto* data = static_cast<DecodeData*>(g_task_get_task_data(task));
+    if (!data) return;
+
+    ArtworkView* self = data->view;
+    const bool alive = g_object_get_data(data->widget, "artwork-view-owner") == self;
+    const bool current = alive && self->decode_task_ == task;
+
     GError* error = nullptr;
-    GdkTexture* texture = GDK_TEXTURE(g_task_propagate_pointer(G_TASK(res), &error));
+    GdkTexture* texture = GDK_TEXTURE(g_task_propagate_pointer(task, &error));
 
-    if (error) {
-        // Decode failed - show fallback
-        if (!g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
-            std::cerr << "[ArtworkView] Decode failed: " << error->message << std::endl;
+    if (current) {
+        if (error) {
+            if (!g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+                std::cerr << "[ArtworkView] Decode failed: " << error->message << std::endl;
+            }
+            self->show_fallback();
+        } else if (texture) {
+            gtk_picture_set_paintable(GTK_PICTURE(self->artwork_image_.get()),
+                                      GDK_PAINTABLE(texture));
+            self->has_artwork_ = true;
+            self->update_visibility();
+        } else {
+            self->show_fallback();
         }
-        g_error_free(error);
-        self->show_fallback();
-    } else if (texture) {
-        // Success - set texture on picture
-        gtk_picture_set_paintable(GTK_PICTURE(self->artwork_image_.get()), GDK_PAINTABLE(texture));
-        self->has_artwork_ = true;
-        self->update_visibility();
-        g_object_unref(texture);
-    } else {
-        self->show_fallback();
-    }
 
-    // Clean up task reference
-    if (self->decode_task_) {
-        g_object_unref(self->decode_task_);
-        self->decode_task_ = nullptr;
+        // Release references held for this load only if it is still current.
+        if (self->decode_task_) {
+            g_object_unref(self->decode_task_);
+            self->decode_task_ = nullptr;
+        }
+        if (self->cancellable_) {
+            g_object_unref(self->cancellable_);
+            self->cancellable_ = nullptr;
+        }
     }
-    // Clean up cancellable
-    if (self->cancellable_) {
-        g_object_unref(self->cancellable_);
-        self->cancellable_ = nullptr;
-    }
+    if (error) g_error_free(error);
+    if (texture) g_object_unref(texture);
 }
 
 void ArtworkView::show_fallback() {
@@ -157,9 +227,16 @@ void ArtworkView::set_corner_radius(double radius) {
 }
 
 void ArtworkView::set_preferred_size(int width, int height) {
+    preferred_width_ = width;
+    preferred_height_ = height;
+
+    // Constrain the wrapper too: GtkPicture advertises the texture's natural
+    // size, which otherwise grows its parent container.
+    gtk_widget_set_size_request(widget_.get(), width, height);
     gtk_widget_set_size_request(artwork_image_.get(), width, height);
     gtk_widget_set_size_request(fallback_image_.get(),
-                                width / 2, height / 2);
+                                std::max(16, width / 3),
+                                std::max(16, height / 3));
 }
 
 void ArtworkView::update_visibility() {

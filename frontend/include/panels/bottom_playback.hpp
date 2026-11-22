@@ -1,12 +1,14 @@
 /**
  * Lollypop C++ - Bottom Playback Panel
- * Persistent playback controls spanning full width
+ * Single-line playback controls spanning full width
  *
- * Layout inspired by Quickshell MediaControls.qml:
- * [Left: Artwork + Title/Artist] [Center: Prev | Wavy Waveform | Next] [Right: Modes | Volume Dial | PiP]
- * No play/pause button - shell/MPRIS owns playback
- * Previous/Next flank the wavy waveform progress bar.
- * Volume is a circular dial (like Quickshell MaterialDial.qml)
+ * Layout:
+ *   [Artwork + Title/Artist] [Prev] [Stretched Wavy Progress] [Next]
+ *   [Shuffle] [Repeat] [Loop] [Volume Dial] [PiP]
+ *
+ * The progress bar is a real animated sine wave rendered with Cairo. A fully
+ * transparent GtkScale sits on top so pointer/keyboard seeking and
+ * accessibility keep working without faking the wave with CSS stripes.
  */
 
 #pragma once
@@ -14,14 +16,12 @@
 #include <gtk/gtk.h>
 #include <memory>
 #include <string>
-#include <vector>
 
 namespace lollypop {
 
 class MainWindow;
-class WaveformView;
-class VisualizerModel;
 class ArtworkView;
+class VolumeDial;
 
 class BottomPlayback {
 public:
@@ -30,69 +30,88 @@ public:
 
     GtkWidget* get_widget() const { return main_box_; }
 
-    void update_track_info(const std::string& title, const std::string& artist, const std::string& artwork_path);
+    void update_track_info(const std::string& title, const std::string& artist,
+                           const std::string& artwork_path);
     void update_playback_position(double position, double duration);
     void set_playing(bool playing);
     void set_volume(double volume);
-    void set_points(const std::vector<float>& points);
 
-    // Shell media controls are the playback authority. GTK buttons are read-only
-    // by default; this allows a future pass-through mode if desired.
     void set_controls_sensitive(bool sensitive);
 
-    // Mode button setters
     void set_shuffle(bool enabled);
     void set_repeat(bool enabled);
     void set_loop(bool enabled);
 
+    VolumeDial* get_volume_dial() const { return volume_dial_.get(); }
+
 private:
+    static constexpr guint kWaveFrameMs = 33;
+    static constexpr guint kSeekCommitDelayMs = 120;
+    static constexpr double kWaveLineWidth = 4.0;
+    static constexpr double kWaveAmplitudeMultiplier = 0.5;
+    static constexpr double kWaveFrequency = 6.0;
+
     MainWindow* main_window_;
     GtkWidget* main_box_;
-    GtkWidget* separator_;
 
-    // Left: Artwork + track info
-    GtkWidget* left_box_;
-    ArtworkView* artwork_view_;
+    // Stretched progress region: Cairo wave + transparent interactive scale.
+    GtkWidget* progress_box_;
+    GtkWidget* progress_bar_;
+    GtkWidget* wave_area_;
+
+    // Left: Artwork + track info.
+    std::unique_ptr<ArtworkView> artwork_view_;
     GtkWidget* track_title_label_;
     GtkWidget* track_artist_label_;
 
-    // Center: Prev | Waveform + Time Labels | Next
-    GtkWidget* center_box_;
+    // Transport and right-side controls.
     GtkWidget* prev_button_;
     GtkWidget* next_button_;
-    GtkWidget* progress_box_;       // Contains waveform + time labels
-    WaveformView* waveform_view_;
-    std::unique_ptr<VisualizerModel> waveform_model_;
-    GtkWidget* time_label_left_;    // Current time (left of waveform)
-    GtkWidget* time_label_right_;   // Duration (right of waveform)
-
-    // Right: Volume Dial + PiP + Playback Modes
     GtkWidget* right_box_;
-    GtkWidget* volume_dial_;        // Circular volume dial button
-    GtkWidget* volume_scale_;       // Vertical scale inside popover
-    GtkWidget* volume_popover_;     // Popover for volume dial
+    std::unique_ptr<VolumeDial> volume_dial_;
     GtkWidget* pip_button_;
-    // Playback mode buttons
     GtkWidget* shuffle_button_;
     GtkWidget* repeat_button_;
     GtkWidget* loop_button_;
 
-    double current_volume_ = 0.7;
+    // Playback/wave state.
+    double current_position_ = 0.0;
+    double current_duration_ = 0.0;
+    double current_progress_ = 0.0;
+    double pending_seek_fraction_ = -1.0;
+    double wave_phase_ = 0.0;
+    gint64 last_frame_time_ = 0;
+    guint wave_tick_source_ = 0;
+    guint seek_commit_source_ = 0;
+    bool playing_ = false;
+    bool seeking_ = false;
+    bool updating_progress_ = false;
 
     void setup_ui();
-    void create_left_section();
-    void create_center_section();
+    void create_row();
+    void create_progress();
     void create_right_section();
+    void start_wave_animation();
+    void stop_wave_animation();
+    void commit_pending_seek();
 
-    // Callbacks
+    // Callbacks.
     static void on_prev_clicked(GtkButton* button, gpointer user_data);
     static void on_next_clicked(GtkButton* button, gpointer user_data);
-    static void on_volume_changed(GtkRange* range, gpointer user_data);
-    static void on_volume_dial_changed(GtkRange* range, gpointer user_data);
     static void on_pip_clicked(GtkButton* button, gpointer user_data);
     static void on_shuffle_toggled(GtkToggleButton* button, gpointer user_data);
     static void on_repeat_toggled(GtkToggleButton* button, gpointer user_data);
     static void on_loop_toggled(GtkToggleButton* button, gpointer user_data);
+
+    static void on_wave_draw(GtkDrawingArea* area, cairo_t* cr,
+                             int width, int height, gpointer user_data);
+    static gboolean on_wave_tick(gpointer user_data);
+    static void on_progress_value_changed(GtkRange* range, gpointer user_data);
+    static gboolean on_progress_pressed(GtkGestureClick* gesture, int n_press,
+                                        double x, double y, gpointer user_data);
+    static gboolean on_progress_released(GtkGestureClick* gesture, int n_press,
+                                         double x, double y, gpointer user_data);
+    static gboolean on_seek_commit_timeout(gpointer user_data);
 };
 
 } // namespace lollypop

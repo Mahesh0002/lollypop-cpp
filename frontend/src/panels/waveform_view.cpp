@@ -30,6 +30,7 @@ WaveformView::WaveformView() {
     gtk_widget_add_css_class(widget_.get(), "waveform-view");
     gtk_widget_set_size_request(widget_.get(), preferred_width_,
                                 preferred_height_);
+    gtk_widget_set_visible(widget_.get(), TRUE);
 
     // Set up Cairo drawing
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(widget_.get()),
@@ -184,31 +185,43 @@ void WaveformView::render(cairo_t* cr, int width, int height) {
     cairo_rectangle(cr, 0, 0, width, height);
     cairo_fill(cr);
 
-    // ── No data: reserve height, no waveform ──
-    if (!model_ || !model_->hasData() || smoothed_samples_.empty()) {
+    float mid_y = height * 0.5f;
+    float track_height = height * 0.12f;      // Thin track line
+    float playhead_x = static_cast<float>(progress_ * width);
+
+    // ── Track line: empty portion (full width, dim) ──
+    cairo_set_source_rgba(cr, 0.3, 0.3, 0.35, 0.4);
+    cairo_set_line_width(cr, track_height);
+    cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+    cairo_move_to(cr, 0, mid_y);
+    cairo_line_to(cr, width, mid_y);
+    cairo_stroke(cr);
+
+    // ── Filled progress: from left to playhead ──
+    if (playhead_x > 0.0f) {
+        cairo_set_source_rgba(cr, accent_r_, accent_g_, accent_b_, accent_a_);
+        cairo_set_line_width(cr, track_height);
+        cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+        cairo_move_to(cr, 0, mid_y);
+        cairo_line_to(cr, playhead_x, mid_y);
+        cairo_stroke(cr);
+    }
+
+    // ── No data or not playing: just show simple progress bar ──
+    if (!model_ || !model_->hasData() || smoothed_samples_.empty() || !playing_) {
         return;
     }
 
-    // ── Real wavy waveform ──
+    // ── Real wavy waveform bars (only when playing with audio data) ──
     const auto& samples = smoothed_samples_;
     size_t n = samples.size();
     if (n < 2) return;
 
-    // Normalize against a fixed ceiling so the waveform height is stable
     constexpr float kMaxVisualizerValue = 1000.0f;
-
-    float playhead_x = static_cast<float>(progress_ * width);
-    float mid_y = height * 0.5f;
     float max_amplitude = height * 0.45f;
 
-    // ── Draw wavy waveform as symmetric bars around center (like WaveVisualizer.qml) ──
-    // Left of playhead: saturated accent; right: dimmed accent
-    
-    // We'll draw as connected bars with wavy tops
-    // First, build the path for the upper wave
+    // Upper wave path
     cairo_new_path(cr);
-    
-    // Upper wave (left of playhead - saturated)
     cairo_move_to(cr, 0, mid_y);
     for (size_t i = 0; i < n; ++i) {
         double x = static_cast<double>(i) * width / (n - 1);
@@ -230,7 +243,17 @@ void WaveformView::render(cairo_t* cr, int width, int height) {
     cairo_fill(cr);
     cairo_restore(cr);
 
-    // Lower wave (left of playhead - saturated)
+    // Dimmed right portion (upper)
+    cairo_save(cr);
+    if (playhead_x < width) {
+        cairo_rectangle(cr, playhead_x, 0, width - playhead_x, height);
+        cairo_clip(cr);
+    }
+    cairo_set_source_rgba(cr, accent_r_, accent_g_, accent_b_, accent_a_ * 0.15);
+    cairo_fill(cr);
+    cairo_restore(cr);
+
+    // Lower wave (symmetric below center)
     cairo_new_path(cr);
     cairo_move_to(cr, 0, mid_y);
     for (size_t i = 0; i < n; ++i) {
@@ -252,19 +275,6 @@ void WaveformView::render(cairo_t* cr, int width, int height) {
     cairo_fill(cr);
     cairo_restore(cr);
 
-    // Dimmed right portion (upper)
-    cairo_new_path(cr);
-    cairo_move_to(cr, 0, mid_y);
-    for (size_t i = 0; i < n; ++i) {
-        double x = static_cast<double>(i) * width / (n - 1);
-        double normalized = samples[i] / kMaxVisualizerValue;
-        if (normalized > 1.0) normalized = 1.0;
-        double y = mid_y - normalized * max_amplitude;
-        cairo_line_to(cr, x, y);
-    }
-    cairo_line_to(cr, width, mid_y);
-    cairo_close_path(cr);
-
     cairo_save(cr);
     if (playhead_x < width) {
         cairo_rectangle(cr, playhead_x, 0, width - playhead_x, height);
@@ -274,29 +284,7 @@ void WaveformView::render(cairo_t* cr, int width, int height) {
     cairo_fill(cr);
     cairo_restore(cr);
 
-    // Dimmed right portion (lower)
-    cairo_new_path(cr);
-    cairo_move_to(cr, 0, mid_y);
-    for (size_t i = 0; i < n; ++i) {
-        double x = static_cast<double>(i) * width / (n - 1);
-        double normalized = samples[i] / kMaxVisualizerValue;
-        if (normalized > 1.0) normalized = 1.0;
-        double y = mid_y + normalized * max_amplitude;
-        cairo_line_to(cr, x, y);
-    }
-    cairo_line_to(cr, width, mid_y);
-    cairo_close_path(cr);
-
-    cairo_save(cr);
-    if (playhead_x < width) {
-        cairo_rectangle(cr, playhead_x, 0, width - playhead_x, height);
-        cairo_clip(cr);
-    }
-    cairo_set_source_rgba(cr, accent_r_, accent_g_, accent_b_, accent_a_ * 0.15);
-    cairo_fill(cr);
-    cairo_restore(cr);
-
-    // ── Progress playhead line (only when progress > 0) ──
+    // ── Progress playhead line ──
     if (progress_ > 0.0) {
         cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.8);
         cairo_set_line_width(cr, 2.0);

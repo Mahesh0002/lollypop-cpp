@@ -74,6 +74,15 @@ public:
     virtual void set_queue_changed_callback(QueueChangedCallback cb) = 0;
     virtual void set_visualization_changed_callback(VisualizationCallback cb) = 0;
     virtual void set_library_changed_callback(LibraryChangedCallback cb) = 0;
+
+    // Multicast variants: register an additional observer without replacing
+    // callbacks already installed by other panels.
+    virtual void add_track_changed_callback(TrackChangedCallback cb) = 0;
+    virtual void add_position_changed_callback(PositionChangedCallback cb) = 0;
+    virtual void add_playback_state_changed_callback(PlaybackStateChangedCallback cb) = 0;
+    virtual void add_queue_changed_callback(QueueChangedCallback cb) = 0;
+    virtual void add_visualization_changed_callback(VisualizationCallback cb) = 0;
+    virtual void add_library_changed_callback(LibraryChangedCallback cb) = 0;
 };
 
 } // namespace lollypop

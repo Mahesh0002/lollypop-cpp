@@ -17,8 +17,15 @@ namespace lollypop {
 
 struct SongsPageLoadData {
     SongsPage* page;
+    GObject* page_widget;  // keeps the widget alive until the idle callback runs
     std::vector<Track> tracks;
 };
+
+static void free_load_data(gpointer data) {
+    auto* load_data = static_cast<SongsPageLoadData*>(data);
+    if (load_data->page_widget) g_object_unref(load_data->page_widget);
+    delete load_data;
+}
 
 SongsPage::SongsPage(MainWindow* main_window, ILibraryService* library_service)
     : main_window_(main_window), library_service_(library_service),
@@ -27,7 +34,13 @@ SongsPage::SongsPage(MainWindow* main_window, ILibraryService* library_service)
     setup_ui();
 }
 
-SongsPage::~SongsPage() = default;
+SongsPage::~SongsPage() {
+    // Idle callbacks hold a ref to the widget; clear the owner marker so they
+    // never touch a destroyed SongsPage.
+    if (widget_) {
+        g_object_set_data(G_OBJECT(widget_.get()), "songs-page-owner", nullptr);
+    }
+}
 
 void SongsPage::setup_ui() {
     widget_.reset(gtk_scrolled_window_new());
@@ -37,10 +50,13 @@ void SongsPage::setup_ui() {
     gtk_widget_set_vexpand(widget_.get(), TRUE);
     gtk_widget_set_hexpand(widget_.get(), TRUE);
     gtk_widget_add_css_class(widget_.get(), "library-scrolled");
+    gtk_widget_set_visible(widget_.get(), TRUE);
+    g_object_set_data(G_OBJECT(widget_.get()), "songs-page-owner", this);
 
     GtkWidget* main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_set_hexpand(main_box, TRUE);
     gtk_widget_set_vexpand(main_box, TRUE);
+    gtk_widget_set_visible(main_box, TRUE);
 
     // Column headers with sort buttons
     create_header(main_box);
@@ -53,6 +69,7 @@ void SongsPage::setup_ui() {
     gtk_widget_set_vexpand(scrolled_list_.get(), TRUE);
     gtk_widget_set_hexpand(scrolled_list_.get(), TRUE);
     gtk_widget_add_css_class(scrolled_list_.get(), "songs-list-scrolled");
+    gtk_widget_set_visible(scrolled_list_.get(), TRUE);
 
     list_box_.reset(gtk_list_box_new());
     g_object_ref_sink(list_box_.get());
@@ -60,6 +77,7 @@ void SongsPage::setup_ui() {
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(list_box_.get()),
                                     GTK_SELECTION_NONE);
     gtk_widget_set_hexpand(list_box_.get(), TRUE);
+    gtk_widget_set_visible(list_box_.get(), TRUE);
 
     safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_list_.get()), list_box_.get());
     gtk_widget_set_vexpand(scrolled_list_.get(), TRUE);
@@ -76,6 +94,7 @@ void SongsPage::setup_ui() {
 }
 
 void SongsPage::create_header(GtkWidget* main_box) {
+    (void)main_box;  // header_box_ is appended by setup_ui()
     header_box_.reset(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12));
     g_object_ref_sink(header_box_.get());
     gtk_widget_add_css_class(header_box_.get(), "songs-header");
@@ -97,6 +116,8 @@ void SongsPage::create_header(GtkWidget* main_box) {
             GtkWidget* genre_dropdown = gtk_drop_down_new(G_LIST_MODEL(string_list), nullptr);
             gtk_widget_add_css_class(genre_dropdown, "songs-genre-filter");
             gtk_widget_set_tooltip_text(genre_dropdown, "Filter by genre");
+            // A valid initial selection avoids GTK accessible-value criticals.
+            gtk_drop_down_set_selected(GTK_DROP_DOWN(genre_dropdown), 0);
             g_signal_connect(genre_dropdown, "notify::selected", G_CALLBACK(on_genre_changed), this);
             gtk_box_append(GTK_BOX(header_box_.get()), genre_dropdown);
         }
@@ -126,6 +147,11 @@ void SongsPage::create_header(GtkWidget* main_box) {
             gtk_button_set_has_frame(GTK_BUTTON(sort_btn), FALSE);
             gtk_widget_set_hexpand(sort_btn, TRUE);
             gtk_widget_set_halign(sort_btn, GTK_ALIGN_FILL);
+            // Consistent spacing on all four sides.
+            gtk_widget_set_margin_start(sort_btn, 10);
+            gtk_widget_set_margin_end(sort_btn, 10);
+            gtk_widget_set_margin_top(sort_btn, 10);
+            gtk_widget_set_margin_bottom(sort_btn, 10);
             gtk_button_set_child(GTK_BUTTON(sort_btn), col_label);
             g_object_set_data_full(G_OBJECT(sort_btn), "sort-field",
                                    g_strdup(columns[i].field), g_free);
@@ -136,8 +162,6 @@ void SongsPage::create_header(GtkWidget* main_box) {
             gtk_box_append(GTK_BOX(header_box_.get()), col_label);
         }
     }
-
-    gtk_box_append(GTK_BOX(main_box), header_box_.get());
 }
 
 void SongsPage::on_sort_header_clicked(GtkButton* button, gpointer user_data) {
@@ -198,14 +222,17 @@ void SongsPage::load_page(size_t start) {
 
     auto tracks = library_service_->get_tracks_by_ids(batch);
     
-    // Append to list box on main thread
-    auto* load_data = new SongsPageLoadData{this, std::move(tracks)};
-    g_idle_add([](gpointer data) -> gboolean {
+    // Append on the main thread. The GObject ref keeps the widget alive; the
+    // owner marker lets us drop stale results if the page was destroyed.
+    auto* load_data = new SongsPageLoadData{
+        this, G_OBJECT(g_object_ref(widget_.get())), std::move(tracks)};
+    g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, [](gpointer data) -> gboolean {
         auto* ld = static_cast<SongsPageLoadData*>(data);
-        ld->page->append_tracks(std::move(ld->tracks));
-        delete ld;
+        if (g_object_get_data(ld->page_widget, "songs-page-owner") == ld->page) {
+            ld->page->append_tracks(std::move(ld->tracks));
+        }
         return G_SOURCE_REMOVE;
-    }, load_data);
+    }, load_data, free_load_data);
 }
 
 void SongsPage::append_tracks(std::vector<Track>&& tracks) {

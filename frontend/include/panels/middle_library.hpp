@@ -53,6 +53,7 @@ private:
     // Search
     guint search_timeout_id_ = 0;
     uint64_t search_generation_ = 0;
+    GWeakRef self_weak_ref_; // For timeout callback lifetime safety
 
     void setup_ui();
     void create_header_bar();

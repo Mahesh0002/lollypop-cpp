@@ -25,6 +25,11 @@ void PlaylistItem::setup_ui() {
     gtk_widget_set_hexpand(widget_.get(), FALSE);
     gtk_widget_set_valign(widget_.get(), GTK_ALIGN_START);
     gtk_widget_set_size_request(widget_.get(), 160, 220);
+    // Consistent spacing on all four sides.
+    gtk_widget_set_margin_start(widget_.get(), 10);
+    gtk_widget_set_margin_end(widget_.get(), 10);
+    gtk_widget_set_margin_top(widget_.get(), 10);
+    gtk_widget_set_margin_bottom(widget_.get(), 10);
 
     GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_widget_set_margin_top(box, 8);
@@ -71,6 +76,11 @@ void PlaylistItem::setup_ui() {
     gtk_image_set_pixel_size(GTK_IMAGE(play_icon), 20);
     gtk_button_set_child(GTK_BUTTON(play_button_.get()), play_icon);
     gtk_widget_set_halign(play_button_.get(), GTK_ALIGN_CENTER);
+    // Consistent spacing on all four sides.
+    gtk_widget_set_margin_start(play_button_.get(), 10);
+    gtk_widget_set_margin_end(play_button_.get(), 10);
+    gtk_widget_set_margin_top(play_button_.get(), 10);
+    gtk_widget_set_margin_bottom(play_button_.get(), 10);
     gtk_widget_set_visible(play_button_.get(), FALSE);
     g_signal_connect(play_button_.get(), "clicked",
                      G_CALLBACK(on_play_clicked), this);

@@ -138,7 +138,7 @@ window {
 button {
     border: none;
     border-radius: 8px;
-    padding: 6px 12px;
+    padding: 8px;
     background-color: transparent;
     color: var(--text-primary);
 }
@@ -300,7 +300,8 @@ listboxrow:selected {
     font-weight: 400;
 }
 
-/* Collapse button (chevron) */
+/* Collapse button (chevron) - size LOCKED at 36px via gtk_widget_set_size_request
+   in LeftSidebar::setup_ui(). min-width/min-height keep it from shrinking below 36px. */
 .sidebar-collapse-button {
     min-width: 36px;
     min-height: 36px;
@@ -312,7 +313,7 @@ listboxrow:selected {
     background-color: var(--bg-hover);
 }
 
-/* Menu button (hamburger) */
+/* Menu button (hamburger) - size LOCKED at 36px via gtk_widget_set_size_request. */
 .sidebar-menu-button {
     min-width: 36px;
     min-height: 36px;
@@ -329,11 +330,17 @@ listboxrow:selected {
     min-width: 42px;
 }
 
-/* Compact sidebar nav items - icon only, centered */
+/* Compact sidebar nav items - icon only, label hidden via revealer.
+   Button geometry (size and margins) is set identically in code for both
+   modes, so every icon stays on the same straight line. Only labels
+   appear/disappear via the revealer widget. */
 .sidebar.compact .sidebar-nav-item {
-    margin: 0;
-    padding: 10px;
-    border-radius: 0;
+    padding: 0;
+    border-radius: 10px;
+}
+
+.sidebar.compact .sidebar-nav-item .sidebar-nav-label {
+    min-width: 0;
 }
 
 .sidebar.compact .sidebar-nav-item:hover {
@@ -348,16 +355,9 @@ listboxrow:selected {
     color: var(--accent-color);
 }
 
-/* Compact header - smaller buttons */
+/* Compact header height */
 .sidebar.compact .sidebar-header {
     min-height: 42px;
-}
-
-.sidebar.compact .sidebar-collapse-button {
-    min-width: 22px;
-    min-height: 22px;
-    border-radius: 11px;
-    padding: 10px;
 }
 
 /* ============================================================================
@@ -411,11 +411,22 @@ listboxrow:selected {
 .album-card, .artist-card {
     background-color: var(--bg-secondary);
     border-radius: 12px;
-    padding: 12px;
+    padding: 0;
+}
+
+/* Album cards are square artwork tiles; metadata is hidden by design. */
+.album-card {
+    min-width: 160px;
+    min-height: 160px;
 }
 
 .album-card:hover, .artist-card:hover {
     background-color: var(--bg-hover);
+    transform: scale(1.02);
+}
+
+.album-card:active {
+    transform: scale(0.98);
 }
 
 .album-card:selected, .artist-card:selected {
@@ -425,8 +436,14 @@ listboxrow:selected {
 
 .album-artwork, .artist-artwork {
     border-radius: 8px;
-    min-width: 140px;
-    min-height: 140px;
+    min-width: 160px;
+    min-height: 160px;
+}
+
+.album-title, .album-artist {
+    min-width: 0;
+    min-height: 0;
+    opacity: 0;
 }
 
 .album-title {
@@ -441,6 +458,25 @@ listboxrow:selected {
     font-weight: 400;
     color: var(--text-tertiary);
     margin-top: 2px;
+}
+
+/* Track Row */
+.track-row {
+    background-color: transparent;
+    border-radius: 8px;
+    transition: background-color 0.1s ease;
+}
+
+.track-row:hover {
+    background-color: var(--bg-hover);
+}
+
+.track-row.pressed {
+    background-color: var(--bg-selected);
+}
+
+.track-row.playing {
+    background-color: var(--accent-bg);
 }
 
 /* Horizontal scrolling sections */
@@ -521,27 +557,28 @@ listboxrow:selected {
     border-left: 1px solid var(--border-subtle);
 }
 
-.now-playing-scrolled {
-    background-color: transparent;
-}
-
 .now-playing-content {
     background-color: transparent;
+    min-width: 0;
+    min-height: 0;
 }
 
 .now-playing-artwork {
-    margin-bottom: 24px;
+    margin-bottom: 2px;
+    min-width: 0;
 }
 
 .now-playing-artwork-image {
     border-radius: 12px;
     box-shadow: 0 16px 48px var(--shadow-strong);
-    min-width: 280px;
-    min-height: 280px;
+    /* Size is driven by the panel allocation, not a fixed 280px request. */
+    min-width: 0;
+    min-height: 0;
 }
 
 .now-playing-track-info {
-    margin-bottom: 16px;
+    margin-bottom: 0;
+    min-width: 0;
 }
 
 .now-playing-title {
@@ -555,14 +592,15 @@ listboxrow:selected {
     font-size: 15px;
     font-weight: 400;
     color: var(--text-secondary);
-    margin-top: 4px;
 }
 
 .now-playing-waveform {
-    margin-top: 8px;
+    margin-top: 2px;
+    min-width: 0;
 }
 
-.now-playing-time {
+.now-playing-elapsed,
+.now-playing-duration {
     font-size: 12px;
     font-weight: 500;
     color: var(--text-tertiary);
@@ -573,44 +611,49 @@ listboxrow:selected {
 .waveform-stub {
     background-color: transparent;
     border-radius: 8px;
-    transition: height 200ms ease-out, min-height 200ms ease-out;
+    min-width: 0;
 }
 
 .waveform-playing {
     /* Animation state handled by renderer */
 }
 
-.now-playing-control-button {
+.now-playing-transport {
+    min-width: 0;
+}
+
+.now-playing-control-button,
+.now-playing-play-button,
+.now-playing-mode-button {
+    min-width: 40px;
+    min-height: 40px;
+    border-radius: 20px;
+    padding: 8px;
+}
+
+.now-playing-play-button {
     min-width: 44px;
     min-height: 44px;
     border-radius: 22px;
-    padding: 10px;
+    color: var(--accent-color);
+    background-color: var(--accent-soft);
 }
 
-.now-playing-control-button:hover {
+.now-playing-control-button:hover,
+.now-playing-mode-button:hover,
+.now-playing-play-button:hover {
     background-color: var(--bg-hover);
 }
 
-.now-playing-control-button:disabled {
+.now-playing-control-button:disabled,
+.now-playing-play-button:disabled,
+.now-playing-mode-button:disabled {
     opacity: 0.4;
     color: var(--text-disabled);
 }
 
-.now-playing-modes {
-    margin-top: 8px;
-}
-
 .now-playing-mode-button {
-    min-width: 36px;
-    min-height: 36px;
-    border-radius: 18px;
-    padding: 8px;
     color: var(--text-tertiary);
-}
-
-.now-playing-mode-button:hover {
-    background-color: var(--bg-hover);
-    color: var(--text-secondary);
 }
 
 .now-playing-mode-button:checked {
@@ -619,22 +662,26 @@ listboxrow:selected {
 }
 
 .now-playing-tabs {
-    margin-top: 16px;
+    margin-top: 2px;
+    min-width: 0;
+    min-height: 0;
 }
 
 .now-playing-tab-buttons {
     background-color: var(--bg-tertiary);
     border-radius: 10px;
-    padding: 4px;
+    padding: 3px;
+    min-width: 0;
 }
 
 .now-playing-tab-button {
     border-radius: 8px;
-    padding: 8px 20px;
+    padding: 8px 10px;
     font-size: 13px;
     font-weight: 500;
     color: var(--text-tertiary);
     background-color: transparent;
+    min-width: 0;
 }
 
 .now-playing-tab-button:hover {
@@ -646,6 +693,13 @@ listboxrow:selected {
     color: var(--text-primary);
     background-color: var(--bg-secondary);
     box-shadow: 0 2px 8px var(--shadow-subtle);
+}
+
+.now-playing-tab-content,
+.now-playing-tab-scroll {
+    background-color: transparent;
+    min-width: 0;
+    min-height: 0;
 }
 
 .now-playing-lyrics {
@@ -662,6 +716,8 @@ listboxrow:selected {
 
 .now-playing-queue {
     background-color: transparent;
+    min-width: 0;
+    min-height: 0;
 }
 
 .queue-item-art {
@@ -689,7 +745,8 @@ listboxrow:selected {
 .bottom-playback {
     background-color: var(--bg-secondary);
     border-top: 1px solid var(--border-subtle);
-    min-height: 80px;
+    /* Compact fixed height: 56px artwork + 10px breathing room per side. */
+    min-height: 76px;
 }
 
 .bottom-playback-separator {
@@ -698,7 +755,8 @@ listboxrow:selected {
 }
 
 .bottom-playback-left {
-    min-width: 300px;
+    /* Artwork (56) + gap (10) + ellipsized title/artist (110). */
+    min-width: 176px;
 }
 
 .bottom-playback-artwork {
@@ -706,6 +764,12 @@ listboxrow:selected {
     min-width: 56px;
     min-height: 56px;
     box-shadow: 0 4px 16px var(--shadow-subtle);
+}
+
+.bottom-playback-artwork .artwork-view-image,
+.bottom-playback-artwork .artwork-view-fallback {
+    min-width: 56px;
+    min-height: 56px;
 }
 
 .bottom-playback-title {
@@ -725,10 +789,10 @@ listboxrow:selected {
 }
 
 .bottom-playback-control-button {
-    min-width: 44px;
-    min-height: 44px;
-    border-radius: 22px;
-    padding: 10px;
+    min-width: 36px;
+    min-height: 36px;
+    border-radius: 18px;
+    padding: 0;
     color: var(--text-primary);
     transition: background-color 100ms ease-out, transform 50ms ease-out;
 }
@@ -775,34 +839,46 @@ listboxrow:selected {
     opacity: 0.4;
 }
 
+/* Stretched wave region. The visible sine is drawn by Cairo in
+   bottom_playback.cpp; the GtkScale above it is intentionally invisible. */
 .bottom-playback-progress {
-    margin-top: 8px;
+    min-width: 0;
+    min-height: 28px;
+    margin: 0;
 }
 
-/* New center section: Prev | Waveform + Time Labels | Next */
-.bottom-playback-center {
-    /* No min-width - expands to fill available space between prev/next */
+.progress-wavy-area {
+    min-width: 0;
+    min-height: 28px;
+    background-color: transparent;
 }
 
-.bottom-playback-progress {
-    /* No min-width - expands to fill available space */
+.progress-wavy-scale {
+    min-width: 0;
+    min-height: 28px;
+    opacity: 0;
 }
 
-/* Time labels underneath waveform */
-.bottom-playback-time-labels {
-    /* No min-width - expands to fill available space */
-}
-
-.bottom-playback-time {
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--text-tertiary);
-    font-variant-numeric: tabular-nums;
-    min-width: 50px;
+.progress-wavy-scale trough,
+.progress-wavy-scale trough highlight,
+.progress-wavy-scale slider {
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    border: none;
+    background-color: transparent;
+    box-shadow: none;
 }
 
 .bottom-playback-right {
-    min-width: 100px;
+    min-width: 0;
+}
+
+.bottom-playback-mode-button {
+    min-width: 30px;
+    min-height: 30px;
+    border-radius: 15px;
+    padding: 0;
 }
 
 /* Volume Dial (circular, like Quickshell MaterialDial.qml) */
@@ -860,10 +936,10 @@ listboxrow:selected {
 }
 
 .bottom-playback-pip-button {
-    min-width: 40px;
-    min-height: 40px;
-    border-radius: 20px;
-    padding: 9px;
+    min-width: 30px;
+    min-height: 30px;
+    border-radius: 15px;
+    padding: 0;
 }
 
 .bottom-playback-pip-button:hover {

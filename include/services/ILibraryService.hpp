@@ -78,6 +78,7 @@ public:
     // --- Callbacks ---
     using LibraryChangedCallback = std::function<void()>;
     virtual void set_library_changed_callback(LibraryChangedCallback cb) = 0;
+    virtual void add_library_changed_callback(LibraryChangedCallback cb) = 0;
 };
 
 } // namespace lollypop

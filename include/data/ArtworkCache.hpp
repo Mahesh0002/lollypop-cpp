@@ -39,6 +39,7 @@ struct CacheEntry {
     GdkTexture* texture = nullptr;   ///< Owned reference (ref-counted)
     std::string file_path;           ///< Real file on disk (for MPRIS artUrl)
     int bucket = 0;                  ///< Which bucket this was generated for
+    size_t byte_size = 0;            ///< Actual memory size of this texture (width * height * 4)
     std::list<std::string>::iterator lru_it;
 };
 

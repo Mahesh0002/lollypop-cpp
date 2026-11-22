@@ -44,6 +44,7 @@ public:
     void pause();
     void stop();
     void seek(double position_seconds);
+    bool can_seek() const;
     void set_volume(double volume);  // 0.0 - 1.0
     double get_volume() const;
 

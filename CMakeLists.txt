@@ -43,6 +43,11 @@ pkg_check_modules(LIBADWAITA REQUIRED libadwaita-1)
 pkg_check_modules(SQLITE3 REQUIRED sqlite3)
 pkg_check_modules(GLIB REQUIRED glib-2.0 gio-2.0 gobject-2.0)
 pkg_check_modules(GIO REQUIRED gio-2.0)
+
+# Gettext for internationalization
+find_package(Gettext REQUIRED)
+set(GETTEXT_PACKAGE "lollypop-cpp")
+add_definitions(-DGETTEXT_PACKAGE="${GETTEXT_PACKAGE}")
 # GStreamer for audio playback
 pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0 gstreamer-audio-1.0 gstreamer-pbutils-1.0)
 # CAVA is optional - for audio visualization

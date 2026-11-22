@@ -33,6 +33,7 @@ public:
     GtkWidget* get_widget() const { return widget_.get(); }
     void refresh() override;
     std::string get_page_id() const override { return "songs"; }
+    void set_genre_filter(const std::string& genre);
 
 private:
     struct WidgetDeleter {
@@ -60,7 +61,8 @@ private:
     static constexpr size_t PAGE_SIZE = 100;
     static constexpr size_t PREFETCH_THRESHOLD = 50;
 
-    std::mutex load_mutex_;
+    // reload() calls load_page(); both take this lock, so it must be recursive.
+    std::recursive_mutex load_mutex_;
     std::mutex ids_mutex_;
 
     void setup_ui();
@@ -68,7 +70,6 @@ private:
     void reload();
     void load_page(size_t start);
     void append_tracks(std::vector<Track>&& tracks);
-    void set_genre_filter(const std::string& genre);
 
     void on_track_played(const Track& track);
     void on_track_liked(const Track& track, bool liked);

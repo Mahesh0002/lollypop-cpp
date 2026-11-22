@@ -27,6 +27,7 @@ void GenresPage::setup_ui() {
     gtk_widget_set_vexpand(widget_.get(), TRUE);
     gtk_widget_set_hexpand(widget_.get(), TRUE);
     gtk_widget_add_css_class(widget_.get(), "library-scrolled");
+    gtk_widget_set_visible(widget_.get(), TRUE);
 
     list_box_.reset(gtk_list_box_new());
     g_object_ref_sink(list_box_.get());
@@ -34,6 +35,7 @@ void GenresPage::setup_ui() {
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(list_box_.get()),
                                     GTK_SELECTION_NONE);
     gtk_widget_set_hexpand(list_box_.get(), TRUE);
+    gtk_widget_set_visible(list_box_.get(), TRUE);
 
     safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()), list_box_.get());
 }
@@ -69,6 +71,11 @@ void GenresPage::populate(const std::vector<std::string>& genres) {
         GtkWidget* button = gtk_button_new_with_label("View");
         gtk_widget_set_halign(button, GTK_ALIGN_END);
         gtk_widget_set_hexpand(button, FALSE);
+        // Consistent spacing on all four sides.
+        gtk_widget_set_margin_start(button, 10);
+        gtk_widget_set_margin_end(button, 10);
+        gtk_widget_set_margin_top(button, 10);
+        gtk_widget_set_margin_bottom(button, 10);
         g_object_set_data_full(G_OBJECT(button), "genre", g_strdup(genre.c_str()), g_free);
         g_signal_connect(button, "clicked",
                          G_CALLBACK(on_genre_view_clicked), this);

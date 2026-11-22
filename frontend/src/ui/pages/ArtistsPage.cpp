@@ -26,6 +26,7 @@ void ArtistsPage::setup_ui() {
     gtk_widget_set_vexpand(widget_.get(), TRUE);
     gtk_widget_set_hexpand(widget_.get(), TRUE);
     gtk_widget_add_css_class(widget_.get(), "library-scrolled");
+    gtk_widget_set_visible(widget_.get(), TRUE);
 
     grid_.reset(gtk_flow_box_new());
     g_object_ref_sink(grid_.get());
@@ -36,6 +37,7 @@ void ArtistsPage::setup_ui() {
     gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(grid_.get()), 24);
     gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(grid_.get()), 24);
     gtk_widget_set_hexpand(grid_.get(), TRUE);
+    gtk_widget_set_visible(grid_.get(), TRUE);
 
     safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()), grid_.get());
 }
