@@ -28,6 +28,7 @@
 #include <glib.h>
 #include <iostream>
 #include <algorithm>
+#include <atomic>
 #include <mutex>
 #include <optional>
 #include <vector>
@@ -651,10 +652,8 @@ bool AudioEngine::load_track(const std::string& file_path) {
         return false;
     }
 
-    // First ensure pipeline is in a clean state before setting URI.
-    gst_element_set_state(impl->pipeline, GST_STATE_NULL);
-
-    // Set the URI on playbin.
+    // Simply set the URI on playbin - playbin handles track changes internally.
+    // No need to set pipeline to NULL and re-request pads.
     g_object_set(impl->playbin, "uri", uri, nullptr);
     g_free(uri);
 
