@@ -1,6 +1,11 @@
 /**
  * Lollypop C++ - Bottom Playback Panel
  * Persistent playback controls spanning full width
+ *
+ * Layout:
+ * [Left: Artwork + Title/Artist] [Center: Prev | Waveform | Next + Time Labels] [Right: Modes | Volume | PiP]
+ * No play/pause button - shell/media keys are the authority.
+ * Previous/Next flank the waveform progress bar.
  */
 
 #pragma once
@@ -34,6 +39,11 @@ public:
     // by default; this allows a future pass-through mode if desired.
     void set_controls_sensitive(bool sensitive);
 
+    // Mode button setters
+    void set_shuffle(bool enabled);
+    void set_repeat(bool enabled);
+    void set_loop(bool enabled);
+
 private:
     MainWindow* main_window_;
     GtkWidget* main_box_;
@@ -45,20 +55,15 @@ private:
     GtkWidget* track_title_label_;
     GtkWidget* track_artist_label_;
 
-    // Center: Playback controls
+    // Center: Prev | Waveform + Time Labels | Next
     GtkWidget* center_box_;
     GtkWidget* prev_button_;
-    GtkWidget* play_button_;
     GtkWidget* next_button_;
-    GtkWidget* play_icon_;
-    bool is_playing_ = false;
-
-    // Progress: Waveform
-    GtkWidget* progress_box_;
+    GtkWidget* progress_box_;       // Contains waveform + time labels
     WaveformView* waveform_view_;
     std::unique_ptr<VisualizerModel> waveform_model_;
-    GtkWidget* time_label_;
-    GtkWidget* time_right_label_;
+    GtkWidget* time_label_left_;    // Current time (left of waveform)
+    GtkWidget* time_label_right_;   // Duration (right of waveform)
 
     // Right: Volume + PiP + Playback Modes
     GtkWidget* right_box_;
@@ -74,17 +79,10 @@ private:
     void setup_ui();
     void create_left_section();
     void create_center_section();
-    void create_progress_section();
     void create_right_section();
-
-    // Mode button setters
-    void set_shuffle(bool enabled);
-    void set_repeat(bool enabled);
-    void set_loop(bool enabled);
 
     // Callbacks
     static void on_prev_clicked(GtkButton* button, gpointer user_data);
-    static void on_play_clicked(GtkButton* button, gpointer user_data);
     static void on_next_clicked(GtkButton* button, gpointer user_data);
     static void on_volume_changed(GtkRange* range, gpointer user_data);
     static void on_pip_clicked(GtkButton* button, gpointer user_data);

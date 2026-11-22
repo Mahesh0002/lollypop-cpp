@@ -111,10 +111,6 @@ void MiddleLibrary::create_header_bar() {
     gtk_widget_set_margin_start(header_bar_, 24);
     gtk_widget_set_margin_end(header_bar_, 24);
 
-    GtkWidget* greeting = gtk_label_new("Good evening");
-    gtk_widget_add_css_class(greeting, "library-greeting");
-    gtk_label_set_xalign(GTK_LABEL(greeting), 0.0);
-
     search_entry_ = gtk_entry_new();
     gtk_widget_add_css_class(search_entry_, "library-search");
     gtk_widget_set_hexpand(search_entry_, TRUE);
@@ -149,7 +145,7 @@ void MiddleLibrary::create_header_bar() {
     gtk_popover_set_child(GTK_POPOVER(popover), popover_box);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(menu_button), popover);
 
-    gtk_box_append(GTK_BOX(header_bar_), greeting);
+    // No greeting - clean header with search and menu only
     gtk_box_append(GTK_BOX(header_bar_), search_entry_);
     gtk_box_append(GTK_BOX(header_bar_), menu_button);
 }

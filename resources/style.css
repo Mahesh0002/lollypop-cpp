@@ -150,7 +150,7 @@ listboxrow:selected {
 .sidebar {
     background-color: var(--bg-secondary);
     border-right: 1px solid var(--border-subtle);
-    min-width: 64px;
+    min-width: 42px;
 }
 
 .sidebar-header {
@@ -235,7 +235,38 @@ listboxrow:selected {
 
 /* Compact sidebar mode */
 .sidebar.compact {
-    min-width: 64px;
+    min-width: 42px;
+}
+
+/* Compact sidebar nav items - icon only, centered */
+.sidebar.compact .sidebar-nav-item {
+    margin: 0;
+    padding: 10px;
+    border-radius: 0;
+}
+
+.sidebar.compact .sidebar-nav-item:hover {
+    background-color: var(--bg-hover);
+}
+
+.sidebar.compact .sidebar-nav-item .sidebar-nav-icon {
+    color: var(--text-secondary);
+}
+
+.sidebar.compact .sidebar-nav-item.active .sidebar-nav-icon {
+    color: var(--accent-color);
+}
+
+/* Compact header - smaller buttons */
+.sidebar.compact .sidebar-header {
+    min-height: 42px;
+}
+
+.sidebar.compact .sidebar-collapse-button {
+    min-width: 22px;
+    min-height: 22px;
+    border-radius: 11px;
+    padding: 10px;
 }
 
 /* ============================================================================
@@ -248,13 +279,6 @@ listboxrow:selected {
 
 .library-header {
     background-color: transparent;
-}
-
-.library-greeting {
-    font-size: 28px;
-    font-weight: 600;
-    letter-spacing: -0.5px;
-    color: var(--text-primary);
 }
 
 .library-search {
@@ -651,6 +675,20 @@ listboxrow:selected {
 
 .bottom-playback-progress {
     margin-top: 8px;
+}
+
+/* New center section: Prev | Waveform + Time Labels | Next */
+.bottom-playback-center {
+    min-width: 240px;
+}
+
+.bottom-playback-progress {
+    min-width: 200px;
+}
+
+/* Time labels underneath waveform */
+.bottom-playback-time-labels {
+    min-width: 200px;
 }
 
 .bottom-playback-time {

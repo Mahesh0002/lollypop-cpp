@@ -1,9 +1,11 @@
 /**
  * Lollypop C++ - Bottom Playback Implementation
- * 
- * Design per user specification:
- * [Artwork + Metadata] [Rewind] [Progress Bar (wide)] [Fast Forward] [Shuffle/Repeat/Loop] [Volume] [PiP]
+ *
+ * Layout:
+ * [Left: Artwork + Title/Artist] [Center: Prev | Waveform + Time Labels | Next] [Right: Modes | Volume | PiP]
  * No play/pause button - shell/MPRIS controls playback
+ * Previous/Next flank the waveform progress bar
+ * Time labels underneath waveform (left = current time, right = duration)
  */
 
 #include "panels/bottom_playback.hpp"
@@ -30,18 +32,19 @@ BottomPlayback::BottomPlayback(MainWindow* main_window)
       center_box_(nullptr),
       prev_button_(nullptr),
       next_button_(nullptr),
+      progress_box_(nullptr),
       waveform_view_(nullptr),
       waveform_model_(nullptr),
-      time_label_(nullptr),
-      time_right_label_(nullptr),
+      time_label_left_(nullptr),
+      time_label_right_(nullptr),
       right_box_(nullptr),
-      shuffle_button_(nullptr),
-      repeat_button_(nullptr),
-      loop_button_(nullptr),
       volume_button_(nullptr),
       volume_scale_(nullptr),
       volume_popover_(nullptr),
-      pip_button_(nullptr) {
+      pip_button_(nullptr),
+      shuffle_button_(nullptr),
+      repeat_button_(nullptr),
+      loop_button_(nullptr) {
     setup_ui();
 }
 
@@ -65,6 +68,7 @@ void BottomPlayback::create_left_section() {
     gtk_widget_set_margin_top(left_box_, 8);
     gtk_widget_set_margin_bottom(left_box_, 8);
     gtk_widget_set_valign(left_box_, GTK_ALIGN_CENTER);
+    gtk_widget_set_size_request(left_box_, 220, -1);  // Minimum width
 
     // ArtworkView component
     artwork_view_ = new ArtworkView();
@@ -75,18 +79,19 @@ void BottomPlayback::create_left_section() {
     // Track info
     GtkWidget* info_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
     gtk_widget_set_valign(info_box, GTK_ALIGN_CENTER);
+    gtk_widget_set_hexpand(info_box, TRUE);
 
     track_title_label_ = gtk_label_new("No track playing");
     gtk_widget_add_css_class(track_title_label_, "bottom-playback-title");
     gtk_label_set_xalign(GTK_LABEL(track_title_label_), 0.0);
     gtk_label_set_ellipsize(GTK_LABEL(track_title_label_), PANGO_ELLIPSIZE_END);
-    gtk_widget_set_size_request(track_title_label_, 200, -1);
+    gtk_widget_set_size_request(track_title_label_, 160, -1);
 
     track_artist_label_ = gtk_label_new("Select a track");
     gtk_widget_add_css_class(track_artist_label_, "bottom-playback-artist");
     gtk_label_set_xalign(GTK_LABEL(track_artist_label_), 0.0);
     gtk_label_set_ellipsize(GTK_LABEL(track_artist_label_), PANGO_ELLIPSIZE_END);
-    gtk_widget_set_size_request(track_artist_label_, 200, -1);
+    gtk_widget_set_size_request(track_artist_label_, 160, -1);
 
     gtk_box_append(GTK_BOX(info_box), track_title_label_);
     gtk_box_append(GTK_BOX(info_box), track_artist_label_);
@@ -96,13 +101,13 @@ void BottomPlayback::create_left_section() {
 }
 
 void BottomPlayback::create_center_section() {
-    center_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    center_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_add_css_class(center_box_, "bottom-playback-center");
     gtk_widget_set_hexpand(center_box_, TRUE);
     gtk_widget_set_halign(center_box_, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(center_box_, GTK_ALIGN_CENTER);
 
-    // Rewind button
+    // Prev button (rewind) - immediately left of waveform
     prev_button_ = gtk_button_new();
     gtk_button_set_has_frame(GTK_BUTTON(prev_button_), FALSE);
     gtk_widget_add_css_class(prev_button_, "bottom-playback-control-button");
@@ -113,40 +118,44 @@ void BottomPlayback::create_center_section() {
     gtk_widget_set_sensitive(prev_button_, FALSE);  // read-only; shell owns playback
     gtk_box_append(GTK_BOX(center_box_), prev_button_);
 
-    // Progress container: time_left | waveform (expands) | time_right
-    GtkWidget* progress_container = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-    gtk_widget_add_css_class(progress_container, "bottom-playback-progress-container");
-    gtk_widget_set_hexpand(progress_container, TRUE);
-    gtk_widget_set_halign(progress_container, GTK_ALIGN_CENTER);
-    gtk_widget_set_valign(progress_container, GTK_ALIGN_CENTER);
+    // Progress container: vertical box with waveform on top, time labels underneath
+    progress_box_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+    gtk_widget_add_css_class(progress_box_, "bottom-playback-progress");
+    gtk_widget_set_hexpand(progress_box_, TRUE);
+    gtk_widget_set_halign(progress_box_, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(progress_box_, GTK_ALIGN_CENTER);
 
-    // Time left label
-    time_label_ = gtk_label_new("0:00");
-    gtk_widget_add_css_class(time_label_, "bottom-playback-time");
-    gtk_widget_set_size_request(time_label_, 44, -1);
-    gtk_box_append(GTK_BOX(progress_container), time_label_);
-
-    // Waveform widget — wide and prominent, expands to fill available width
+    // Waveform widget - reduced preferred width, expands to fill
     waveform_view_ = new WaveformView();
-    waveform_view_->set_preferred_size(600, 48);
+    waveform_view_->set_preferred_size(280, 40);  // Reduced from 600 to ~280
     gtk_widget_set_hexpand(waveform_view_->get_widget(), TRUE);
-    gtk_box_append(GTK_BOX(progress_container), waveform_view_->get_widget());
+    gtk_widget_set_size_request(waveform_view_->get_widget(), 200, 40);  // Min width 200
+    gtk_box_append(GTK_BOX(progress_box_), waveform_view_->get_widget());
 
-    // Time right label
-    time_right_label_ = gtk_label_new("0:00");
-    gtk_widget_add_css_class(time_right_label_, "bottom-playback-time");
-    gtk_widget_set_size_request(time_right_label_, 44, -1);
-    gtk_label_set_xalign(GTK_LABEL(time_right_label_), 1.0);
-    gtk_box_append(GTK_BOX(progress_container), time_right_label_);
+    // Time labels underneath waveform: left = current time, right = duration
+    GtkWidget* time_labels_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class(time_labels_box, "bottom-playback-time-labels");
+    gtk_widget_set_hexpand(time_labels_box, TRUE);
+
+    time_label_left_ = gtk_label_new("0:00");
+    gtk_widget_add_css_class(time_label_left_, "bottom-playback-time");
+    gtk_label_set_xalign(GTK_LABEL(time_label_left_), 0.0);
+    gtk_box_append(GTK_BOX(time_labels_box), time_label_left_);
+
+    time_label_right_ = gtk_label_new("0:00");
+    gtk_widget_add_css_class(time_label_right_, "bottom-playback-time");
+    gtk_label_set_xalign(GTK_LABEL(time_label_right_), 1.0);
+    gtk_box_append(GTK_BOX(time_labels_box), time_label_right_);
+
+    gtk_box_append(GTK_BOX(progress_box_), time_labels_box);
 
     // Create a VisualizerModel to feed the waveform
     waveform_model_ = std::make_unique<VisualizerModel>();
     waveform_view_->set_model(waveform_model_.get());
 
-    gtk_box_append(GTK_BOX(center_box_), progress_container);
-    gtk_box_append(GTK_BOX(main_box_), center_box_);
+    gtk_box_append(GTK_BOX(center_box_), progress_box_);
 
-    // Fast forward button
+    // Next button (fast forward) - immediately right of waveform
     next_button_ = gtk_button_new();
     gtk_button_set_has_frame(GTK_BUTTON(next_button_), FALSE);
     gtk_widget_add_css_class(next_button_, "bottom-playback-control-button");
@@ -156,6 +165,8 @@ void BottomPlayback::create_center_section() {
     g_signal_connect(next_button_, "clicked", G_CALLBACK(on_next_clicked), this);
     gtk_widget_set_sensitive(next_button_, FALSE);  // read-only; shell owns playback
     gtk_box_append(GTK_BOX(center_box_), next_button_);
+
+    gtk_box_append(GTK_BOX(main_box_), center_box_);
 }
 
 void BottomPlayback::create_right_section() {
@@ -266,10 +277,10 @@ void BottomPlayback::update_playback_position(double position, double duration) 
 
     char time_str[32];
     snprintf(time_str, sizeof(time_str), "%d:%02d", pos_min, pos_sec);
-    gtk_label_set_text(GTK_LABEL(time_label_), time_str);
+    gtk_label_set_text(GTK_LABEL(time_label_left_), time_str);
 
     snprintf(time_str, sizeof(time_str), "%d:%02d", dur_min, dur_sec);
-    gtk_label_set_text(GTK_LABEL(time_right_label_), time_str);
+    gtk_label_set_text(GTK_LABEL(time_label_right_), time_str);
 
     double progress = duration > 0 ? position / duration : 0.0;
     if (waveform_view_) {

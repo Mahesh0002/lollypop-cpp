@@ -95,8 +95,7 @@ void MainWindow::setup_layout() {
     // Set column expansion: middle gets most space
     gtk_grid_set_column_homogeneous(GTK_GRID(main_grid_), FALSE);
 
-    // Left sidebar: fixed width (compact ~64px, expanded ~220px)
-    gtk_widget_set_size_request(left_widget, 64, -1);
+    // Left sidebar: fixed width controlled by LeftSidebar (compact 42px, expanded 220px)
     gtk_widget_set_hexpand(left_widget, FALSE);
 
     // Middle library: expands to fill remaining space

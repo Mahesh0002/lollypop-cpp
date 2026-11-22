@@ -236,18 +236,11 @@ void HomePage::create_welcome_section() {
     gtk_widget_add_css_class(welcome, "home-welcome");
     gtk_widget_set_margin_bottom(welcome, 16);
 
-    GtkWidget* greeting = gtk_label_new("Good evening");
-    gtk_widget_add_css_class(greeting, "home-greeting");
-    gtk_label_set_xalign(GTK_LABEL(greeting), 0.0);
-
+    // No greeting - just a subtle prompt
     GtkWidget* subtitle = gtk_label_new("What would you like to listen to?");
     gtk_widget_add_css_class(subtitle, "home-subtitle");
     gtk_label_set_xalign(GTK_LABEL(subtitle), 0.0);
 
-    // Safe append - check if widget already has a parent
-    if (gtk_widget_get_parent(greeting) == nullptr) {
-        gtk_box_append(GTK_BOX(welcome), greeting);
-    }
     if (gtk_widget_get_parent(subtitle) == nullptr) {
         gtk_box_append(GTK_BOX(welcome), subtitle);
     }
