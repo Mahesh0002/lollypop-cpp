@@ -1,5 +1,9 @@
 /**
  * Lollypop C++ - VisualizerEngine Implementation
+ *
+ * Simplified architecture using mutex-protected latest-frame snapshot
+ * with EMA smoothing (Exponential Moving Average).
+ * Target: ~30 FPS cap for UI consumption.
  */
 
 #include "visualizer_engine.hpp"
@@ -101,13 +105,14 @@ std::vector<float> band_map(const std::vector<double>& magnitudes,
     return out;
 }
 
-// Simple one-pole smoothing: out = alpha * new + (1 - alpha) * prev.
-void smooth_spectrum(std::vector<float>& spectrum,
-                     const std::vector<float>& previous,
-                     float alpha) {
-    for (std::size_t i = 0; i < spectrum.size(); i++) {
-        spectrum[i] =
-            alpha * spectrum[i] + (1.0f - alpha) * previous[i];
+// EMA smoothing: out = alpha * new + (1 - alpha) * prev.
+// Alpha = 1 - exp(-dt / tau). For ~30 FPS and tau = 50ms, alpha ~ 0.5.
+void ema_smooth(std::vector<float>& current,
+                std::vector<float>& previous,
+                float alpha) {
+    const std::size_t n = std::min(current.size(), previous.size());
+    for (std::size_t i = 0; i < n; i++) {
+        current[i] = alpha * current[i] + (1.0f - alpha) * previous[i];
     }
 }
 
@@ -118,9 +123,9 @@ struct VisualizerEngine::Impl {
     SpectrumCallback spectrum_cb;
     std::mutex cb_mutex;
 
-    // Guards band_count, enabled, and previous_spectrum against concurrent
+    // Guards band_count, enabled, and latest_spectrum against concurrent
     // access by the FFT worker thread and the UI thread.
-    std::mutex config_mutex;
+    std::mutex data_mutex;
 
     // Ring buffer fed by the GStreamer streaming thread (appsink callback).
     SpscRingBuffer<float, kRingCapacity> ring;
@@ -135,19 +140,20 @@ struct VisualizerEngine::Impl {
     std::shared_ptr<std::atomic<bool>> alive =
         std::make_shared<std::atomic<bool>>(true);
 
-    // Triple buffer for spectrum frames consumed by the GTK draw callback.
-    TripleBuffer<std::vector<float>> triple;
-
-    std::atomic<int> band_count = kDefaultBands;
-    std::atomic<bool> enabled{false};
+    // Latest spectrum frame (mutex-protected snapshot).
+    std::vector<float> latest_spectrum;
+    std::vector<float> previous_spectrum;  // For EMA smoothing
 
     // Reusable frame buffer and Hann window.
     std::vector<float> frame;
     std::vector<float> window;
-    std::vector<float> previous_spectrum;
 
     // FFT scratch space (complex).
     std::vector<std::complex<double>> fft_in;
+
+    std::atomic<int> band_count = kDefaultBands;
+    std::atomic<bool> enabled{false};
+    std::atomic<uint64_t> frame_count{0};
 
     double sample_rate = 44100.0;
 
@@ -155,12 +161,18 @@ struct VisualizerEngine::Impl {
         frame.resize(kFrameSize, 0.0f);
         window = make_hann_window(kFrameSize);
         {
-            std::lock_guard<std::mutex> lock(config_mutex);
+            std::lock_guard<std::mutex> lock(data_mutex);
             previous_spectrum.assign(static_cast<std::size_t>(band_count), 0.0f);
+            latest_spectrum.assign(static_cast<std::size_t>(band_count), 0.0f);
         }
         fft_in.resize(kFrameSize);
 
+        // Target ~30 FPS = ~33ms per frame
+        constexpr std::chrono::microseconds frame_interval(33333);
+
         while (running && alive->load()) {
+            auto frame_start = std::chrono::steady_clock::now();
+
             // Fill a frame from the ring buffer. If the ring is empty, yield
             // briefly rather than spinning, then retry.
             std::size_t filled = 0;
@@ -180,7 +192,7 @@ struct VisualizerEngine::Impl {
             int bands;
             bool en;
             {
-                std::lock_guard<std::mutex> lock(config_mutex);
+                std::lock_guard<std::mutex> lock(data_mutex);
                 bands = band_count;
                 en = enabled;
             }
@@ -206,24 +218,18 @@ struct VisualizerEngine::Impl {
             std::vector<float> spectrum =
                 band_map(magnitudes, kFrameSize, bands, sample_rate);
 
-            // Smooth using the previous spectrum (guarded by config_mutex).
+            // EMA smoothing using the previous spectrum (guarded by data_mutex).
+            // Alpha = 0.6 provides smooth visualization with good responsiveness.
             {
-                std::lock_guard<std::mutex> lock(config_mutex);
+                std::lock_guard<std::mutex> lock(data_mutex);
                 if (previous_spectrum.size() == spectrum.size()) {
-                    smooth_spectrum(spectrum, previous_spectrum, 0.6f);
+                    ema_smooth(spectrum, previous_spectrum, 0.6f);
                 }
                 previous_spectrum = spectrum;
+                latest_spectrum = spectrum;  // Publish snapshot
             }
 
-            // Keep a copy for the direct callback before moving into the
-            // triple buffer.
-            std::vector<float> spectrum_copy = spectrum;
-
-            // Publish to triple buffer for the UI.
-            if (auto* buf = triple.begin_write()) {
-                *buf = std::move(spectrum);
-                triple.end_write();
-            }
+            frame_count.fetch_add(1, std::memory_order_relaxed);
 
             // Invoke the direct spectrum callback (if set) on the worker thread.
             SpectrumCallback cb;
@@ -231,7 +237,7 @@ struct VisualizerEngine::Impl {
                 std::lock_guard<std::mutex> lock(cb_mutex);
                 cb = spectrum_cb;
             }
-            if (cb) cb(spectrum_copy);
+            if (cb) cb(latest_spectrum);
 
             // Publish spectrum as a conflated EventBus event so UI consumers
             // receive it on the GTK main context (thread-safe). Conflated
@@ -239,8 +245,15 @@ struct VisualizerEngine::Impl {
             Event event;
             event.type = "spectrum";
             event.event_class = EventClass::Conflated;
-            event.payload = SpectrumFrame{spectrum_copy};
+            event.payload = SpectrumFrame{latest_spectrum};
             EventBus::instance().publish_conflated(event.type, event);
+
+            // Frame rate limiting: sleep to maintain ~30 FPS
+            auto frame_end = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(frame_end - frame_start);
+            if (elapsed < frame_interval) {
+                std::this_thread::sleep_for(frame_interval - elapsed);
+            }
         }
     }
 };
@@ -276,7 +289,11 @@ void VisualizerEngine::set_audio_engine(AudioEngine* engine) {
 void VisualizerEngine::start() {
     if (impl_->running) return;
     impl_->ring.clear();
-    impl_->previous_spectrum.assign(static_cast<std::size_t>(impl_->band_count), 0.0f);
+    {
+        std::lock_guard<std::mutex> lock(impl_->data_mutex);
+        impl_->previous_spectrum.assign(static_cast<std::size_t>(impl_->band_count), 0.0f);
+        impl_->latest_spectrum.assign(static_cast<std::size_t>(impl_->band_count), 0.0f);
+    }
     impl_->running = true;
     impl_->worker_thread = std::thread(&Impl::fft_worker, impl_.get());
 }
@@ -293,6 +310,11 @@ bool VisualizerEngine::is_running() const {
     return impl_->running;
 }
 
+std::vector<float> VisualizerEngine::get_latest_spectrum() const {
+    std::lock_guard<std::mutex> lock(impl_->data_mutex);
+    return impl_->latest_spectrum;
+}
+
 void VisualizerEngine::set_spectrum_callback(SpectrumCallback cb) {
     std::lock_guard<std::mutex> lock(impl_->cb_mutex);
     impl_->spectrum_cb = std::move(cb);
@@ -302,11 +324,12 @@ void VisualizerEngine::set_band_count(int bands) {
     if (bands < 1) bands = 1;
     if (bands > 256) bands = 256;
     impl_->band_count = bands;
-    // Resize the previous-spectrum buffer under the config mutex so the FFT
+    // Resize the previous-spectrum buffer under the data mutex so the FFT
     // worker never reads a vector that is being resized out from under it.
     if (bands > 0) {
-        std::lock_guard<std::mutex> lock(impl_->config_mutex);
+        std::lock_guard<std::mutex> lock(impl_->data_mutex);
         impl_->previous_spectrum.assign(static_cast<std::size_t>(bands), 0.0f);
+        impl_->latest_spectrum.assign(static_cast<std::size_t>(bands), 0.0f);
     }
 }
 

@@ -78,9 +78,19 @@ public:
     // on the worker thread using fetch_fn, and the callback fires on the
     // worker thread when complete. The caller is responsible for dispatching
     // to the GTK main context if it touches UI.
+    // file_path is optional but enables local .lrc file reading.
     bool request_lyrics(const std::string& track_id,
                         const std::string& artist,
                         const std::string& title,
+                        const std::string& file_path,
+                        LyricsReadyCallback cb);
+
+    // Overload that accepts pre-extracted embedded lyrics.
+    bool request_lyrics(const std::string& track_id,
+                        const std::string& artist,
+                        const std::string& title,
+                        const std::string& file_path,
+                        const std::string& embedded_lyrics,
                         LyricsReadyCallback cb);
 
     // Parse LRC-formatted timed lyrics into LyricLines.
@@ -96,6 +106,10 @@ public:
     // Return the display text for lyrics: synced text if available, else raw text.
     static std::string display_text(const Lyrics& lyrics);
 
+    // Read local .lrc file next to the audio file.
+    // Returns the file content or empty string if not found.
+    static std::string read_local_lrc_file(const std::string& audio_file_path);
+
     void set_fetch_fn(FetchFn fn);
 
 private:
@@ -103,6 +117,8 @@ private:
         std::string track_id;
         std::string artist;
         std::string title;
+        std::string file_path;
+        std::string embedded_lyrics;
         LyricsReadyCallback callback;
     };
 

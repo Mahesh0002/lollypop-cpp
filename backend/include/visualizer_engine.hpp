@@ -3,7 +3,7 @@
  *
  * Audio-reactive visualization pipeline isolated from the audio output path.
  *
- * Architecture (plan.md Section 8):
+ * Simplified Architecture (Phase 3 - Visualizer Snapshot):
  *
  *   GStreamer appsink (streaming thread)
  *       | pull samples, convert to mono float
@@ -14,10 +14,10 @@
  *   FFT worker thread            (window -> FFT -> magnitudes -> bands)
  *       |
  *       v
- *   Triple buffer                (UI reads latest frame without blocking)
+ *   Mutex-protected latest-frame snapshot with EMA smoothing (30 FPS cap)
  *       |
  *       v
- *   GTK draw callback (main thread)
+ *   GTK draw callback (main thread) reads via get_latest_spectrum()
  *
  * For internal playback the samples come from the appsink branch. For
  * external MPRIS players, CAVA/system capture is the appropriate source and
@@ -94,57 +94,6 @@ public:
     }
 };
 
-// ---------------------------------------------------------------------------
-// Triple buffer: producer publishes completed frames, consumer reads the
-// latest without blocking. Used between the FFT worker and the GTK draw
-// callback.
-// ---------------------------------------------------------------------------
-template <typename T>
-class TripleBuffer {
-    T buffers_[3];
-    std::atomic<int> write_index_{0};      // buffer currently being written
-    std::atomic<int> committed_index_{-1}; // latest fully-written buffer
-    std::atomic<int> read_index_{-1};      // last buffer read by consumer
-
-public:
-    TripleBuffer() = default;
-
-    // Producer: obtain a buffer to fill. Returns nullptr if all buffers are
-    // in use (should not happen with a single producer + single consumer).
-    T* begin_write() {
-        int wi = write_index_.load(std::memory_order_relaxed);
-        int ci = committed_index_.load(std::memory_order_acquire);
-        int ri = read_index_.load(std::memory_order_acquire);
-        // The next buffer to write is the one neither committed nor being read.
-        int next = (wi + 1) % 3;
-        if (next == ci || next == ri) return nullptr;
-        write_index_.store(next, std::memory_order_relaxed);
-        return &buffers_[next];
-    }
-
-    // Producer: mark the buffer as fully written and visible to consumers.
-    void end_write() {
-        int wi = write_index_.load(std::memory_order_relaxed);
-        committed_index_.store(wi, std::memory_order_release);
-    }
-
-    // Consumer: obtain a pointer to the latest committed frame. Returns the
-    // same pointer until a new frame is committed (no busy-wait).
-    const T* read() {
-        int ci = committed_index_.load(std::memory_order_acquire);
-        if (ci == read_index_.load(std::memory_order_relaxed)) {
-            return nullptr;  // nothing new
-        }
-        read_index_.store(ci, std::memory_order_relaxed);
-        return &buffers_[ci];
-    }
-
-    bool has_new() const {
-        return committed_index_.load(std::memory_order_acquire) !=
-               read_index_.load(std::memory_order_relaxed);
-    }
-};
-
 class VisualizerEngine {
 public:
     using SpectrumCallback = std::function<void(const std::vector<float>&)>;
@@ -162,9 +111,12 @@ public:
     void stop();
     bool is_running() const;
 
+    // Get the latest spectrum frame (thread-safe, for UI polling).
+    // Returns empty vector if no frame available yet.
+    std::vector<float> get_latest_spectrum() const;
+
     // Set a direct spectrum callback (called from the FFT worker thread).
-    // Prefer subscribing to EventBus spectrum events for thread-safe UI
-    // delivery; this callback is provided for backward compatibility.
+    // Prefer polling get_latest_spectrum() from the GTK frame clock.
     void set_spectrum_callback(SpectrumCallback cb);
     void set_band_count(int bands);
     void set_enabled(bool enabled);

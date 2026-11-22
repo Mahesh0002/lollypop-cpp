@@ -322,6 +322,38 @@ struct LibraryScanner::Impl {
                     track.album_artist = values.front().to8Bit(true);
                 }
             }
+
+            // Embedded lyrics: read LYRICS or UNSYNCEDLYRICS frame from PropertyMap.
+            // Common field names: LYRICS, UNSYNCEDLYRICS, SYNCEDLYRICS.
+            std::string embedded_lyrics;
+            if (properties.contains("LYRICS")) {
+                const TagLib::StringList values = properties.value("LYRICS");
+                if (!values.isEmpty()) {
+                    embedded_lyrics = values.front().to8Bit(true);
+                }
+            }
+            if (embedded_lyrics.empty() && properties.contains("UNSYNCEDLYRICS")) {
+                const TagLib::StringList values = properties.value("UNSYNCEDLYRICS");
+                if (!values.isEmpty()) {
+                    embedded_lyrics = values.front().to8Bit(true);
+                }
+            }
+            if (embedded_lyrics.empty() && properties.contains("SYNCEDLYRICS")) {
+                const TagLib::StringList values = properties.value("SYNCEDLYRICS");
+                if (!values.isEmpty()) {
+                    embedded_lyrics = values.front().to8Bit(true);
+                }
+            }
+            // Vorbis comment field.
+            if (embedded_lyrics.empty() && properties.contains("UNSYNCED LYRICS")) {
+                const TagLib::StringList values = properties.value("UNSYNCED LYRICS");
+                if (!values.isEmpty()) {
+                    embedded_lyrics = values.front().to8Bit(true);
+                }
+            }
+            if (!embedded_lyrics.empty()) {
+                track.embedded_lyrics = embedded_lyrics;
+            }
         }
 
         // Keep the UI readable when files have missing or partial tags.

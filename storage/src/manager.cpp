@@ -29,7 +29,7 @@ constexpr const char* kTrackColumnsQualified =
     "tracks.id, tracks.title, tracks.artist, tracks.album, "
     "tracks.album_artist, tracks.genre, tracks.track_number, "
     "tracks.disc_number, tracks.year, tracks.duration, tracks.file_path, "
-    "tracks.artwork_path, tracks.liked, tracks.play_count, tracks.last_played, "
+    "tracks.artwork_path, tracks.embedded_lyrics, tracks.liked, tracks.play_count, tracks.last_played, "
     "tracks.date_added";
 
 // sqlite3_column_text() returns nullptr for SQL NULL columns. Constructing a
@@ -79,7 +79,7 @@ namespace lollypop {
 struct StorageManager::Impl {
     sqlite3* db = nullptr;
     std::string db_path;
-    int schema_version = 3;
+    int schema_version = 4;
 
     std::mutex ro_mutex;
     std::vector<sqlite3*> read_only_connections;
@@ -138,7 +138,7 @@ bool StorageManager::initialize(const std::string& db_path) {
         }
         sqlite3_finalize(version_stmt);
     }
-    if (!migrate_schema(current_version, 3)) return false;
+    if (!migrate_schema(current_version, impl_->schema_version)) return false;
     if (!create_schema()) return false;
     if (!create_fts5_index()) return false;
     if (!create_triggers()) return false;
@@ -297,6 +297,18 @@ bool StorageManager::migrate_schema(int from_version, int to_version) {
         }
     }
 
+    if (from_version < 4) {
+        const char* sql = R"(
+            ALTER TABLE tracks ADD COLUMN embedded_lyrics TEXT;
+        )";
+        char* error = nullptr;
+        if (sqlite3_exec(impl_->db, sql, nullptr, nullptr, &error) != SQLITE_OK) {
+            std::cerr << "Schema migration v4 failed: " << (error ? error : "unknown") << std::endl;
+            sqlite3_free(error);
+            return false;
+        }
+    }
+
     if (sqlite3_exec(impl_->db,
                      ("PRAGMA user_version = " + std::to_string(to_version) + ";").c_str(),
                      nullptr, nullptr, nullptr) != SQLITE_OK) {
@@ -311,15 +323,13 @@ bool StorageManager::create_schema() {
 }
 
 bool StorageManager::create_fts5_index() {
-    // Optimized FTS5 tokenizer:
-    // - unicode61 with remove_diacritics=1 for accent-insensitive search
-    // - porter for stemming (e.g., "running" -> "run")
-    // - prefix='2 3' for fast prefix matching (2 and 3 char prefixes)
+    // FTS5 tokenizer configuration - use default tokenizer with prefix support.
+    // unicode61/porter may not be available on all SQLite builds.
     const char* sql = R"(
         CREATE VIRTUAL TABLE IF NOT EXISTS tracks_fts USING fts5(
             title, artist, album, album_artist, genre,
             content='tracks', content_rowid='rowid',
-            tokenize='porter unicode61 remove_diacritics 1 prefix 2 3'
+            prefix='2 3'
         );
     )";
     char* error = nullptr;
@@ -371,10 +381,11 @@ Track StorageManager::row_to_track(sqlite3_stmt* stmt) {
     track.duration = sqlite3_column_double(stmt, 9);
     track.file_path = column_text(stmt, 10);
     track.artwork_path = column_text(stmt, 11);
-    track.liked = sqlite3_column_int(stmt, 12) != 0;
-    track.play_count = sqlite3_column_int64(stmt, 13);
-    track.last_played = sqlite3_column_int64(stmt, 14);
-    track.date_added = sqlite3_column_int64(stmt, 15);
+    track.embedded_lyrics = column_text(stmt, 12);
+    track.liked = sqlite3_column_int(stmt, 13) != 0;
+    track.play_count = sqlite3_column_int64(stmt, 14);
+    track.last_played = sqlite3_column_int64(stmt, 15);
+    track.date_added = sqlite3_column_int64(stmt, 16);
     return track;
 }
 
@@ -430,9 +441,9 @@ bool StorageManager::insert_track(const Track& track) {
     const char* sql = R"(
         INSERT OR REPLACE INTO tracks (id, title, artist, album, album_artist, genre,
                                        track_number, disc_number, year, duration,
-                                       file_path, artwork_path, liked, play_count,
+                                       file_path, artwork_path, embedded_lyrics, liked, play_count,
                                        last_played, date_added)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     )";
     sqlite3_stmt* stmt;
     if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
@@ -449,10 +460,11 @@ bool StorageManager::insert_track(const Track& track) {
     sqlite3_bind_double(stmt, 10, track.duration);
     sqlite3_bind_text(stmt, 11, track.file_path.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 12, track.artwork_path.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int(stmt, 13, track.liked ? 1 : 0);
-    sqlite3_bind_int64(stmt, 14, track.play_count);
-    sqlite3_bind_int64(stmt, 15, track.last_played);
-    sqlite3_bind_int64(stmt, 16, track.date_added);
+    sqlite3_bind_text(stmt, 13, track.embedded_lyrics.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 14, track.liked ? 1 : 0);
+    sqlite3_bind_int64(stmt, 15, track.play_count);
+    sqlite3_bind_int64(stmt, 16, track.last_played);
+    sqlite3_bind_int64(stmt, 17, track.date_added);
 
     int rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
@@ -465,9 +477,9 @@ bool StorageManager::insert_tracks_batch(const std::vector<Track>& tracks) {
     const char* sql = R"(
         INSERT OR REPLACE INTO tracks (id, title, artist, album, album_artist, genre,
                                        track_number, disc_number, year, duration,
-                                       file_path, artwork_path, liked, play_count,
+                                       file_path, artwork_path, embedded_lyrics, liked, play_count,
                                        last_played, date_added)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     )";
 
     sqlite3_exec(impl_->db, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
@@ -495,10 +507,11 @@ bool StorageManager::insert_tracks_batch(const std::vector<Track>& tracks) {
         sqlite3_bind_double(stmt, 10, track.duration);
         sqlite3_bind_text(stmt, 11, track.file_path.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(stmt, 12, track.artwork_path.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 13, track.liked ? 1 : 0);
-        sqlite3_bind_int64(stmt, 14, track.play_count);
-        sqlite3_bind_int64(stmt, 15, track.last_played);
-        sqlite3_bind_int64(stmt, 16, track.date_added);
+        sqlite3_bind_text(stmt, 13, track.embedded_lyrics.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 14, track.liked ? 1 : 0);
+        sqlite3_bind_int64(stmt, 15, track.play_count);
+        sqlite3_bind_int64(stmt, 16, track.last_played);
+        sqlite3_bind_int64(stmt, 17, track.date_added);
 
         if (sqlite3_step(stmt) != SQLITE_DONE) {
             success = false;

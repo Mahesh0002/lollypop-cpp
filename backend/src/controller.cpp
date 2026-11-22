@@ -754,16 +754,17 @@ void BackendController::request_lyrics(
     pending_lyrics_track_id_ = track_id;
 
     if (lyrics_manager_) {
-        // Look up the track for artist/title needed by the fetch function.
+        // Look up the track for artist/title/file_path/embedded_lyrics.
         Track track = storage_->get_track(track_id);
         std::string track_id_copy = track_id;
         // Request lyrics asynchronously from the lyrics manager.
-        // LyricsManager::request_lyrics(track_id, artist, title, callback)
-        // where callback(track_id, Lyrics).
+        // Pass file_path and embedded_lyrics for local/embedded lookup.
         lyrics_manager_->request_lyrics(
             track_id,
             track.artist,
             track.title,
+            track.file_path,
+            track.embedded_lyrics,
             [this, track_id_copy](const std::string& fetched_id,
                                   const Lyrics& lyrics) {
                 if (storage_) {

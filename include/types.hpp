@@ -24,6 +24,7 @@ struct Track {
     int duration = 0;  // seconds
     std::string file_path;
     std::string artwork_path;
+    std::string embedded_lyrics;  // Raw lyrics text from audio file tags
     bool liked = false;
     int play_count = 0;
     int64_t last_played = 0;

@@ -157,6 +157,26 @@ std::string LyricsManager::display_text(const Lyrics& lyrics) {
     return lyrics.text;
 }
 
+std::string LyricsManager::read_local_lrc_file(const std::string& audio_file_path) {
+    std::filesystem::path path(audio_file_path);
+    // Replace extension with .lrc
+    path.replace_extension(".lrc");
+    
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec)) {
+        return "";
+    }
+    
+    std::ifstream file(path);
+    if (!file) {
+        return "";
+    }
+    
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
+
 std::string LyricsManager::cache_key(const std::string& track_id) const {
     return "lyrics:" + track_id;
 }
@@ -275,6 +295,16 @@ bool LyricsManager::set_lyrics(const std::string& track_id,
 bool LyricsManager::request_lyrics(const std::string& track_id,
                                     const std::string& artist,
                                     const std::string& title,
+                                    const std::string& file_path,
+                                    LyricsReadyCallback cb) {
+    return request_lyrics(track_id, artist, title, file_path, "", std::move(cb));
+}
+
+bool LyricsManager::request_lyrics(const std::string& track_id,
+                                    const std::string& artist,
+                                    const std::string& title,
+                                    const std::string& file_path,
+                                    const std::string& embedded_lyrics,
                                     LyricsReadyCallback cb) {
     // Check cache/storage first.
     std::optional<Lyrics> cached = get_lyrics(track_id);
@@ -287,6 +317,8 @@ bool LyricsManager::request_lyrics(const std::string& track_id,
     req.track_id = track_id;
     req.artist = artist;
     req.title = title;
+    req.file_path = file_path;
+    req.embedded_lyrics = embedded_lyrics;
     req.callback = std::move(cb);
 
     {
@@ -318,14 +350,43 @@ void LyricsManager::worker_loop() {
                 std::chrono::system_clock::now().time_since_epoch())
                 .count());
 
-        if (fetch_fn_) {
+        // 1. Check embedded lyrics from audio file tags (highest priority).
+        if (!req.embedded_lyrics.empty()) {
+            auto parsed = parse_lrc(req.embedded_lyrics);
+            if (!parsed.empty()) {
+                lyrics.text = req.embedded_lyrics;
+                lyrics.synced = true;
+                lyrics.source = "embedded";
+            } else {
+                lyrics.text = req.embedded_lyrics;
+                lyrics.synced = false;
+                lyrics.source = "embedded";
+            }
+        }
+
+        // 2. Check local .lrc file next to audio file.
+        if (lyrics.text.empty() && !req.file_path.empty()) {
+            std::string lrc_text = read_local_lrc_file(req.file_path);
+            if (!lrc_text.empty()) {
+                auto parsed = parse_lrc(lrc_text);
+                if (!parsed.empty()) {
+                    lyrics.text = lrc_text;
+                    lyrics.synced = true;
+                    lyrics.source = "local_lrc";
+                } else {
+                    lyrics.text = lrc_text;
+                    lyrics.synced = false;
+                    lyrics.source = "local_lrc";
+                }
+            }
+        }
+
+        // 3. Fall back to external fetch (e.g., web API).
+        if (lyrics.text.empty() && fetch_fn_) {
             std::string text = fetch_fn_(req.track_id, req.artist, req.title);
             if (!text.empty()) {
-                // Try to parse as LRC timed lyrics.
                 auto parsed = parse_lrc(text);
                 if (!parsed.empty()) {
-                    // Store the raw LRC text; the UI can parse it via
-                    // parse_lrc() and use current_line() for sync.
                     lyrics.text = text;
                     lyrics.synced = true;
                     lyrics.source = "external";
