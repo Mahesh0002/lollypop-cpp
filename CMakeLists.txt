@@ -55,6 +55,12 @@ else()
     set(HAVE_CAVA 0)
 endif()
 
+# GSK GLSL Compiler for shaders (GTK 4.14+)
+find_program(GSK_GLSL_COMPILER gsk-glsl-compiler)
+if(NOT GSK_GLSL_COMPILER)
+    message(WARNING "gsk-glsl-compiler not found - shaders will not be compiled")
+endif()
+
 # Include directories
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -78,6 +84,54 @@ set(LIBRARIES
     ${GIO_LIBRARIES}
     ${GSTREAMER_LIBRARIES}
 )
+
+# Shader compilation
+function(compile_gsk_shader OUTPUT_NAME VERT FRAG)
+    if(GSK_GLSL_COMPILER)
+        add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/shaders/${OUTPUT_NAME}.gskshader
+            COMMAND ${GSK_GLSL_COMPILER}
+                --vertex ${VERT}
+                --fragment ${FRAG}
+                --output ${CMAKE_CURRENT_BINARY_DIR}/shaders/${OUTPUT_NAME}.gskshader
+            DEPENDS ${VERT} ${FRAG}
+            COMMENT "Compiling GSK shader: ${OUTPUT_NAME}"
+        )
+        set(${OUTPUT_NAME}_SHADER ${CMAKE_CURRENT_BINARY_DIR}/shaders/${OUTPUT_NAME}.gskshader PARENT_SCOPE)
+    else()
+        message(WARNING "Skipping shader ${OUTPUT_NAME} - gsk-glsl-compiler not found")
+    endif()
+endfunction()
+
+if(GSK_GLSL_COMPILER)
+    # Compile all shaders
+    compile_gsk_shader(glass_shader      src/ui/shaders/glass.vert      src/ui/shaders/glass.frag)
+    compile_gsk_shader(glass_reflection_shader  src/ui/shaders/glass_reflection.vert  src/ui/shaders/glass_reflection.frag)
+    compile_gsk_shader(glass_dial_shader      src/ui/shaders/glass_dial.vert      src/ui/shaders/glass_dial.frag)
+    compile_gsk_shader(waveform_shader        src/ui/shaders/waveform.vert        src/ui/shaders/waveform.frag)
+    compile_gsk_shader(morph_shader           src/ui/shaders/morph.vert           src/ui/shaders/morph.frag)
+
+    # Shader target for building all shaders
+    add_custom_target(shaders ALL
+        DEPENDS
+            ${glass_shader_SHADER}
+            ${glass_reflection_shader_SHADER}
+            ${glass_dial_shader_SHADER}
+            ${waveform_shader_SHADER}
+            ${morph_shader_SHADER}
+        COMMENT "Compiling all GSK shaders"
+    )
+
+    # Install shaders
+    install(FILES
+        ${glass_shader_SHADER}
+        ${glass_reflection_shader_SHADER}
+        ${glass_dial_shader_SHADER}
+        ${waveform_shader_SHADER}
+        ${morph_shader_SHADER}
+        DESTINATION share/lollypop-cpp/shaders
+    )
+endif()
 
 # Add subdirectories
 add_subdirectory(frontend)

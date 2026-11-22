@@ -17,6 +17,7 @@ target_include_directories(lollypop-frontend PUBLIC
     ${CMAKE_SOURCE_DIR}/backend/include
     ${CMAKE_SOURCE_DIR}/storage/include
     ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_BINARY_DIR}/shaders
     /usr/include/libadwaita-1
     /usr/include/gtk-4.0
 )
