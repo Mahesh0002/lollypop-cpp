@@ -122,9 +122,11 @@ void MainWindow::setup_layout() {
     auto* library_service = dynamic_cast<ILibraryService*>(backend);
     auto* lyrics_service = dynamic_cast<ILyricsService*>(backend);
 
-    // Create panels
-    left_sidebar_ = std::make_unique<LeftSidebar>(this);
+    // Create panels - MiddleLibrary must be created before LeftSidebar
+    // because LeftSidebar::create_navigation_items() calls set_active_page()
+    // which requires MiddleLibrary pages to exist.
     middle_library_ = std::make_unique<MiddleLibrary>(this, library_service);
+    left_sidebar_ = std::make_unique<LeftSidebar>(this);
     right_now_playing_ = std::make_unique<RightNowPlaying>(this, lyrics_service, library_service);
     bottom_playback_ = std::make_unique<BottomPlayback>(this);
 
