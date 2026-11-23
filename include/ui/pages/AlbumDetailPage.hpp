@@ -13,18 +13,11 @@
 #include <vector>
 
 #include "ui/components/LibraryPage.hpp"
+#include "ui/components/TrackRow.hpp"
 #include "types.hpp"
 #include "services/ILibraryService.hpp"
 
 namespace lollypop {
-
-class TrackRow;
-
-struct TrackRowDeleter {
-    void operator()(TrackRow* w) const {
-        if (w) delete w;
-    }
-};
 
 class MainWindow;
 
@@ -63,7 +56,7 @@ private:
     ILibraryService* library_service_;
     std::string current_album_id_;
     Album current_album_;
-    std::vector<std::unique_ptr<TrackRow, TrackRowDeleter>> track_rows_;
+    std::vector<std::unique_ptr<TrackRow>> track_rows_;
 
     void setup_ui();
     void populate_album(const Album& album);

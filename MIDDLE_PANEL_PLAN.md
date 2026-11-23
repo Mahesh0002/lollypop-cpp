@@ -133,7 +133,8 @@ Files:
 
 ### Phase 6 — Actions and accessibility
 
-- Add tooltips/accessible labels to the like button ("Like"/"Unlike").
+- Like-button tooltip ("Like"/"Unlike") is in place; accessible label is
+  still optional.
 - Consider a trailing ellipsis action for "Add to playlist / Go to album /
   Info" after the core look is settled.
 

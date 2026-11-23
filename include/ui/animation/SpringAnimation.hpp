@@ -175,17 +175,17 @@ public:
         gtk_widget_add_tick_callback(
             widget,
             [](GtkWidget*, GdkFrameClock*, gpointer data) -> gboolean {
-                auto* ctx = static_cast<SpringTickContext*>(data);
+                auto* tick_ctx = static_cast<SpringTickContext*>(data);
                 double dt = 1.0 / 60.0; // Fixed 60 FPS timestep
 
-                ctx->state.step(dt);
-                ctx->on_tick();
+                tick_ctx->state.step(dt);
+                tick_ctx->on_tick();
 
-                if (ctx->state.is_settled()) {
+                if (tick_ctx->state.is_settled()) {
                     // Extract and call completion callback. Return G_SOURCE_REMOVE so
-                    // the destroy notify deletes ctx (do NOT delete here).
-                    std::function<void()> on_complete = std::move(ctx->on_complete);
-                    if (on_complete) on_complete();
+                    // the destroy notify deletes tick_ctx (do NOT delete here).
+                    std::function<void()> completion = std::move(tick_ctx->on_complete);
+                    if (completion) completion();
                     return G_SOURCE_REMOVE;
                 }
                 return G_SOURCE_CONTINUE;

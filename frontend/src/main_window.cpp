@@ -15,6 +15,7 @@
 #include "services/ILibraryService.hpp"
 #include "services/MockLibraryService.hpp"
 #include "services/MockLyricsService.hpp"
+#include "ui/components/TrackRow.hpp"
 #include "ui/components/VolumeDial.hpp"
 #include "config/i18n.hpp"
 
@@ -304,6 +305,9 @@ void MainWindow::connect_backend() {
         // Auto-request lyrics for new track
         right_now_playing_->request_lyrics_for_track(track.id);
     });
+    backend->add_track_changed_callback([backend](const Track& track) {
+        TrackRow::update_playing_state(track.id, backend->is_playing());
+    });
 
     // Position changed → update both playback panels
     backend->add_position_changed_callback([this](double position,
@@ -317,6 +321,9 @@ void MainWindow::connect_backend() {
         bottom_playback_->set_playing(playing);
         right_now_playing_->set_playing(playing);
     });
+    backend->add_playback_state_changed_callback([backend](bool playing) {
+        TrackRow::update_playing_state(backend->get_current_track().id, playing);
+    });
 
     // Queue changed → update RightNowPlaying queue view
     backend->add_queue_changed_callback([this](const std::vector<std::string>& queue_ids) {
@@ -326,6 +333,8 @@ void MainWindow::connect_backend() {
     // Seed panels with current backend state
     bottom_playback_->set_playing(backend->is_playing());
     right_now_playing_->set_playing(backend->is_playing());
+    TrackRow::update_playing_state(backend->get_current_track().id,
+                                   backend->is_playing());
     right_now_playing_->set_queue(backend->get_queue());
     right_now_playing_->set_shuffle(backend->get_shuffle());
     right_now_playing_->set_repeat(backend->get_repeat());
@@ -357,7 +366,7 @@ void MainWindow::present() {
 
 gboolean MainWindow::on_window_close(GtkWindow* window, gpointer user_data) {
     (void)window;
-    MainWindow* self = static_cast<MainWindow*>(user_data);
+    (void)user_data;
     // Allow close, cleanup happens in destructor
     return FALSE;
 }

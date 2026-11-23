@@ -276,7 +276,7 @@ void HomePage::refresh_track_section(SectionData* data) {
             static_cast<guint>(delay * 1000),
             on_track_anim_timeout,
             anim_data,
-            [](gpointer data) { delete static_cast<TrackAnimData*>(data); });
+            [](gpointer ptr) { delete static_cast<TrackAnimData*>(ptr); });
         data->anim_timeout_ids.push_back(timeout_id);
     }
 }
@@ -329,7 +329,7 @@ void HomePage::refresh_album_section(AlbumSectionData* data) {
             static_cast<guint>(delay * 1000),
             on_album_anim_timeout,
             anim_data,
-            [](gpointer data) { delete static_cast<HomePage::AlbumAnimData*>(data); });
+            [](gpointer ptr) { delete static_cast<HomePage::AlbumAnimData*>(ptr); });
         data->anim_timeout_ids.push_back(timeout_id);
     }
 }

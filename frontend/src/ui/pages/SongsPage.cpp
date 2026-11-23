@@ -64,11 +64,7 @@ void SongsPage::setup_ui() {
     gtk_widget_set_vexpand(list_box_.get(), TRUE);
     gtk_widget_set_visible(list_box_.get(), TRUE);
 
-    // Connect scroll to load more - use the ListBox's built-in scrolling
-    // The parent scrolled window (from MiddleLibrary) will handle the actual scrolling
-    // We just need to detect when we're near the bottom
-    GtkWidget* vadj_widget = list_box_.get();  // Will get adjustment from parent scrolled window
-    // We'll connect to the scrolled window's adjustment in MiddleLibrary via a signal
+    // Scroll-to-load is wired by MiddleLibrary through the shared adjustment.
 
     safe_box_append(GTK_BOX(main_box), header_box_.get());
     safe_box_append(GTK_BOX(main_box), list_box_.get());
@@ -210,7 +206,7 @@ void SongsPage::reload() {
     // Get sorted track IDs with genre filter
     auto track_ids = library_service_->get_sorted_track_ids(sort_column_, sort_ascending_, genre_filter_);
     {
-        std::lock_guard lock(ids_mutex_);
+        std::lock_guard ids_lock(ids_mutex_);
         sorted_ids_ = std::move(track_ids);
         total_count_ = sorted_ids_.size();
     }
@@ -228,7 +224,7 @@ void SongsPage::load_page(size_t start) {
     size_t end = std::min(start + PAGE_SIZE, sorted_ids_.size());
     std::vector<std::string> batch;
     {
-        std::lock_guard lock(ids_mutex_);
+        std::lock_guard ids_lock(ids_mutex_);
         batch.assign(sorted_ids_.begin() + start, sorted_ids_.begin() + end);
     }
 

@@ -12,6 +12,7 @@
 #include <memory>
 #include <string>
 #include <functional>
+#include <unordered_set>
 
 #include "types.hpp"
 #include "ui/animation/SpringAnimation.hpp"
@@ -54,6 +55,9 @@ public:
     void set_playing(bool playing);
     void set_liked(bool liked);
 
+    /// Refresh every live row when playback changes. Safe on the main context.
+    static void update_playing_state(const std::string& track_id, bool playing);
+
 private:
     struct WidgetDeleter {
         void operator()(GtkWidget* w) const {
@@ -75,6 +79,7 @@ private:
     LikeCallback like_cb_;
     bool playing_ = false;
     bool liked_ = false;
+    static std::unordered_set<TrackRow*> live_rows_;
 
     void setup_ui();
     static void on_like_clicked(GtkButton* button, gpointer user_data);

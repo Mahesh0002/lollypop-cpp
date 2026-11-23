@@ -173,8 +173,8 @@ void AlbumDetailPage::populate_album(const Album& album) {
 
 void AlbumDetailPage::populate_tracks(const std::vector<Track>& tracks) {
     for (size_t i = 0; i < tracks.size(); ++i) {
-        auto row = std::unique_ptr<TrackRow, TrackRowDeleter>(
-            new TrackRow(main_window_, tracks[i], static_cast<int>(i + 1)));
+        auto row = std::make_unique<TrackRow>(
+            main_window_, tracks[i], static_cast<int>(i + 1));
         row->set_play_callback(
             [this](const Track& t) { on_track_played(t); });
         row->set_like_callback(
@@ -221,7 +221,7 @@ void AlbumDetailPage::on_album_shuffle() {
 
 void AlbumDetailPage::on_track_played_trampoline(GtkButton* button, gpointer user_data) {
     (void)button;
-    auto* self = static_cast<AlbumDetailPage*>(user_data);
+    (void)user_data;
     // This is called from TrackRow, but TrackRow passes itself as user_data
     // We need to track which track was clicked. For now, just log.
     std::cout << "[AlbumDetailPage] Track played (trampoline)" << std::endl;

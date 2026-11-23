@@ -8,6 +8,7 @@
 #include "ui/components/ArtworkView.hpp"
 #include "ui/components/EqualizerIndicator.hpp"
 #include "ui/components/TrackListMetrics.hpp"
+#include "services/IPlayerService.hpp"
 #include "main_window.hpp"
 #include "ui/animation/SpringAnimation.hpp"
 
@@ -17,6 +18,8 @@
 #include <vector>
 
 namespace lollypop {
+
+std::unordered_set<TrackRow*> TrackRow::live_rows_;
 
 namespace {
 
@@ -185,9 +188,21 @@ TrackRow::TrackRow(MainWindow* main_window, const Track& track, int track_number
     : main_window_(main_window), track_(track) {
     (void)track_number;
     setup_ui();
+    live_rows_.insert(this);
+
+    // Seed from the authoritative backend so rows created after playback
+    // started still show the equalizer immediately.
+    if (main_window_) {
+        if (auto* backend = main_window_->get_backend()) {
+            set_playing(backend->is_playing() &&
+                        backend->get_current_track().id == track_.id);
+        }
+    }
 }
 
-TrackRow::~TrackRow() = default;
+TrackRow::~TrackRow() {
+    live_rows_.erase(this);
+}
 
 void TrackRow::setup_ui() {
     widget_.reset(gtk_list_box_row_new());
@@ -291,6 +306,8 @@ void TrackRow::setup_ui() {
     g_object_ref_sink(like_button_.get());
     gtk_button_set_has_frame(GTK_BUTTON(like_button_.get()), FALSE);
     gtk_widget_add_css_class(like_button_.get(), "track-row-like-button");
+    gtk_widget_set_tooltip_text(like_button_.get(),
+                                liked_ ? "Unlike" : "Like");
     GtkWidget* like_icon = gtk_image_new_from_icon_name(
         liked_ ? "starred-symbolic" : "non-starred-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(like_icon),
@@ -332,6 +349,12 @@ void TrackRow::setup_ui() {
     gtk_widget_add_controller(widget_.get(), GTK_EVENT_CONTROLLER(click_gesture));
 }
 
+void TrackRow::update_playing_state(const std::string& track_id, bool playing) {
+    for (TrackRow* row : live_rows_) {
+        if (row) row->set_playing(playing && row->track_.id == track_id);
+    }
+}
+
 void TrackRow::set_playing(bool playing) {
     playing_ = playing;
     if (equalizer_) equalizer_->set_playing(playing);
@@ -344,6 +367,8 @@ void TrackRow::set_playing(bool playing) {
 
 void TrackRow::set_liked(bool liked) {
     liked_ = liked;
+    gtk_widget_set_tooltip_text(like_button_.get(),
+                                liked_ ? "Unlike" : "Like");
     GtkWidget* child = gtk_button_get_child(GTK_BUTTON(like_button_.get()));
     if (GTK_IS_IMAGE(child)) {
         // Reuse existing image widget, just change the icon name

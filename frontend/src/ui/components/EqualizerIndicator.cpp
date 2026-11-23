@@ -50,6 +50,7 @@ void EqualizerIndicator::set_playing(bool playing) {
 
 void EqualizerIndicator::start_tick() {
     if (tick_id_ != 0) return;
+    if (!gtk_widget_get_realized(widget_.get())) return;
     if (!animations_enabled()) return;
     tick_id_ = gtk_widget_add_tick_callback(widget_.get(), on_tick, this,
                                             nullptr);
@@ -86,6 +87,9 @@ void EqualizerIndicator::on_draw(GtkDrawingArea* area, cairo_t* cr, int width,
     auto* self = static_cast<EqualizerIndicator*>(user_data);
     (void)area;
     if (!self || !self->playing_ || width <= 0 || height <= 0) return;
+
+    // Rows can be seeded before they are realized; begin ticking on first draw.
+    if (self->tick_id_ == 0) self->start_tick();
 
     const double cx = width / 2.0;
     const double cy = height / 2.0;
