@@ -20,6 +20,7 @@ namespace lollypop {
 
 class MainWindow;
 class ArtworkView;
+class EqualizerIndicator;
 
 // Direct children tagged with one of these roles are laid out by
 // create_track_columns_layout(). Title/Artist/Album receive 20/30/25 of the
@@ -61,6 +62,7 @@ private:
     };
     std::unique_ptr<GtkWidget, WidgetDeleter> widget_;
     std::unique_ptr<ArtworkView> artwork_view_;
+    std::unique_ptr<EqualizerIndicator> equalizer_;
     std::unique_ptr<GtkWidget, WidgetDeleter> title_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> artist_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> album_label_;

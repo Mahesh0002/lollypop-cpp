@@ -27,6 +27,12 @@ These are the GitHub references that informed the plan:
   GTK-native list and CSS patterns.
 - In-repo: `APPLE_HIG_DESIGN_PLAN.md`, `APPLE_HIG_DESIGN_PLAN_GTK.md`.
 
+## Confirmed decisions
+
+- Playing marker: animated equalizer overlay on the 18px artwork.
+- Like icon: keep the existing star (no heart swap).
+- Column header: pin it above the scrolling rows now.
+
 ## Current state (as of `673b082`)
 
 - `TrackRow` uses `ArtworkView` with async loading from `Track::artwork_path`.
@@ -101,7 +107,7 @@ Files:
 - `resources/style.css`
 - `frontend/src/ui/pages/SongsPage.cpp`
 
-### Phase 4 — Sticky column header
+### Phase 4 — Sticky column header (done)
 
 Today the sort header scrolls with the list because it is inside the shared
 scrolled window. Move the columns row outside the scrolled area (or use an
@@ -112,13 +118,13 @@ Files:
 - `frontend/src/ui/pages/SongsPage.cpp`
 - `frontend/src/panels/middle_library.cpp`
 
-### Phase 5 — Playing and hover states
+### Phase 5 — Playing and hover states (equalizer done)
 
 - Keep artwork visible; do not replace it with a number.
 - Playing row: accent title and soft accent row background (background already
   present; add title accent).
-- Optional later: a tiny animated equalizer badge overlaid on the artwork for
-  the playing row, matching Apple Music's "now playing" marker.
+- Animated equalizer badge overlaid on the artwork for the playing row,
+  matching Apple Music's "now playing" marker.
 - Add explicit `:focus-visible` outline for keyboard navigation.
 
 Files:
@@ -128,7 +134,6 @@ Files:
 ### Phase 6 — Actions and accessibility
 
 - Add tooltips/accessible labels to the like button ("Like"/"Unlike").
-- Consider switching star → heart to match Apple Music semantics.
 - Consider a trailing ellipsis action for "Add to playlist / Go to album /
   Info" after the core look is settled.
 
@@ -154,9 +159,5 @@ is small and already works.
 
 ## Open questions
 
-1. Should the playing indicator be an overlay on the artwork, or only an
-   accent title/row tint?
-2. Should the like icon become a heart now, or stay a star to preserve current
-   library semantics?
-3. Should the column header be sticky immediately, or after typography is
-   finalized?
+All open questions from the planning pass were resolved: equalizer overlay,
+keep the star, sticky header now.

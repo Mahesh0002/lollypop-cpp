@@ -56,6 +56,7 @@ private:
     GtkWidget* content_box_;       // Content box inside scroller
     GtkWidget* stack_;             // Page stack
     GtkWidget* glass_toolbar_;     // Floating glass toolbar (overlay)
+    GtkWidget* sticky_header_;     // Pinned column header for SongsPage
     GtkWidget* search_entry_;
     GtkWidget* menu_button_;
     GtkWidget* back_button_;
@@ -93,6 +94,7 @@ private:
     void ensure_page(const std::string& page_id);
     void ensure_search_page();
     void update_toolbar_state();
+    void update_sticky_header();
     void navigate_to_page(const std::string& page_id, bool add_to_history,
                           const std::string& param = std::string());
     void apply_history_entry(const HistoryEntry& entry, bool restore_scroll);

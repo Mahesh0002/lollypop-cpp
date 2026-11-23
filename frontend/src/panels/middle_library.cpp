@@ -18,6 +18,7 @@
 #include "ui/pages/SearchResultsPage.hpp"
 #include "ui/components/HomePage.hpp"
 #include "util/safe_gtk.hpp"
+#include "ui/components/TrackListMetrics.hpp"
 
 #include <adwaita.h>
 #include <gtk/gtk.h>
@@ -94,6 +95,7 @@ MiddleLibrary::MiddleLibrary(MainWindow* main_window,
       content_box_(nullptr),
       stack_(nullptr),
       glass_toolbar_(nullptr),
+      sticky_header_(nullptr),
       search_entry_(nullptr),
       menu_button_(nullptr),
       back_button_(nullptr),
@@ -131,6 +133,17 @@ void MiddleLibrary::setup_ui() {
 
     // Add glass toolbar as overlay (floating on top)
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay_), glass_toolbar_);
+
+    // Pinned column header, shared by the Songs page. It lives above the
+    // scroller so the sort labels stay visible while rows scroll underneath.
+    sticky_header_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_add_css_class(sticky_header_, "middle-sticky-header");
+    gtk_widget_set_hexpand(sticky_header_, TRUE);
+    gtk_widget_set_valign(sticky_header_, GTK_ALIGN_START);
+    gtk_widget_set_margin_top(sticky_header_,
+                              track_list_metrics::kStickyHeaderOffset);
+    gtk_widget_set_visible(sticky_header_, FALSE);
+    gtk_overlay_add_overlay(GTK_OVERLAY(overlay_), sticky_header_);
 }
 
 void MiddleLibrary::create_content_area() {
@@ -371,6 +384,7 @@ void MiddleLibrary::navigate_to_page(const std::string& page_id,
     }
 
     active_page_id_ = page_id;
+    update_sticky_header();
     gtk_stack_set_visible_child_name(GTK_STACK(stack_), page_id.c_str());
     sync_search_entry(page_id);
     update_toolbar_state();
@@ -461,6 +475,40 @@ void MiddleLibrary::apply_history_entry(const HistoryEntry& entry,
 
 void MiddleLibrary::set_active_page(const std::string& page_id) {
     navigate_to_page(page_id, true);
+}
+
+void MiddleLibrary::update_sticky_header() {
+    if (!sticky_header_ || !content_box_) return;
+
+    SongsPage* songs = nullptr;
+    if (auto it = pages_.find("songs"); it != pages_.end()) {
+        songs = dynamic_cast<SongsPage*>(it->second.get());
+    }
+
+    GtkWidget* child = gtk_widget_get_first_child(sticky_header_);
+    const bool want_header =
+        active_page_id_ == "songs" && songs && songs->get_header_widget();
+
+    if (want_header) {
+        GtkWidget* header = songs->get_header_widget();
+        if (gtk_widget_get_parent(header) != sticky_header_) {
+            if (child) gtk_box_remove(GTK_BOX(sticky_header_), child);
+            gtk_box_append(GTK_BOX(sticky_header_), header);
+        }
+        gtk_widget_set_visible(sticky_header_, TRUE);
+        gtk_widget_set_margin_top(
+            content_box_, track_list_metrics::kStickyHeaderOffset +
+                              track_list_metrics::kStickyHeaderHeight);
+        return;
+    }
+
+    if (child) {
+        gtk_box_remove(GTK_BOX(sticky_header_), child);
+        if (songs) songs->reattach_header();
+    }
+    gtk_widget_set_visible(sticky_header_, FALSE);
+    gtk_widget_set_margin_top(content_box_,
+                              track_list_metrics::kStickyHeaderOffset);
 }
 
 void MiddleLibrary::update_toolbar_state() {

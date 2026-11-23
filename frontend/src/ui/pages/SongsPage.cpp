@@ -8,6 +8,7 @@
 #include "main_window.hpp"
 #include "services/IPlayerService.hpp"
 #include "ui/components/TrackRow.hpp"
+#include "ui/components/TrackListMetrics.hpp"
 #include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
@@ -81,8 +82,10 @@ void SongsPage::create_header(GtkWidget* main_box) {
     header_box_.reset(gtk_box_new(GTK_ORIENTATION_VERTICAL, 4));
     g_object_ref_sink(header_box_.get());
     gtk_widget_add_css_class(header_box_.get(), "songs-header");
-    gtk_widget_set_margin_start(header_box_.get(), 12);
-    gtk_widget_set_margin_end(header_box_.get(), 12);
+    gtk_widget_set_margin_start(header_box_.get(),
+                                track_list_metrics::kSideMargin);
+    gtk_widget_set_margin_end(header_box_.get(),
+                              track_list_metrics::kSideMargin);
     gtk_widget_set_margin_top(header_box_.get(), 8);
     gtk_widget_set_margin_bottom(header_box_.get(), 8);
 
@@ -113,7 +116,8 @@ void SongsPage::create_header(GtkWidget* main_box) {
         }
     }
 
-    GtkWidget* columns = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    GtkWidget* columns = gtk_box_new(GTK_ORIENTATION_HORIZONTAL,
+                                     track_list_metrics::kColumnGap);
     gtk_widget_set_layout_manager(columns, create_track_columns_layout());
     gtk_widget_set_visible(columns, TRUE);
 
@@ -134,9 +138,11 @@ void SongsPage::create_header(GtkWidget* main_box) {
         gtk_widget_add_css_class(col_label, "songs-column-header");
         gtk_label_set_xalign(GTK_LABEL(col_label), 0.0);
         if (i == 0) {
-            gtk_widget_set_size_request(col_label, 18, -1);
+            gtk_widget_set_size_request(col_label,
+                                        track_list_metrics::kArtworkSize, -1);
         } else if (i == 4) {
-            gtk_widget_set_size_request(col_label, 40, -1);
+            gtk_widget_set_size_request(col_label,
+                                        track_list_metrics::kDurationWidth, -1);
         }
 
         if (i > 0) {
@@ -160,7 +166,8 @@ void SongsPage::create_header(GtkWidget* main_box) {
 
     // Reserve the same trailing space the like button occupies in each row.
     GtkWidget* like_spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_set_size_request(like_spacer, 28, 1);
+    gtk_widget_set_size_request(like_spacer,
+                                track_list_metrics::kLikeColumnWidth, 1);
     gtk_widget_set_visible(like_spacer, TRUE);
     gtk_box_append(GTK_BOX(columns), like_spacer);
 
@@ -335,6 +342,13 @@ void SongsPage::on_track_liked(const Track& track, bool /*liked*/) {
     if (library_service_) {
         library_service_->toggle_like(track.id);
     }
+}
+
+void SongsPage::reattach_header() {
+    if (!widget_ || !header_box_) return;
+    if (gtk_widget_get_parent(header_box_.get()) == widget_.get()) return;
+    gtk_box_prepend(GTK_BOX(widget_.get()), header_box_.get());
+    gtk_widget_set_visible(header_box_.get(), TRUE);
 }
 
 void SongsPage::refresh() {

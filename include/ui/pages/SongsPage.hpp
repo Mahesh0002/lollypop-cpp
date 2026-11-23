@@ -31,6 +31,8 @@ public:
     SongsPage& operator=(const SongsPage&) = delete;
 
     GtkWidget* get_widget() const { return widget_.get(); }
+    GtkWidget* get_header_widget() const { return header_box_.get(); }
+    void reattach_header();
     void refresh() override;
     std::string get_page_id() const override { return "songs"; }
     void set_genre_filter(const std::string& genre);

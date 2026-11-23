@@ -1578,3 +1578,43 @@ searchentry:focus,
     min-height: 20px;
     padding: 0;
 }
+
+/* Typography hierarchy and pinned-header polish for the music list. */
+.track-row-title {
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: var(--font-weight-medium);
+}
+
+.track-row-artist {
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.track-row-album {
+    color: var(--text-tertiary);
+    font-size: 12px;
+}
+
+.track-row.playing .track-row-title {
+    color: var(--accent-color);
+    font-weight: var(--font-weight-semibold);
+}
+
+.track-row:focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: -2px;
+}
+
+.songs-column-header {
+    font-size: 11px;
+}
+
+.middle-sticky-header {
+    background-color: var(--bg-primary);
+    box-shadow: 0 6px 16px var(--shadow-strong);
+}
+
+.track-row-equalizer {
+    color: var(--accent-color);
+}

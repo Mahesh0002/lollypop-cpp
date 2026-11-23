@@ -6,6 +6,8 @@
 
 #include "ui/components/TrackRow.hpp"
 #include "ui/components/ArtworkView.hpp"
+#include "ui/components/EqualizerIndicator.hpp"
+#include "ui/components/TrackListMetrics.hpp"
 #include "main_window.hpp"
 #include "ui/animation/SpringAnimation.hpp"
 
@@ -18,7 +20,7 @@ namespace lollypop {
 
 namespace {
 
-constexpr int kColumnSpacing = 12;
+constexpr int kColumnSpacing = track_list_metrics::kColumnGap;
 constexpr const char* kTrackColumnRoleKey = "track-column-role";
 constexpr int kTitleShare = 20;
 constexpr int kArtistShare = 30;
@@ -192,26 +194,44 @@ void TrackRow::setup_ui() {
     g_object_ref_sink(widget_.get());
     gtk_widget_add_css_class(widget_.get(), "track-row");
     gtk_widget_set_hexpand(widget_.get(), TRUE);
-    gtk_widget_set_size_request(widget_.get(), -1, 20);
+    gtk_widget_set_size_request(widget_.get(), -1,
+                                track_list_metrics::kRowHeight);
     gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(widget_.get()), TRUE);
     gtk_widget_set_visible(widget_.get(), TRUE);
 
-    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL,
+                                 track_list_metrics::kColumnGap);
     gtk_widget_set_layout_manager(box, create_track_columns_layout());
-    gtk_widget_set_margin_start(box, 12);
-    gtk_widget_set_margin_end(box, 12);
+    gtk_widget_set_margin_start(box, track_list_metrics::kSideMargin);
+    gtk_widget_set_margin_end(box, track_list_metrics::kSideMargin);
     gtk_widget_set_margin_top(box, 0);
     gtk_widget_set_margin_bottom(box, 0);
     gtk_widget_set_visible(box, TRUE);
 
     // Artwork thumbnail replaces the track number for an Apple Music look.
     artwork_view_ = std::make_unique<ArtworkView>();
-    artwork_view_->set_preferred_size(18, 18);
-    artwork_view_->set_corner_radius(3);
+    artwork_view_->set_preferred_size(track_list_metrics::kArtworkSize,
+                                      track_list_metrics::kArtworkSize);
+    artwork_view_->set_corner_radius(
+        track_list_metrics::kArtworkCornerRadius);
     gtk_widget_add_css_class(artwork_view_->get_widget(), "track-row-artwork");
     artwork_view_->set_artwork_path(track_.artwork_path);
     gtk_widget_set_visible(artwork_view_->get_widget(), TRUE);
-    gtk_box_append(GTK_BOX(box), artwork_view_->get_widget());
+
+    GtkWidget* artwork_stack = gtk_overlay_new();
+    gtk_widget_set_size_request(artwork_stack,
+                                track_list_metrics::kArtworkSize,
+                                track_list_metrics::kArtworkSize);
+    gtk_widget_set_visible(artwork_stack, TRUE);
+    gtk_overlay_set_child(GTK_OVERLAY(artwork_stack),
+                          artwork_view_->get_widget());
+
+    equalizer_ = std::make_unique<EqualizerIndicator>();
+    gtk_overlay_add_overlay(GTK_OVERLAY(artwork_stack),
+                            equalizer_->get_widget());
+    gtk_overlay_set_measure_overlay(GTK_OVERLAY(artwork_stack),
+                                    equalizer_->get_widget(), FALSE);
+    gtk_box_append(GTK_BOX(box), artwork_stack);
 
     // Title
     title_label_.reset(gtk_label_new(track_.title.c_str()));
@@ -261,7 +281,8 @@ void TrackRow::setup_ui() {
     g_object_ref_sink(duration_label_.get());
     gtk_widget_add_css_class(duration_label_.get(), "track-row-duration");
     gtk_label_set_xalign(GTK_LABEL(duration_label_.get()), 1.0);
-    gtk_widget_set_size_request(duration_label_.get(), 40, -1);
+    gtk_widget_set_size_request(duration_label_.get(),
+                                track_list_metrics::kDurationWidth, -1);
     gtk_widget_set_visible(duration_label_.get(), TRUE);
     gtk_box_append(GTK_BOX(box), duration_label_.get());
 
@@ -272,12 +293,15 @@ void TrackRow::setup_ui() {
     gtk_widget_add_css_class(like_button_.get(), "track-row-like-button");
     GtkWidget* like_icon = gtk_image_new_from_icon_name(
         liked_ ? "starred-symbolic" : "non-starred-symbolic");
-    gtk_image_set_pixel_size(GTK_IMAGE(like_icon), 16);
+    gtk_image_set_pixel_size(GTK_IMAGE(like_icon),
+                              track_list_metrics::kLikeIconSize);
     gtk_button_set_child(GTK_BUTTON(like_button_.get()), like_icon);
     gtk_widget_set_halign(like_button_.get(), GTK_ALIGN_END);
     // Consistent spacing on all four sides.
-    gtk_widget_set_margin_start(like_button_.get(), 4);
-    gtk_widget_set_margin_end(like_button_.get(), 4);
+    gtk_widget_set_margin_start(like_button_.get(),
+                                track_list_metrics::kLikeMargin);
+    gtk_widget_set_margin_end(like_button_.get(),
+                              track_list_metrics::kLikeMargin);
     gtk_widget_set_margin_top(like_button_.get(), 0);
     gtk_widget_set_margin_bottom(like_button_.get(), 0);
     g_signal_connect(like_button_.get(), "clicked",
@@ -310,6 +334,7 @@ void TrackRow::setup_ui() {
 
 void TrackRow::set_playing(bool playing) {
     playing_ = playing;
+    if (equalizer_) equalizer_->set_playing(playing);
     if (playing) {
         gtk_widget_add_css_class(widget_.get(), "playing");
     } else {
@@ -328,7 +353,8 @@ void TrackRow::set_liked(bool liked) {
         // Fallback: create new icon if child is not an image
         GtkWidget* new_icon = gtk_image_new_from_icon_name(
             liked_ ? "starred-symbolic" : "non-starred-symbolic");
-        gtk_image_set_pixel_size(GTK_IMAGE(new_icon), 16);
+        gtk_image_set_pixel_size(GTK_IMAGE(new_icon),
+                                  track_list_metrics::kLikeIconSize);
         gtk_button_set_child(GTK_BUTTON(like_button_.get()), new_icon);
         // gtk_button_set_child() automatically unrefs the old child
     }
