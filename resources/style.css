@@ -2,36 +2,61 @@
  * Lollypop C++ - GTK4 CSS Stylesheet
  * Apple Music-inspired design with custom playback areas
  * GTK4 compatible - uses CSS custom properties (GTK 4.16+)
+ * Baseline: GTK 4.24.1 - supports custom properties and media queries
  *
- * NOTE: @define-color and alpha() are deprecated in GTK 4.
+ * NOTE: backdrop-filter is NOT available in GTK CSS. Glass effects use translucent fills only.
  * Custom properties set by ThemeManager at runtime override --accent-color.
  * @font-face is not supported in GTK CSS - font loaded via GResource and ThemeManager
  */
 
-* {
-    font-family: "Inter", "Noto Sans", "Liberation Sans", sans-serif;
-    font-size: 13px;
-    color: var(--text-primary, #f5f5f7);
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
-}
-
 /* ============================================================================
- * Apple Type Scale (Inter font)
+ * 1. Design Tokens (single consolidated :root)
  * ============================================================================ */
 
 :root {
-    /* Apple type scale in px */
-    --font-display: 34px;       /* Large titles */
-    --font-title1: 28px;        /* Title 1 */
-    --font-title2: 22px;        /* Title 2 */
-    --font-title3: 20px;        /* Title 3 */
-    --font-headline: 17px;      /* Headline */
-    --font-body: 17px;          /* Body */
-    --font-callout: 16px;       /* Callout */
-    --font-subhead: 15px;       /* Subhead */
-    --font-footnote: 13px;      /* Footnote */
-    --font-caption1: 12px;      /* Caption 1 */
-    --font-caption2: 11px;      /* Caption 2 */
+    /* Surfaces */
+    --bg-primary: #111116;
+    --bg-secondary: #1a1a22;
+    --bg-tertiary: #22222c;
+    --bg-hover: #2a2a36;
+    --bg-active: #333340;
+    --bg-selected: #3a3a4a;
+
+    /* Text */
+    --text-primary: #f5f5f7;
+    --text-secondary: #a3a3ad;
+    --text-tertiary: #7a7a8a;
+    --text-disabled: #555565;
+
+    /* Accent — ThemeManager overrides these at runtime */
+    --accent-color: #a78bfa;
+    --accent-hover: #8b5cf6;
+    --accent-soft: rgba(167, 139, 250, 0.18);
+    --accent-bg: rgba(167, 139, 250, 0.18);
+    --accent-active: #7c3aed;
+    --accent-shadow: rgba(167, 139, 250, 0.28);
+    --accent-shadow-strong: rgba(167, 139, 250, 0.42);
+
+    /* Borders and focus */
+    --border-subtle: #2a2a36;
+    --border-focus: var(--accent-color);
+
+    /* Shadows */
+    --shadow-strong: rgba(0, 0, 0, 0.50);
+    --shadow-subtle: rgba(0, 0, 0, 0.20);
+
+    /* Typography scale (Apple type scale in px) */
+    --font-display: 34px;
+    --font-title1: 28px;
+    --font-title2: 22px;
+    --font-title3: 20px;
+    --font-headline: 17px;
+    --font-body: 17px;
+    --font-callout: 16px;
+    --font-subhead: 15px;
+    --font-footnote: 13px;
+    --font-caption1: 12px;
+    --font-caption2: 11px;
 
     /* Font weights */
     --font-weight-thin: 100;
@@ -43,104 +68,59 @@
     --font-weight-bold: 700;
     --font-weight-heavy: 800;
     --font-weight-black: 900;
-}
 
-/* Type scale utility classes */
-.display { font-size: var(--font-display); font-weight: var(--font-weight-bold); letter-spacing: -0.5px; }
-.title1 { font-size: var(--font-title1); font-weight: var(--font-weight-semibold); letter-spacing: -0.3px; }
-.title2 { font-size: var(--font-title2); font-weight: var(--font-weight-semibold); letter-spacing: -0.2px; }
-.title3 { font-size: var(--font-title3); font-weight: var(--font-weight-semibold); letter-spacing: -0.1px; }
-.headline { font-size: var(--font-headline); font-weight: var(--font-weight-semibold); }
-.body { font-size: var(--font-body); font-weight: var(--font-weight-regular); }
-.body-strong { font-size: var(--font-body); font-weight: var(--font-weight-semibold); }
-.callout { font-size: var(--font-callout); font-weight: var(--font-weight-regular); }
-.subhead { font-size: var(--font-subhead); font-weight: var(--font-weight-regular); }
-.footnote { font-size: var(--font-footnote); font-weight: var(--font-weight-regular); }
-.caption1 { font-size: var(--font-caption1); font-weight: var(--font-weight-regular); }
-.caption2 { font-size: var(--font-caption2); font-weight: var(--font-weight-regular); }
+    /* Corner radii */
+    --radius-xs: 6px;
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 24px;
+    --radius-pill: 999px;
 
-/* Weight utilities */
-.weight-thin { font-weight: var(--font-weight-thin); }
-.weight-light { font-weight: var(--font-weight-light); }
-.weight-regular { font-weight: var(--font-weight-regular); }
-.weight-medium { font-weight: var(--font-weight-medium); }
-.weight-semibold { font-weight: var(--font-weight-semibold); }
-.weight-bold { font-weight: var(--font-weight-bold); }
-
-/* Dynamic type support - responds to GTK font size setting */
-@media (prefers-reduced-motion: reduce) {
-    * {
-        transition-duration: 1ms;
-        animation-duration: 1ms;
-    }
-}
-
-/* ============================================================================
- * Color Variables (defaults; overridden by ThemeManager at runtime)
- * ============================================================================ */
-
-:root {
-    --bg-primary: #111116;
-    --bg-secondary: #1a1a22;
-    --bg-tertiary: #22222c;
-    --bg-hover: #2a2a36;
-    --bg-active: #333340;
-    --bg-selected: #3a3a4a;
-
-    --text-primary: #f5f5f7;
-    --text-secondary: #a3a3ad;
-    --text-tertiary: #7a7a8a;
-    --text-disabled: #555565;
-
-    --accent-color: #a78bfa;          /* Overridden by ThemeManager */
-    --accent-soft: rgba(167, 139, 250, 0.18);
-    --accent-hover: #8b5cf6;
-
-    --border-subtle: #2a2a36;
-    --border-focus: var(--accent-color);
-
-    --shadow-strong: rgba(0, 0, 0, 0.5);
-    --shadow-subtle: rgba(0, 0, 0, 0.2);
-
-    /* ========================================================================
-     * Glass Material System (GTK 4.14+ backdrop-filter)
-     * ======================================================================== */
+    /* Translucent material tokens — NO backdrop-filter (not in GTK CSS) */
     --glass-ultra-thin-bg: rgba(255, 255, 255, 0.04);
     --glass-ultra-thin-border: rgba(255, 255, 255, 0.06);
-    --glass-ultra-thin-blur: 10px;
-
     --glass-thin-bg: rgba(255, 255, 255, 0.06);
     --glass-thin-border: rgba(255, 255, 255, 0.08);
-    --glass-thin-blur: 20px;
-
     --glass-regular-bg: rgba(255, 255, 255, 0.08);
     --glass-regular-border: rgba(255, 255, 255, 0.12);
-    --glass-regular-blur: 30px;
-
     --glass-thick-bg: rgba(255, 255, 255, 0.12);
     --glass-thick-border: rgba(255, 255, 255, 0.16);
-    --glass-thick-blur: 40px;
 
-    --glass-radius-sm: 8px;
-    --glass-radius-md: 12px;
-    --glass-radius-lg: 16px;
-    --glass-radius-xl: 24px;
+    /* Reduced motion support - handled by C++ adding .reduce-motion class */
 }
 
 /* ============================================================================
- * Base Styles
+ * 2. Global Foundation
  * ============================================================================ */
+
+* {
+    font-family: "Inter", "Noto Sans", "Liberation Sans", sans-serif;
+    font-size: 13px;
+    color: var(--text-primary);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
 
 window {
     background-color: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+label {
+    color: var(--text-primary);
 }
 
 button {
-    border: none;
-    border-radius: 8px;
-    padding: 8px;
-    background-color: transparent;
     color: var(--text-primary);
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    padding: 8px;
+    transition: background-color 150ms ease-out,
+                color 150ms ease-out,
+                border-color 150ms ease-out,
+                box-shadow 150ms ease-out,
+                transform 150ms ease-out;
 }
 
 button:hover {
@@ -149,33 +129,33 @@ button:hover {
 
 button:active {
     background-color: var(--bg-active);
+    transition-duration: 50ms;
 }
 
 button:focus {
-    outline: none;
-    box-shadow: 0 0 0 2px var(--border-focus);
+    outline: 2px solid var(--border-focus);
+    outline-offset: 1px;
 }
 
 button:disabled {
     color: var(--text-disabled);
     background-color: transparent;
+    opacity: 0.55;
 }
 
-label {
+entry,
+searchentry {
     color: var(--text-primary);
-}
-
-entry, searchentry {
-    border: 1px solid var(--border-subtle);
-    border-radius: 20px;
-    padding: 8px 16px;
     background-color: var(--bg-secondary);
-    color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
+    padding: 8px 16px;
 }
 
-entry:focus, searchentry:focus {
+entry:focus,
+searchentry:focus {
     border-color: var(--border-focus);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--border-focus), transparent 70%);
+    box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
 scrolledwindow {
@@ -189,14 +169,15 @@ separator {
 }
 
 popover {
+    color: var(--text-primary);
     background-color: var(--bg-secondary);
     border: 1px solid var(--border-subtle);
-    border-radius: 12px;
+    border-radius: var(--radius-md);
     box-shadow: 0 8px 32px var(--shadow-strong);
 }
 
 popover button {
-    border-radius: 6px;
+    border-radius: var(--radius-xs);
     padding: 8px 16px;
 }
 
@@ -217,62 +198,84 @@ listboxrow:selected {
 }
 
 /* ============================================================================
- * Typography Scale (Apple type scale with Inter)
+ * 3. Typography Utilities (single authoritative definitions)
  * ============================================================================ */
 
 .display { font-size: var(--font-display); font-weight: var(--font-weight-bold); letter-spacing: -0.5px; }
-.title-1 { font-size: var(--font-title1); font-weight: var(--font-weight-semibold); letter-spacing: -0.3px; }
-.title-2 { font-size: var(--font-title2); font-weight: var(--font-weight-semibold); letter-spacing: -0.2px; }
-.title-3 { font-size: var(--font-title3); font-weight: var(--font-weight-semibold); letter-spacing: -0.1px; }
+.title1, .title-1 { font-size: var(--font-title1); font-weight: var(--font-weight-semibold); letter-spacing: -0.3px; }
+.title2, .title-2 { font-size: var(--font-title2); font-weight: var(--font-weight-semibold); letter-spacing: -0.2px; }
+.title3, .title-3 { font-size: var(--font-title3); font-weight: var(--font-weight-semibold); letter-spacing: -0.1px; }
 .headline { font-size: var(--font-headline); font-weight: var(--font-weight-semibold); }
 .body { font-size: var(--font-body); font-weight: var(--font-weight-regular); }
 .body-strong { font-size: var(--font-body); font-weight: var(--font-weight-semibold); }
 .callout { font-size: var(--font-callout); font-weight: var(--font-weight-regular); }
 .subhead { font-size: var(--font-subhead); font-weight: var(--font-weight-regular); }
 .footnote { font-size: var(--font-footnote); font-weight: var(--font-weight-regular); }
-.caption { font-size: var(--font-caption1); font-weight: var(--font-weight-regular); color: var(--text-tertiary); }
+.caption, .caption1 { font-size: var(--font-caption1); font-weight: var(--font-weight-regular); color: var(--text-tertiary); }
 .caption2 { font-size: var(--font-caption2); font-weight: var(--font-weight-regular); color: var(--text-secondary); }
 .caption-strong { font-size: var(--font-caption1); font-weight: var(--font-weight-semibold); color: var(--text-secondary); }
 
+.weight-thin { font-weight: var(--font-weight-thin); }
+.weight-light { font-weight: var(--font-weight-light); }
+.weight-regular { font-weight: var(--font-weight-regular); }
+.weight-medium { font-weight: var(--font-weight-medium); }
+.weight-semibold { font-weight: var(--font-weight-semibold); }
+.weight-bold { font-weight: var(--font-weight-bold); }
+.weight-heavy { font-weight: var(--font-weight-heavy); }
+.weight-black { font-weight: var(--font-weight-black); }
+
+/* Dynamic type support - reduced motion */
+@media (prefers-reduced-motion: reduce) {
+    * {
+        transition-duration: 1ms;
+        animation-duration: 1ms;
+    }
+}
+
 /* ============================================================================
- * Sidebar Styles
+ * 4. Sidebar (consolidated)
  * ============================================================================ */
 
 .sidebar {
     background-color: var(--bg-secondary);
     border-right: 1px solid var(--border-subtle);
-    min-width: 40px;
+    min-width: 50px;
 }
 
 .sidebar-header {
     background-color: transparent;
-    min-height: 45px;
+    min-height: 52px;
 }
 
-/* Every sidebar control is a single 40x45 button. Icons are centred by GTK
-   alignment in code, so no padding or nested shell is needed here. */
 .sidebar-menu-button,
 .sidebar-action-button,
 .sidebar-nav-item {
-    min-width: 40px;
-    min-height: 45px;
+    min-width: 50px;
+    min-height: 52px;
     border-radius: 10px;
     padding: 0;
     margin: 0;
 }
 
+.sidebar button {
+    padding: 0;
+}
+
+.sidebar-nav-item:hover,
 .sidebar-menu-button:hover,
-.sidebar-action-button:hover,
-.sidebar-nav-item:hover {
+.sidebar-action-button:hover {
     background-color: var(--bg-hover);
+}
+
+.sidebar button:focus,
+.sidebar button:focus-visible {
+    box-shadow: none;
+    outline: none;
+    border: none;
 }
 
 .sidebar-nav {
     margin-top: 0;
-}
-
-.sidebar-nav-item:hover {
-    background-color: var(--bg-hover);
 }
 
 .sidebar-nav-item.active {
@@ -285,7 +288,7 @@ listboxrow:selected {
 
 .sidebar-nav-item.active .sidebar-nav-label {
     color: var(--text-primary);
-    font-weight: 500;
+    font-weight: var(--font-weight-medium);
 }
 
 .sidebar-nav-icon {
@@ -297,18 +300,13 @@ listboxrow:selected {
 .sidebar-nav-label {
     color: var(--text-secondary);
     font-size: 13px;
-    font-weight: 400;
+    font-weight: var(--font-weight-regular);
 }
 
-/* Compact sidebar mode */
 .sidebar.compact {
-    min-width: 40px;
+    min-width: 50px;
 }
 
-/* Compact sidebar nav items - icon only, label hidden via revealer.
-   Button geometry (size and margins) is set identically in code for both
-   modes, so every icon stays on the same straight line. Only labels
-   appear/disappear via the revealer widget. */
 .sidebar.compact .sidebar-nav-item {
     padding: 0;
     border-radius: 10px;
@@ -330,45 +328,58 @@ listboxrow:selected {
     color: var(--accent-color);
 }
 
-/* Compact header height matches the nav button height. */
 .sidebar.compact .sidebar-header {
-    min-height: 45px;
+    min-height: 52px;
 }
 
 /* ============================================================================
- * Middle Library Styles
+ * 5. Middle Library & Floating Glass Toolbar
  * ============================================================================ */
 
-.middle-library {
+.middle-library,
+.middle-library-overlay {
     background-color: var(--bg-primary);
 }
 
-.library-header {
+.library-header,
+.library-page,
+.library-scrolled,
+.middle-viewport,
+.middle-content {
     background-color: transparent;
 }
 
 .library-search {
-    min-width: 300px;
+    min-width: 0;
 }
 
-.library-menu-button {
+.library-menu-button,
+.middle-toolbar-button {
     min-width: 40px;
     min-height: 40px;
     border-radius: 10px;
     padding: 8px;
 }
 
-.library-menu-button:hover {
+.library-menu-button:hover,
+.middle-toolbar-button:hover {
     background-color: var(--bg-hover);
+    transform: scale(1.04);
 }
 
-.library-page {
+.middle-toolbar-button:active {
+    transform: scale(0.96);
+}
+
+.middle-toolbar-button:disabled {
+    opacity: 0.35;
     background-color: transparent;
 }
 
 .library-page-title {
+    color: var(--text-primary);
     font-size: 22px;
-    font-weight: 600;
+    font-weight: var(--font-weight-semibold);
     letter-spacing: -0.3px;
     margin-bottom: 16px;
 }
@@ -378,50 +389,31 @@ listboxrow:selected {
     font-size: 13px;
 }
 
-.library-scrolled {
-    background-color: transparent;
-}
-
-/* ============================================================================
- * Middle Library Redesign - Single Scroller with Floating Glass Toolbar
- * ============================================================================ */
-
-.middle-library-overlay {
-    background-color: var(--bg-primary);
-}
-
-/* Single viewport scroller */
-.middle-viewport {
-    background-color: transparent;
-}
-
-/* Content box inside scroller - fills width, natural height */
-.middle-content {
-    background-color: transparent;
-    /* Top/bottom margins set programmatically */
-}
-
-/* Floating glass toolbar */
 .middle-glass-toolbar {
-    background: linear-gradient(180deg,
-        rgba(255, 255, 255, 0.10) 0%,
-        rgba(255, 255, 255, 0.05) 100%);
-    background-color: rgba(0, 0, 0, 0.55);
-    border-radius: 16px;
+    background-color: rgba(24, 24, 31, 0.88);
+    background-image: linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.10),
+        rgba(255, 255, 255, 0.04)
+    );
     border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: var(--radius-lg);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.24),
                 0 2px 8px rgba(0, 0, 0, 0.16);
     min-height: 52px;
     padding: 0 12px;
-    transition: background 0.2s ease, box-shadow 0.2s ease;
+    transition: background-color 200ms ease-out,
+                box-shadow 200ms ease-out;
 }
 
 @media (prefers-color-scheme: light) {
     .middle-glass-toolbar {
-        background: linear-gradient(180deg,
-            rgba(255, 255, 255, 0.80) 0%,
-            rgba(255, 255, 255, 0.60) 100%);
         background-color: rgba(255, 255, 255, 0.72);
+        background-image: linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.80),
+            rgba(255, 255, 255, 0.60)
+        );
         border: 1px solid rgba(0, 0, 0, 0.08);
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.10),
                     0 2px 8px rgba(0, 0, 0, 0.06);
@@ -440,41 +432,15 @@ listboxrow:selected {
     }
 }
 
-/* Toolbar buttons */
-.middle-toolbar-button {
-    min-width: 40px;
-    min-height: 40px;
-    border-radius: 10px;
-    padding: 8px;
-    color: var(--text-primary);
-    transition: background-color 0.1s ease, transform 0.1s ease;
-}
-
-.middle-toolbar-button:hover {
-    background-color: var(--bg-hover);
-    transform: scale(1.05);
-}
-
-.middle-toolbar-button:active {
-    transform: scale(0.95);
-}
-
-.middle-toolbar-button:disabled {
-    opacity: 0.35;
-    background-color: transparent;
-}
-
-/* Toolbar title */
 .middle-toolbar-title {
-    font-size: 17px;
-    font-weight: 600;
     color: var(--text-primary);
+    font-size: 17px;
+    font-weight: var(--font-weight-semibold);
     letter-spacing: -0.2px;
 }
 
-/* Toolbar search entry */
 .middle-toolbar-search {
-    min-width: 280px;
+    min-width: 0;
     min-height: 36px;
     border-radius: 10px;
     padding: 0 12px 0 40px;
@@ -494,7 +460,7 @@ listboxrow:selected {
 .middle-toolbar-search:focus {
     background-color: rgba(255, 255, 255, 0.12);
     border-color: var(--accent-color);
-    box-shadow: 0 0 0 3px var(--accent-bg);
+    box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
 @media (prefers-color-scheme: light) {
@@ -507,8 +473,13 @@ listboxrow:selected {
     opacity: 0.5;
 }
 
-/* Home page styles - no nested scroller */
-.home-page {
+/* ============================================================================
+ * 6. Home Page, Sections, Albums, Artists, Tracks
+ * ============================================================================ */
+
+.home-page,
+.home-track-list,
+.home-album-grid {
     background-color: transparent;
 }
 
@@ -517,26 +488,26 @@ listboxrow:selected {
 }
 
 .home-subtitle {
-    font-size: 15px;
-    font-weight: 400;
     color: var(--text-secondary);
+    font-size: 15px;
+    font-weight: var(--font-weight-regular);
     margin-left: 4px;
 }
 
-/* Section headers */
 .section-title {
-    font-size: 17px;
-    font-weight: 600;
     color: var(--text-primary);
+    font-size: 17px;
+    font-weight: var(--font-weight-semibold);
     letter-spacing: -0.2px;
+    margin-bottom: 16px;
 }
 
 .section-view-all {
-    font-size: 13px;
-    font-weight: 500;
     color: var(--accent-color);
+    font-size: 13px;
+    font-weight: var(--font-weight-medium);
     padding: 4px 8px;
-    border-radius: 6px;
+    border-radius: var(--radius-xs);
     transition: background-color 0.1s ease;
 }
 
@@ -544,225 +515,149 @@ listboxrow:selected {
     background-color: var(--accent-bg);
 }
 
-/* Track list in home */
-.home-track-list {
-    background-color: transparent;
+.horizontal-section {
+    margin-bottom: 32px;
 }
 
-/* Album grid in home */
-.home-album-grid {
-    background-color: transparent;
-}
-
-/* Responsive album card sizing handled by MiddleLibrary allocation */
-
-/* Album/Artist Cards - square artwork tiles */
-.album-card, .artist-card {
+.album-card,
+.artist-card {
     background-color: var(--bg-secondary);
-    border-radius: 12px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
     padding: 0;
-    min-width: 160px;
-    min-height: 160px;
-    transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.1s ease;
+    min-width: 0;
+    min-height: 0;
+    transition: background-color 150ms ease-out,
+                border-color 150ms ease-out,
+                box-shadow 150ms ease-out,
+                transform 150ms ease-out;
 }
 
-.album-card:hover, .artist-card:hover {
+.album-card:hover,
+.artist-card:hover {
     background-color: var(--bg-hover);
-    transform: scale(1.03);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.20);
+    border-color: var(--border-subtle);
+    transform: scale(1.02);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.20);
 }
 
-.album-card:active {
+.album-card:active,
+.artist-card:active {
     transform: scale(0.98);
 }
 
-.album-card:selected, .artist-card:selected {
+.album-card:selected,
+.artist-card:selected {
     background-color: var(--bg-selected);
-    box-shadow: 0 0 0 2px var(--border-focus);
+    border-color: var(--border-focus);
+    box-shadow: 0 0 0 1px var(--border-focus);
 }
 
-.album-artwork, .artist-artwork {
-    border-radius: 8px;
-    min-width: 160px;
-    min-height: 160px;
-}
-
-/* Hidden metadata by default - shown on hover via JS/CSS */
-.album-title, .album-artist {
+.album-artwork,
+.artist-artwork {
+    border-radius: var(--radius-sm);
     min-width: 0;
     min-height: 0;
-    opacity: 0;
-    transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
-.album-card:hover .album-title,
-.album-card:hover .album-artist,
-.artist-card:hover .album-title,
-.artist-card:hover .album-artist {
-    opacity: 1;
-    transform: translateY(0);
-}
-
-.album-title {
-    font-size: 14px;
-    font-weight: 600;
+.album-title,
+.artist-card .album-title {
     color: var(--text-primary);
+    font-size: 14px;
+    font-weight: var(--font-weight-semibold);
     margin-top: 8px;
     margin-bottom: 2px;
 }
 
-.album-artist {
-    font-size: 12px;
-    font-weight: 400;
+.album-artist,
+.artist-card .album-artist {
     color: var(--text-tertiary);
+    font-size: 12px;
+    font-weight: var(--font-weight-regular);
     margin-bottom: 12px;
 }
 
-/* Album Detail Hero */
-.detail-hero {
-    background: linear-gradient(180deg,
-        rgba(0, 0, 0, 0.40) 0%,
-        transparent 60%);
-    border-radius: 24px;
-    padding: 32px;
-    margin-bottom: 24px;
-}
-
-.detail-artwork {
-    border-radius: 18px;
-    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.40);
-    min-width: 180px;
-    min-height: 180px;
-}
-
-.detail-title {
-    font-size: 32px;
-    font-weight: 700;
-    color: var(--text-primary);
-    letter-spacing: -0.5px;
-    margin-bottom: 8px;
-}
-
-.detail-meta {
-    font-size: 15px;
-    color: var(--text-secondary);
-    margin-bottom: 16px;
-}
-
-/* Search empty state */
-.search-empty {
-    /* text-align not supported in GTK CSS - center via GtkWidget halign */
-    padding: 48px 24px;
-    color: var(--text-secondary);
-}
-
-.search-empty-icon {
-    font-size: 48px;
-    color: var(--text-tertiary);
-    margin-bottom: 16px;
-}
-
-.search-empty-title {
-    font-size: 17px;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 8px;
-}
-
-.search-empty-description {
-    font-size: 13px;
-    color: var(--text-tertiary);
-}
-
-/* Album/Artist grid responsive columns handled by MiddleLibrary allocation */
-
-/* ============================================================================
- * Album/Artist Cards (existing)
- * ============================================================================ */
-.album-card, .artist-card {
-    background-color: var(--bg-secondary);
-    border-radius: 12px;
-    padding: 0;
-}
-
-/* Album cards are square artwork tiles; metadata is hidden by design. */
-.album-card {
-    min-width: 160px;
-    min-height: 160px;
-}
-
-.album-card:hover, .artist-card:hover {
-    background-color: var(--bg-hover);
-    transform: scale(1.02);
-}
-
-.album-card:active {
-    transform: scale(0.98);
-}
-
-.album-card:selected, .artist-card:selected {
-    background-color: var(--bg-selected);
-    box-shadow: 0 0 0 2px var(--border-focus);
-}
-
-.album-artwork, .artist-artwork {
-    border-radius: 8px;
-    min-width: 160px;
-    min-height: 160px;
-}
-
-.album-title, .album-artist {
-    min-width: 0;
-    min-height: 0;
-    opacity: 0;
-}
-
-.album-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-top: 8px;
-}
-
-.album-artist {
-    font-size: 12px;
-    font-weight: 400;
-    color: var(--text-tertiary);
-    margin-top: 2px;
-}
-
-/* Track Row */
 .track-row {
     background-color: transparent;
-    border-radius: 8px;
-    transition: background-color 0.1s ease;
+    border-radius: var(--radius-sm);
+    transition: background-color 100ms ease-out;
 }
 
 .track-row:hover {
     background-color: var(--bg-hover);
 }
 
-.track-row.pressed {
+.track-row.pressed,
+.track-row:selected {
     background-color: var(--bg-selected);
 }
 
 .track-row.playing {
-    background-color: var(--accent-bg);
-}
-
-/* Horizontal scrolling sections */
-.horizontal-section {
-    margin-bottom: 32px;
-}
-
-.section-title {
-    font-size: 17px;
-    font-weight: 600;
-    margin-bottom: 16px;
+    background-color: var(--accent-soft);
 }
 
 /* ============================================================================
- * ArtworkView Component
+ * 7. Album/Artist Detail, Search Empty State
+ * ============================================================================ */
+
+.detail-hero {
+    background-color: var(--bg-secondary);
+    background-image: linear-gradient(
+        180deg,
+        rgba(0, 0, 0, 0.32),
+        rgba(0, 0, 0, 0.00)
+    );
+    border-radius: var(--radius-xl);
+    padding: 32px;
+    margin-bottom: 24px;
+}
+
+.detail-artwork {
+    border-radius: 18px;
+    box-shadow: 0 20px 56px rgba(0, 0, 0, 0.38);
+    min-width: 0;
+    min-height: 0;
+}
+
+.detail-title {
+    color: var(--text-primary);
+    font-size: 32px;
+    font-weight: var(--font-weight-bold);
+    letter-spacing: -0.5px;
+    margin-bottom: 8px;
+}
+
+.detail-meta {
+    color: var(--text-secondary);
+    font-size: 15px;
+    margin-bottom: 16px;
+}
+
+.search-empty {
+    color: var(--text-secondary);
+    padding: 48px 24px;
+}
+
+.search-empty-icon {
+    color: var(--text-tertiary);
+    font-size: 48px;
+    margin-bottom: 16px;
+}
+
+.search-empty-title {
+    color: var(--text-primary);
+    font-size: 17px;
+    font-weight: var(--font-weight-semibold);
+    margin-bottom: 8px;
+}
+
+.search-empty-description {
+    color: var(--text-tertiary);
+    font-size: 13px;
+}
+
+/* ============================================================================
+ * 8. Artwork & Generic States
  * ============================================================================ */
 
 .artwork-view {
@@ -770,17 +665,13 @@ listboxrow:selected {
 }
 
 .artwork-view-image {
-    border-radius: 12px;
+    border-radius: var(--radius-md);
     box-shadow: 0 16px 48px var(--shadow-strong);
 }
 
 .artwork-view-fallback {
     color: var(--text-secondary);
 }
-
-/* ============================================================================
- * Empty / Loading / Error States
- * ============================================================================ */
 
 .empty-state,
 .loading-state,
@@ -795,15 +686,15 @@ listboxrow:selected {
 
 .empty-state-title,
 .error-state-title {
-    font-size: 17px;
-    font-weight: 600;
     color: var(--text-primary);
+    font-size: 17px;
+    font-weight: var(--font-weight-semibold);
 }
 
 .empty-state-description,
 .error-state-description {
-    font-size: 13px;
     color: var(--text-secondary);
+    font-size: 13px;
 }
 
 .loading-state-spinner {
@@ -811,8 +702,8 @@ listboxrow:selected {
 }
 
 .loading-state-message {
-    font-size: 13px;
     color: var(--text-secondary);
+    font-size: 13px;
 }
 
 .error-state-retry {
@@ -820,7 +711,7 @@ listboxrow:selected {
 }
 
 /* ============================================================================
- * Right Now Playing Styles
+ * 9. Right Now Playing Panel
  * ============================================================================ */
 
 .right-now-playing {
@@ -828,7 +719,10 @@ listboxrow:selected {
     border-left: 1px solid var(--border-subtle);
 }
 
-.now-playing-content {
+.now-playing-content,
+.now-playing-tab-content,
+.now-playing-tab-scroll,
+.now-playing-queue {
     background-color: transparent;
     min-width: 0;
     min-height: 0;
@@ -840,9 +734,8 @@ listboxrow:selected {
 }
 
 .now-playing-artwork-image {
-    border-radius: 12px;
+    border-radius: var(--radius-md);
     box-shadow: 0 16px 48px var(--shadow-strong);
-    /* Size is driven by the panel allocation, not a fixed 280px request. */
     min-width: 0;
     min-height: 0;
 }
@@ -853,16 +746,16 @@ listboxrow:selected {
 }
 
 .now-playing-title {
-    font-size: 20px;
-    font-weight: 600;
-    letter-spacing: -0.2px;
     color: var(--text-primary);
+    font-size: 20px;
+    font-weight: var(--font-weight-semibold);
+    letter-spacing: -0.2px;
 }
 
 .now-playing-artist {
-    font-size: 15px;
-    font-weight: 400;
     color: var(--text-secondary);
+    font-size: 15px;
+    font-weight: var(--font-weight-regular);
 }
 
 .now-playing-waveform {
@@ -872,21 +765,21 @@ listboxrow:selected {
 
 .now-playing-elapsed,
 .now-playing-duration {
-    font-size: 12px;
-    font-weight: 500;
     color: var(--text-tertiary);
+    font-size: 12px;
+    font-weight: var(--font-weight-medium);
     font-variant-numeric: tabular-nums;
 }
 
 .waveform-view,
 .waveform-stub {
     background-color: transparent;
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     min-width: 0;
 }
 
 .waveform-playing {
-    /* Animation state handled by renderer */
+    background-color: transparent;
 }
 
 .now-playing-transport {
@@ -898,7 +791,7 @@ listboxrow:selected {
 .now-playing-mode-button {
     min-width: 40px;
     min-height: 40px;
-    border-radius: 20px;
+    border-radius: var(--radius-pill);
     padding: 8px;
 }
 
@@ -919,8 +812,8 @@ listboxrow:selected {
 .now-playing-control-button:disabled,
 .now-playing-play-button:disabled,
 .now-playing-mode-button:disabled {
-    opacity: 0.4;
     color: var(--text-disabled);
+    opacity: 0.4;
 }
 
 .now-playing-mode-button {
@@ -946,12 +839,12 @@ listboxrow:selected {
 }
 
 .now-playing-tab-button {
-    border-radius: 8px;
-    padding: 8px 10px;
-    font-size: 13px;
-    font-weight: 500;
     color: var(--text-tertiary);
     background-color: transparent;
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    font-size: 13px;
+    font-weight: var(--font-weight-medium);
     min-width: 0;
 }
 
@@ -966,57 +859,42 @@ listboxrow:selected {
     box-shadow: 0 2px 8px var(--shadow-subtle);
 }
 
-.now-playing-tab-content,
-.now-playing-tab-scroll {
-    background-color: transparent;
-    min-width: 0;
-    min-height: 0;
-}
-
 .now-playing-lyrics {
     background-color: transparent;
-    font-size: 14px;
-    line-height: 1.6;
     color: var(--text-secondary);
+    font-size: 14px;
 }
 
 .now-playing-lyrics .current-line {
     color: var(--text-primary);
-    font-weight: 500;
-}
-
-.now-playing-queue {
-    background-color: transparent;
-    min-width: 0;
-    min-height: 0;
+    font-weight: var(--font-weight-medium);
 }
 
 .queue-item-art {
-    border-radius: 6px;
+    border-radius: var(--radius-xs);
     min-width: 40px;
     min-height: 40px;
 }
 
 .queue-item-title {
-    font-size: 13px;
-    font-weight: 500;
     color: var(--text-primary);
+    font-size: 13px;
+    font-weight: var(--font-weight-medium);
 }
 
 .queue-item-artist {
-    font-size: 11px;
-    font-weight: 400;
     color: var(--text-tertiary);
+    font-size: 11px;
+    font-weight: var(--font-weight-regular);
 }
 
 /* ============================================================================
- * Bottom Playback Styles
+ * 10. Bottom Playback Bar
  * ============================================================================ */
 
 .bottom-playback {
     background-color: var(--bg-secondary);
     border-top: 1px solid var(--border-subtle);
-    /* Compact fixed height: 56px artwork + 10px breathing room per side. */
     min-height: 76px;
 }
 
@@ -1026,18 +904,17 @@ listboxrow:selected {
 }
 
 .bottom-playback-left {
-    /* Fixed metadata zone: artwork 56 + gap 10 + ellipsized text. */
-    min-width: 250px;
+    min-width: 0;
 }
 
-.bottom-playback-middle {
-    /* Transport zone starts at x=275; width is set in code from the
-       1500px progress bar plus the prev/next buttons. */
+.bottom-playback-middle,
+.bottom-playback-center,
+.bottom-playback-right {
     min-width: 0;
 }
 
 .bottom-playback-artwork {
-    border-radius: 6px;
+    border-radius: var(--radius-xs);
     min-width: 56px;
     min-height: 56px;
     box-shadow: 0 4px 16px var(--shadow-subtle);
@@ -1050,25 +927,21 @@ listboxrow:selected {
 }
 
 .bottom-playback-title {
-    font-size: 14px;
-    font-weight: 500;
     color: var(--text-primary);
+    font-size: 14px;
+    font-weight: var(--font-weight-medium);
 }
 
 .bottom-playback-artist {
-    font-size: 12px;
-    font-weight: 400;
     color: var(--text-tertiary);
-}
-
-.bottom-playback-center {
-    /* flex-grow handled by GTK layout */
+    font-size: 12px;
+    font-weight: var(--font-weight-regular);
 }
 
 .bottom-playback-control-button {
     min-width: 36px;
     min-height: 36px;
-    border-radius: 18px;
+    border-radius: var(--radius-pill);
     padding: 0;
     color: var(--text-primary);
     transition: background-color 100ms ease-out, transform 50ms ease-out;
@@ -1093,10 +966,7 @@ listboxrow:selected {
     color: var(--text-disabled);
 }
 
-/* Play/Pause button - morphs like Quickshell:
-   - Paused: circle (56px), border-radius 28px
-   - Playing: rounded rect (56x44), border-radius 22px
-   Background: accent color when playing, primary text when paused */
+/* Play/Pause button - morphs like Quickshell */
 .bottom-playback-play-button {
     min-width: 56px;
     min-height: 56px;
@@ -1105,10 +975,13 @@ listboxrow:selected {
     background-color: var(--text-primary);
     color: var(--bg-primary);
     box-shadow: 0 4px 16px var(--shadow-subtle);
-    transition: border-radius 200ms ease-out, background-color 200ms ease-out, box-shadow 200ms ease-out, min-height 200ms ease-out, min-width 200ms ease-out;
+    transition: border-radius 200ms ease-out,
+                background-color 200ms ease-out,
+                box-shadow 200ms ease-out,
+                min-height 200ms ease-out,
+                min-width 200ms ease-out;
 }
 
-/* Playing state: morph to rounded rectangle */
 .bottom-playback-play-button.playing {
     min-width: 56px;
     min-height: 44px;
@@ -1130,7 +1003,7 @@ listboxrow:selected {
 }
 
 .bottom-playback-play-button:active {
-    background-color: var(--text-primary);
+    background-color: var(--bg-active);
 }
 
 .bottom-playback-play-button.playing:active {
@@ -1141,21 +1014,15 @@ listboxrow:selected {
     opacity: 0.4;
 }
 
-/* Stretched wave region. The visible sine is drawn by Cairo in
-   bottom_playback.cpp; the GtkScale above it is intentionally invisible. */
-.bottom-playback-progress {
-    min-width: 0;
-    min-height: 28px;
-    margin: 0;
-}
-
+/* Cairo draws the visible sine wave; GtkScale overlay is for seeking */
+.bottom-playback-progress,
 .progress-wavy-area {
     min-width: 0;
     min-height: 28px;
+    margin: 0;
     background-color: transparent;
 }
 
-/* When canSeek: transparent GtkScale overlay for interactive seeking */
 .progress-wavy-scale {
     min-width: 0;
     min-height: 28px;
@@ -1173,25 +1040,17 @@ listboxrow:selected {
     box-shadow: none;
 }
 
-/* Seek mode is toggled in code via gtk_widget_set_visible(progress_bar_).
-   GTK CSS has no :has()/:visible selectors, so no selector is used here. */
-
-.bottom-playback-right {
-    min-width: 0;
-}
-
 .bottom-playback-mode-button {
     min-width: 30px;
     min-height: 30px;
-    border-radius: 15px;
+    border-radius: var(--radius-pill);
     padding: 0;
 }
 
-/* Volume Dial (circular, like Quickshell MaterialDial.qml) */
 .bottom-playback-volume-dial {
     min-width: 40px;
     min-height: 40px;
-    border-radius: 20px;
+    border-radius: var(--radius-pill);
     padding: 0;
     background-color: transparent;
     color: var(--text-primary);
@@ -1206,13 +1065,14 @@ listboxrow:selected {
     color: var(--text-disabled);
 }
 
-/* Volume Popover Scale (vertical, circular dial style) */
-.bottom-playback-volume-scale {
+.bottom-playback-volume-scale,
+.pip-volume-scale {
     min-width: 24px;
-    min-height: 120px;
+    min-height: 100px;
 }
 
-.bottom-playback-volume-scale slider {
+.bottom-playback-volume-scale slider,
+.pip-volume-scale slider {
     min-width: 14px;
     min-height: 14px;
     border-radius: 7px;
@@ -1221,22 +1081,20 @@ listboxrow:selected {
     box-shadow: 0 2px 8px var(--shadow-subtle);
 }
 
-.bottom-playback-volume-scale slider:hover {
+.bottom-playback-volume-scale slider:hover,
+.pip-volume-scale slider:hover {
     background-color: var(--text-primary);
 }
 
-/* Waveform View */
-.waveform-view {
-    background-color: transparent;
-}
-
-.bottom-playback-volume-scale trough {
+.bottom-playback-volume-scale trough,
+.pip-volume-scale trough {
     min-width: 4px;
     border-radius: 2px;
     background-color: var(--bg-tertiary);
 }
 
-.bottom-playback-volume-scale highlight {
+.bottom-playback-volume-scale highlight,
+.pip-volume-scale highlight {
     background-color: var(--accent-color);
     border-radius: 2px;
 }
@@ -1244,7 +1102,7 @@ listboxrow:selected {
 .bottom-playback-pip-button {
     min-width: 30px;
     min-height: 30px;
-    border-radius: 15px;
+    border-radius: var(--radius-pill);
     padding: 0;
 }
 
@@ -1258,7 +1116,7 @@ listboxrow:selected {
 }
 
 /* ============================================================================
- * Scrollbar Styles (GTK4)
+ * 11. Scrollbars
  * ============================================================================ */
 
 scrollbar {
@@ -1289,36 +1147,40 @@ scrollbar button {
 }
 
 /* ============================================================================
- * PiP (Picture-in-Picture) Window Styles
+ * 12. Picture-in-Picture Window
  * ============================================================================ */
 
 .pip-content {
     background-color: var(--bg-secondary);
-    border-radius: 16px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
     box-shadow: 0 16px 48px var(--shadow-strong);
 }
 
 .pip-title {
-    font-size: 15px;
-    font-weight: 600;
     color: var(--text-primary);
+    font-size: 15px;
+    font-weight: var(--font-weight-semibold);
 }
 
 .pip-artist {
-    font-size: 13px;
-    font-weight: 400;
     color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: var(--font-weight-regular);
 }
 
-.pip-control-button {
+.pip-control-button,
+.pip-volume-button,
+.pip-close-button {
     min-width: 36px;
     min-height: 36px;
-    border-radius: 18px;
+    border-radius: var(--radius-pill);
     padding: 8px;
     color: var(--text-primary);
 }
 
-.pip-control-button:hover {
+.pip-control-button:hover,
+.pip-volume-button:hover {
     background-color: var(--bg-hover);
 }
 
@@ -1327,16 +1189,13 @@ scrollbar button {
     color: var(--text-disabled);
 }
 
-.pip-volume-button {
-    min-width: 36px;
-    min-height: 36px;
-    border-radius: 18px;
-    padding: 8px;
-    color: var(--text-primary);
+.pip-close-button {
+    color: var(--text-tertiary);
 }
 
-.pip-volume-button:hover {
+.pip-close-button:hover {
     background-color: var(--bg-hover);
+    color: var(--text-primary);
 }
 
 .pip-volume-scale {
@@ -1368,189 +1227,131 @@ scrollbar button {
     border-radius: 2px;
 }
 
-.pip-close-button {
-    min-width: 36px;
-    min-height: 36px;
-    border-radius: 18px;
-    padding: 8px;
-    color: var(--text-tertiary);
-}
-
-.pip-close-button:hover {
-    background-color: var(--bg-hover);
-    color: var(--text-primary);
-}
-
 /* ============================================================================
- * Animations & Transitions
- * ============================================================================ */
+ * 13. Translucent Material Variants (NO backdrop-filter)
+ * ============================================================================
 
-* {
-    transition-property: background-color, color, border-color, box-shadow;
-    transition-duration: 150ms;
-    transition-timing-function: ease-out;
-}
-
-button:active,
-.toggle-button:active {
-    transition-duration: 50ms;
-}
-
-/* ============================================================================
- * Glass Material System (GTK 4.14+ backdrop-filter)
- * ============================================================================ */
+/* These classes provide translucent fills, borders and shadows only.
+ * They do NOT blur content behind the widget. */
 
 .glass-ultra-thin {
     background-color: var(--glass-ultra-thin-bg);
     border: 1px solid var(--glass-ultra-thin-border);
-    backdrop-filter: blur(var(--glass-ultra-thin-blur));
-    border-radius: var(--glass-radius-md);
+    border-radius: var(--radius-md);
 }
 
 .glass-thin {
     background-color: var(--glass-thin-bg);
     border: 1px solid var(--glass-thin-border);
-    backdrop-filter: blur(var(--glass-thin-blur));
-    border-radius: var(--glass-radius-md);
+    border-radius: var(--radius-md);
 }
 
-.glass-regular {
-    background-color: var(--glass-regular-bg);
-    border: 1px solid var(--glass-regular-border);
-    backdrop-filter: blur(var(--glass-regular-blur));
-    border-radius: var(--glass-radius-lg);
-}
-
-.glass-thick {
-    background-color: var(--glass-thick-bg);
-    border: 1px solid var(--glass-thick-border);
-    backdrop-filter: blur(var(--glass-thick-blur));
-    border-radius: var(--glass-radius-xl);
-}
-
-/* Glass panel variants */
+.glass-regular,
 .glass-panel {
     background-color: var(--glass-regular-bg);
     border: 1px solid var(--glass-regular-border);
-    backdrop-filter: blur(var(--glass-regular-blur));
-    border-radius: var(--glass-radius-lg);
+    border-radius: var(--radius-lg);
+}
+
+.glass-thick,
+.glass-panel-lg {
+    background-color: var(--glass-thick-bg);
+    border: 1px solid var(--glass-thick-border);
+    border-radius: var(--radius-xl);
 }
 
 .glass-panel-sm {
     background-color: var(--glass-regular-bg);
     border: 1px solid var(--glass-regular-border);
-    backdrop-filter: blur(var(--glass-regular-blur));
-    border-radius: var(--glass-radius-sm);
+    border-radius: var(--radius-sm);
 }
 
-.glass-panel-lg {
-    background-color: var(--glass-thick-bg);
-    border: 1px solid var(--glass-thick-border);
-    backdrop-filter: blur(var(--glass-thick-blur));
-    border-radius: var(--glass-radius-xl);
-}
-
-/* Glass card for album/artist */
-.glass-card {
-    background-color: var(--glass-regular-bg);
-    border: 1px solid var(--glass-regular-border);
-    backdrop-filter: blur(var(--glass-regular-blur));
-    border-radius: var(--glass-radius-md);
-    box-shadow: 0 4px 16px var(--shadow-subtle);
-    transition: transform 200ms ease-out, box-shadow 200ms ease-out;
-}
-
-.glass-card:hover {
-    transform: scale(1.02);
-    box-shadow: 0 8px 32px var(--shadow-strong);
-    background-color: var(--glass-thin-bg);
-    border-color: var(--glass-thin-border);
-}
-
-.glass-card:active {
-    transform: scale(0.98);
-}
-
-/* Glass toolbar */
-.glass-toolbar {
-    background-color: var(--glass-thin-bg);
-    border-top: 1px solid var(--glass-thin-border);
-    backdrop-filter: blur(var(--glass-thin-blur));
-}
-
-/* Glass popover */
-.glass-popover {
-    background-color: var(--glass-regular-bg);
-    border: 1px solid var(--glass-regular-border);
-    backdrop-filter: blur(var(--glass-regular-blur));
-    border-radius: var(--glass-radius-lg);
-    box-shadow: 0 8px 32px var(--shadow-strong);
-}
-
-/* Glass sidebar */
-.glass-sidebar {
-    background-color: var(--glass-thin-bg);
-    border-right: 1px solid var(--glass-thin-border);
-    backdrop-filter: blur(var(--glass-thin-blur));
-}
-
-/* Glass card variants for different contexts */
-.glass-album-card {
-    background-color: var(--glass-regular-bg);
-    border: 1px solid var(--glass-regular-border);
-    backdrop-filter: blur(var(--glass-regular-blur));
-    border-radius: var(--glass-radius-md);
-    box-shadow: 0 4px 16px var(--shadow-subtle);
-    transition: transform 200ms ease-out, box-shadow 200ms ease-out;
-}
-
-.glass-album-card:hover {
-    transform: scale(1.02);
-    box-shadow: 0 8px 32px var(--shadow-strong);
-    background-color: var(--glass-thin-bg);
-    border-color: var(--glass-thin-border);
-}
-
+.glass-card,
+.glass-album-card,
 .glass-artist-card {
     background-color: var(--glass-regular-bg);
     border: 1px solid var(--glass-regular-border);
-    backdrop-filter: blur(var(--glass-regular-blur));
-    border-radius: var(--glass-radius-md);
+    border-radius: var(--radius-md);
     box-shadow: 0 4px 16px var(--shadow-subtle);
-    transition: transform 200ms ease-out, box-shadow 200ms ease-out;
+    transition: background-color 200ms ease-out,
+                border-color 200ms ease-out,
+                box-shadow 200ms ease-out,
+                transform 200ms ease-out;
 }
 
+.glass-card:hover,
+.glass-album-card:hover,
 .glass-artist-card:hover {
-    transform: scale(1.02);
-    box-shadow: 0 8px 32px var(--shadow-strong);
     background-color: var(--glass-thin-bg);
     border-color: var(--glass-thin-border);
+    box-shadow: 0 8px 32px var(--shadow-strong);
+    transform: scale(1.02);
 }
 
-/* Hover elevation for cards */
+.glass-card:active,
+.glass-album-card:active,
+.glass-artist-card:active {
+    transform: scale(0.98);
+}
+
+.glass-toolbar {
+    background-color: var(--glass-thin-bg);
+    border-top: 1px solid var(--glass-thin-border);
+}
+
+.glass-popover {
+    background-color: var(--glass-regular-bg);
+    border: 1px solid var(--glass-regular-border);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 8px 32px var(--shadow-strong);
+}
+
+.glass-sidebar {
+    background-color: var(--glass-thin-bg);
+    border-right: 1px solid var(--glass-thin-border);
+}
+
 .card-elevate:hover {
-    transform: translateY(-4px) scale(1.02);
+    transform: translateY(-3px) scale(1.01);
     box-shadow: 0 16px 48px var(--shadow-strong);
 }
 
-/* Focus states for accessibility */
-.glass-card:focus-visible,
-.glass-panel:focus-visible,
-.glass-toolbar:focus-visible {
+/* ============================================================================
+ * 14. Reduced Motion (C++ adds .reduce-motion class)
+ * ============================================================================
+
+.reduce-motion * {
+    transition-duration: 1ms;
+}
+
+/* ============================================================================
+ * 15. Accessibility - Targeted focus styles (not universal *)
+ * ============================================================================
+
+button:focus,
+entry:focus,
+searchentry:focus,
+.middle-toolbar-search:focus,
+.middle-toolbar-button:focus,
+.bottom-playback-control-button:focus,
+.bottom-playback-play-button:focus,
+.now-playing-control-button:focus,
+.now-playing-play-button:focus,
+.now-playing-mode-button:focus,
+.pip-control-button:focus,
+.pip-volume-button:focus,
+.pip-close-button:focus,
+.sidebar-menu-button:focus,
+.sidebar-action-button:focus,
+.sidebar-nav-item:focus {
     outline: 2px solid var(--border-focus);
     outline-offset: 2px;
 }
 
-/* Reduced motion */
-@media (prefers-reduced-motion: reduce) {
-    .glass-card,
-    .glass-panel,
-    .card-elevate {
-        transition: none;
-    }
-}
+/* ============================================================================
+ * 16. High Contrast Mode (media query supported in GTK 4.20+)
+ * ============================================================================
 
-/* High contrast mode */
 @media (prefers-contrast: more) {
     :root {
         --glass-regular-bg: rgba(255, 255, 255, 0.15);
@@ -1561,14 +1362,3 @@ button:active,
         --glass-thick-border: rgba(255, 255, 255, 0.4);
     }
 }
-
-/* ============================================================================
- * Accessibility
- * ============================================================================ */
-
-*:focus {
-    outline: 2px solid var(--border-focus);
-    outline-offset: 2px;
-}
-
-/* Reduced motion - GTK handles this via settings */
