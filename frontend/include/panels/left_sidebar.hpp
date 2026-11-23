@@ -35,8 +35,10 @@ class LeftSidebar {
 public:
     // Constants
     static constexpr int kIconSize = 22;
-    static constexpr int kCompactWidth = 42;
-    static constexpr int kExpandedWidth = 220;
+    static constexpr int kButtonWidth = 40;
+    static constexpr int kButtonHeight = 45;
+    static constexpr int kCompactWidth = kButtonWidth;
+    static constexpr int kExpandedWidth = 3 * kButtonHeight; // 135px
 
     explicit LeftSidebar(MainWindow* main_window);
     ~LeftSidebar();
@@ -62,10 +64,11 @@ private:
     GtkWidget* collapse_icon_;        // icon inside collapse_button_ (to swap chevron)
     GtkWidget* settings_button_;      // settings icon (shown in expanded mode only)
     GtkWidget* fullscreen_button_;    // fullscreen icon (shown in expanded mode only)
-    GtkWidget* nav_list_box_;
+    GtkWidget* nav_list_box_;   // Plain GtkBox; no ListBoxRow wrapper.
 
     bool expanded_ = true;  // Default to expanded
     std::vector<NavigationItem> nav_items_;
+    std::vector<GtkWidget*> nav_buttons_;
     std::string active_item_id_;
 
     void setup_ui();

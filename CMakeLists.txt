@@ -207,13 +207,14 @@ if(GLIB_COMPILE_RESOURCES)
 endif()
 
 # Copy resources to build directory
-add_custom_command(TARGET lollypop-cpp POST_BUILD
+add_custom_target(copy_resources ALL
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/resources
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_CURRENT_SOURCE_DIR}/resources/style.css
         ${CMAKE_CURRENT_BINARY_DIR}/resources/style.css
     COMMENT "Copying resources to build directory"
 )
+add_dependencies(lollypop-cpp copy_resources)
 
 # Install
 install(TARGETS lollypop-cpp DESTINATION bin)

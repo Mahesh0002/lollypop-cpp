@@ -39,22 +39,18 @@ static GtkWidget* create_sidebar_action_button(const char* icon_name,
     GtkWidget* button = gtk_button_new();
     gtk_button_set_has_frame(GTK_BUTTON(button), FALSE);
     gtk_widget_add_css_class(button, "sidebar-action-button");
-    // Lock size at 36x36 so the icon never changes between modes.
-    gtk_widget_set_size_request(button, 36, 36);
+    // One uniform control for every sidebar action: 40x45 in both modes.
+    gtk_widget_set_size_request(button, LeftSidebar::kButtonWidth,
+                                LeftSidebar::kButtonHeight);
     gtk_widget_set_hexpand(button, FALSE);
     gtk_widget_set_vexpand(button, FALSE);
-    gtk_widget_set_halign(button, GTK_ALIGN_START);
-    gtk_widget_set_valign(button, GTK_ALIGN_START);
-    // 10px gap on all four sides - identical for every sidebar button.
-    gtk_widget_set_margin_start(button, 10);
-    gtk_widget_set_margin_end(button, 10);
-    gtk_widget_set_margin_top(button, 10);
-    gtk_widget_set_margin_bottom(button, 10);
+    gtk_widget_set_halign(button, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(button, GTK_ALIGN_CENTER);
 
     GtkWidget* icon = gtk_image_new_from_icon_name(icon_name);
-    gtk_image_set_pixel_size(GTK_IMAGE(icon), 22);
-    gtk_widget_set_halign(icon, GTK_ALIGN_START);
-    gtk_widget_set_valign(icon, GTK_ALIGN_START);
+    gtk_image_set_pixel_size(GTK_IMAGE(icon), LeftSidebar::kIconSize);
+    gtk_widget_set_halign(icon, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(icon, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(icon, TRUE);
     safe_button_set_child(GTK_BUTTON(button), icon);
 
@@ -102,13 +98,9 @@ void LeftSidebar::setup_ui() {
     // Header box: holds collapse toggle + settings + fullscreen icons (expanded only)
     header_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(header_box_, "sidebar-header");
-    gtk_box_set_homogeneous(GTK_BOX(header_box_), FALSE);
-    gtk_widget_set_hexpand(header_box_, FALSE);
-    gtk_widget_set_halign(header_box_, GTK_ALIGN_START);
-    gtk_widget_set_margin_top(header_box_, 4);
-    gtk_widget_set_margin_bottom(header_box_, 4);
-    gtk_widget_set_margin_start(header_box_, 0);
-    gtk_widget_set_margin_end(header_box_, 0);
+    gtk_box_set_homogeneous(GTK_BOX(header_box_), TRUE);
+    gtk_widget_set_hexpand(header_box_, TRUE);
+    gtk_widget_set_halign(header_box_, GTK_ALIGN_FILL);
     gtk_widget_set_visible(header_box_, TRUE);
 
     // Collapse toggle button - always visible
@@ -121,7 +113,11 @@ void LeftSidebar::setup_ui() {
     collapse_icon_ = gtk_image_new_from_icon_name(
         expanded_ ? "pan-start-symbolic" : "pan-end-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(collapse_icon_), kIconSize);
+    gtk_widget_set_halign(collapse_icon_, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(collapse_icon_, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(collapse_icon_, TRUE);
+    // The displayed icon must be the one update_toggle_icon() swaps.
+    safe_button_set_child(GTK_BUTTON(collapse_button_), collapse_icon_);
 
     // Settings icon button - shown only in expanded mode
     settings_button_ = create_sidebar_action_button(
@@ -139,10 +135,12 @@ void LeftSidebar::setup_ui() {
     safe_box_append(GTK_BOX(header_box_), settings_button_);
     safe_box_append(GTK_BOX(header_box_), fullscreen_button_);
 
-    // Navigation list
-    nav_list_box_ = gtk_list_box_new();
+    // Navigation container. A plain box means each item is one button with no
+    // GtkListBoxRow wrapper around it.
+    nav_list_box_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_add_css_class(nav_list_box_, "sidebar-nav");
-    gtk_list_box_set_selection_mode(GTK_LIST_BOX(nav_list_box_), GTK_SELECTION_SINGLE);
+    gtk_widget_set_hexpand(nav_list_box_, TRUE);
+    gtk_widget_set_halign(nav_list_box_, GTK_ALIGN_FILL);
     gtk_widget_set_vexpand(nav_list_box_, TRUE);
     gtk_widget_set_valign(nav_list_box_, GTK_ALIGN_START);
     gtk_widget_set_visible(nav_list_box_, TRUE);
@@ -179,43 +177,42 @@ void LeftSidebar::create_nav_button(const NavigationItem& item) {
     GtkWidget* button = gtk_button_new();
     gtk_button_set_has_frame(GTK_BUTTON(button), FALSE);
     gtk_widget_add_css_class(button, "sidebar-nav-item");
-    // Minimum size 36x36 — button stays square in compact mode (sidebar ~42px wide),
-    // grows naturally in expanded mode to fit icon + text label.
-    gtk_widget_set_size_request(button, 36, 36);
+    // Height never changes; width is switched between 40 and 135 in
+    // update_sidebar_width(). One button is the entire hit target.
+    gtk_widget_set_size_request(button, expanded_ ? kExpandedWidth : kCompactWidth,
+                                kButtonHeight);
     gtk_widget_set_hexpand(button, FALSE);
     gtk_widget_set_vexpand(button, FALSE);
-    gtk_widget_set_halign(button, GTK_ALIGN_START);
-    gtk_widget_set_valign(button, GTK_ALIGN_START);
-    // 10px gap on all four sides - identical to header buttons.
-    gtk_widget_set_margin_start(button, 10);
-    gtk_widget_set_margin_end(button, 10);
-    gtk_widget_set_margin_top(button, 10);
-    gtk_widget_set_margin_bottom(button, 10);
+    gtk_widget_set_halign(button, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(button, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(button, TRUE);
 
     gtk_accessible_update_property(GTK_ACCESSIBLE(button),
                                    GTK_ACCESSIBLE_PROPERTY_LABEL,
                                    item.label.c_str(), -1);
 
-    // Inner box: icon left-aligned, label in revealer.
-    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    // Icon and label live directly inside the button. The icon occupies a
+    // fixed 40x45 slot so it stays on the exact same x/y in both modes; the
+    // label simply slides in to the right when the sidebar expands.
+    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_set_halign(box, GTK_ALIGN_START);
-    gtk_widget_set_valign(box, GTK_ALIGN_START);
+    gtk_widget_set_valign(box, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(box, TRUE);
 
-    // Icon (always visible, 22px) - left-aligned, never moves.
     GtkWidget* icon = gtk_image_new_from_icon_name(item.icon_name.c_str());
     gtk_image_set_pixel_size(GTK_IMAGE(icon), kIconSize);
     gtk_widget_add_css_class(icon, "sidebar-nav-icon");
-    gtk_widget_set_halign(icon, GTK_ALIGN_START);
-    gtk_widget_set_valign(icon, GTK_ALIGN_START);
+    gtk_widget_set_size_request(icon, kButtonWidth, kButtonHeight);
+    gtk_widget_set_halign(icon, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(icon, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(icon, TRUE);
 
-    // Label inside a revealer for animated show/hide
     GtkWidget* label = gtk_label_new(item.label.c_str());
     gtk_label_set_xalign(GTK_LABEL(label), 0.0);
     gtk_widget_add_css_class(label, "sidebar-nav-label");
     gtk_widget_set_halign(label, GTK_ALIGN_START);
+    gtk_widget_set_valign(label, GTK_ALIGN_CENTER);
+    gtk_widget_set_margin_start(label, 4);
     gtk_widget_set_visible(label, TRUE);
 
     GtkWidget* revealer = gtk_revealer_new();
@@ -229,7 +226,8 @@ void LeftSidebar::create_nav_button(const NavigationItem& item) {
     safe_box_append(GTK_BOX(box), revealer);
     safe_button_set_child(GTK_BUTTON(button), box);
 
-    safe_list_box_append(GTK_LIST_BOX(nav_list_box_), button);
+    safe_box_append(GTK_BOX(nav_list_box_), button);
+    nav_buttons_.push_back(button);
 
     g_object_set_data_full(G_OBJECT(button), "nav-item-id",
                            g_strdup(item.id.c_str()), g_free);
@@ -284,40 +282,32 @@ void LeftSidebar::update_toggle_icon() {
 }
 
 void LeftSidebar::animate_labels() {
-    GtkWidget* child = gtk_widget_get_first_child(nav_list_box_);
-    while (child) {
-        GtkWidget* row = child;
-        GtkWidget* button = gtk_list_box_row_get_child(GTK_LIST_BOX_ROW(row));
-        GtkWidget* revealer = static_cast<GtkWidget*>(
+    for (GtkWidget* button : nav_buttons_) {
+        auto* revealer = static_cast<GtkWidget*>(
             g_object_get_data(G_OBJECT(button), "revealer"));
         if (revealer) {
             gtk_revealer_set_reveal_child(GTK_REVEALER(revealer), expanded_);
         }
-        child = gtk_widget_get_next_sibling(child);
     }
 }
 
 void LeftSidebar::update_sidebar_width() {
-    // Let the sidebar size naturally based on content.
-    // Compact mode: min-width 42px from CSS (icons only).
-    // Expanded mode: icon + label width from content.
+    const int width = expanded_ ? kExpandedWidth : kCompactWidth;
+    gtk_widget_set_size_request(sidebar_box_, width, -1);
+    for (GtkWidget* button : nav_buttons_) {
+        gtk_widget_set_size_request(button, width, kButtonHeight);
+    }
 }
 
 void LeftSidebar::update_active_state() {
-    GtkWidget* child = gtk_widget_get_first_child(nav_list_box_);
-    while (child) {
-        GtkWidget* row = child;
-        GtkWidget* button = gtk_list_box_row_get_child(GTK_LIST_BOX_ROW(row));
+    for (GtkWidget* button : nav_buttons_) {
         const char* item_id = static_cast<const char*>(
             g_object_get_data(G_OBJECT(button), "nav-item-id"));
         if (item_id && std::string(item_id) == active_item_id_) {
             gtk_widget_add_css_class(button, "active");
-            gtk_list_box_select_row(GTK_LIST_BOX(nav_list_box_),
-                                    GTK_LIST_BOX_ROW(row));
         } else {
             gtk_widget_remove_css_class(button, "active");
         }
-        child = gtk_widget_get_next_sibling(child);
     }
 }
 

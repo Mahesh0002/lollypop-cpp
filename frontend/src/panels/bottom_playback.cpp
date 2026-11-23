@@ -1,16 +1,19 @@
 /**
  * Lollypop C++ - Bottom Playback Implementation
+ * Matches Quickshell PlayerControl.qml design:
  *
- * Single horizontal row matching Quickshell PlayerControl.qml:
- *
- *   [Artwork + Title/Artist] [Prev] [Stretched Wavy Progress] [Next] [Modes] [Volume] [PiP]
+ *   [Artwork + Title/Artist] [Prev] [Play/Pause] [Wavy Progress] [Next] [Modes] [Volume] [PiP]
  *
  * The wave is drawn with Cairo using WavyLine.qml's sine formula
  * (line width 4, amplitude 0.5x, six cycles, phase advancing while playing).
  * A transparent GtkScale is overlaid for accessible seeking.
+ *
+ * Play/Pause button morphs: circle (paused) → rounded rect (playing).
+ * Progress switches: GtkScale (canSeek) ↔ progress-only wave (can't seek).
  */
 
 #include "panels/bottom_playback.hpp"
+#include "panels/pip_window.hpp"
 #include "main_window.hpp"
 #include "application.hpp"
 #include "services/IPlayerService.hpp"
@@ -34,6 +37,7 @@ BottomPlayback::BottomPlayback(MainWindow* main_window)
       track_title_label_(nullptr),
       track_artist_label_(nullptr),
       prev_button_(nullptr),
+      play_pause_button_(nullptr),
       next_button_(nullptr),
       middle_section_(nullptr),
       right_box_(nullptr),
@@ -50,6 +54,8 @@ BottomPlayback::BottomPlayback(MainWindow* main_window)
     if (main_window_) {
         if (auto* backend = main_window_->get_backend()) {
             volume_dial_->set_volume(backend->get_volume());
+            // Initialize can_seek_ from backend
+            can_seek_ = backend->can_seek();
         }
     }
 }
@@ -78,17 +84,17 @@ void BottomPlayback::setup_ui() {
 
 void BottomPlayback::create_row() {
     // Four zones in one row, in order:
-    //   1. artwork + metadata, fixed 190px (12px inset -> occupies 0..202)
-    //   2. 13px gap, so the transport starts at x = 215px
-    //   3. transport: prev + wavy progress + next, 1000..1200px
+    //   1. artwork + metadata (flexible width)
+    //   2. transport: prev + play/pause + wavy progress + next
+    //   3. spacer (fills remaining width)
     //   4. playback modes + volume + PiP, right-aligned
 
+    // LEFT SECTION: Artwork + track info
     GtkWidget* left_section = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
     gtk_widget_add_css_class(left_section, "bottom-playback-left");
     gtk_widget_set_valign(left_section, GTK_ALIGN_CENTER);
     gtk_widget_set_hexpand(left_section, FALSE);
     gtk_widget_set_halign(left_section, GTK_ALIGN_START);
-    gtk_widget_set_size_request(left_section, 190, -1);
     gtk_widget_set_margin_start(left_section, 12);
     gtk_widget_set_margin_end(left_section, 13);
     gtk_widget_set_visible(left_section, TRUE);
@@ -129,15 +135,16 @@ void BottomPlayback::create_row() {
     safe_box_append(GTK_BOX(left_section), info_box);
     safe_box_append(GTK_BOX(main_box_), left_section);
 
-    // Transport starts at x=215px and owns the flexible center region.
+    // MIDDLE SECTION: Transport controls (Prev | Play/Pause | Progress | Next)
     middle_section_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(middle_section_, "bottom-playback-middle");
     gtk_widget_set_hexpand(middle_section_, FALSE);
     gtk_widget_set_halign(middle_section_, GTK_ALIGN_START);
     gtk_widget_set_valign(middle_section_, GTK_ALIGN_CENTER);
-    gtk_widget_set_size_request(middle_section_, 1000, -1);
+    gtk_widget_set_size_request(middle_section_, 1584, -1);
     gtk_widget_set_visible(middle_section_, TRUE);
 
+    // Previous button (TrackChangeButton style from Quickshell)
     prev_button_ = gtk_button_new();
     gtk_button_set_has_frame(GTK_BUTTON(prev_button_), FALSE);
     gtk_widget_add_css_class(prev_button_, "bottom-playback-control-button");
@@ -153,8 +160,28 @@ void BottomPlayback::create_row() {
     gtk_widget_set_visible(prev_button_, TRUE);
     safe_box_append(GTK_BOX(middle_section_), prev_button_);
 
+    // Play/Pause button (Prominent, morphing - circle when paused, rounded rect when playing)
+    play_pause_button_ = gtk_button_new();
+    gtk_button_set_has_frame(GTK_BUTTON(play_pause_button_), FALSE);
+    gtk_widget_add_css_class(play_pause_button_, "bottom-playback-play-button");
+    // Initial icon (play_arrow for paused state)
+    GtkWidget* play_pause_icon = gtk_image_new_from_icon_name("media-playback-start-symbolic");
+    gtk_image_set_pixel_size(GTK_IMAGE(play_pause_icon), 28);
+    safe_button_set_child(GTK_BUTTON(play_pause_button_), play_pause_icon);
+    g_signal_connect(play_pause_button_, "clicked", G_CALLBACK(on_play_pause_clicked), this);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(play_pause_button_),
+                                   GTK_ACCESSIBLE_PROPERTY_LABEL, "Play/Pause", -1);
+    gtk_widget_set_margin_start(play_pause_button_, 2);
+    gtk_widget_set_margin_end(play_pause_button_, 2);
+    // 44px like Quickshell, will morph via CSS
+    gtk_widget_set_size_request(play_pause_button_, 44, 44);
+    gtk_widget_set_visible(play_pause_button_, TRUE);
+    safe_box_append(GTK_BOX(middle_section_), play_pause_button_);
+
+    // Progress (wavy wave + transparent GtkScale)
     create_progress(middle_section_);
 
+    // Next button
     next_button_ = gtk_button_new();
     gtk_button_set_has_frame(GTK_BUTTON(next_button_), FALSE);
     gtk_widget_add_css_class(next_button_, "bottom-playback-control-button");
@@ -172,34 +199,44 @@ void BottomPlayback::create_row() {
 
     safe_box_append(GTK_BOX(main_box_), middle_section_);
 
-    // Absorbs any window width beyond the 1200px center cap so the right
-    // controls stay pinned to the end instead of drifting inward.
+    // SPACER: Absorbs any window width beyond the center cap
     GtkWidget* tail_spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_set_hexpand(tail_spacer, TRUE);
     gtk_widget_set_visible(tail_spacer, TRUE);
     safe_box_append(GTK_BOX(main_box_), tail_spacer);
 
+    // RIGHT SECTION: Modes + Volume + PiP
     create_right_section();
 }
 
 gboolean BottomPlayback::on_layout_tick(GtkWidget* widget, GdkFrameClock*,
-                                        gpointer user_data) {
+                                         gpointer user_data) {
     auto* self = static_cast<BottomPlayback*>(user_data);
     if (!self->middle_section_ || !self->right_box_) return G_SOURCE_CONTINUE;
 
     const int total_width = gtk_widget_get_width(widget);
     if (total_width <= 0) return G_SOURCE_CONTINUE;
 
-    // 215px is the fixed left zone (12 inset + 190 metadata + 13 gap).
-    // Reserve the measured right control cluster plus its 12px trailing inset,
-    // then give the transport the remaining space, clamped to 1000..1200px.
+    // 275px is the fixed left zone (12 inset + 250 metadata + 13 gap).
+    // Reserve the measured right cluster plus its 12px trailing inset and the
+    // prev/play/next buttons, then give the wave up to 1500px of the remainder.
     const int right_width = gtk_widget_get_width(self->right_box_);
-    const int available = total_width - 215 - right_width - 12;
-    const int target = std::clamp(available, 1000, 1200);
+    int chrome = gtk_widget_get_width(self->prev_button_) +
+                 gtk_widget_get_width(self->play_pause_button_) +
+                 gtk_widget_get_width(self->next_button_);
+    if (chrome <= 0) chrome = 116; // 36+44+36 + margins
 
-    if (target != self->last_middle_width_) {
-        self->last_middle_width_ = target;
-        gtk_widget_set_size_request(self->middle_section_, target, -1);
+    const int available = total_width - 275 - right_width - 12 - chrome;
+    const int progress_width = std::clamp(available, 600, 1500);
+    const int middle_width = progress_width + chrome;
+
+    if (progress_width != self->last_progress_width_) {
+        self->last_progress_width_ = progress_width;
+        gtk_widget_set_size_request(self->progress_box_, progress_width, 28);
+    }
+    if (middle_width != self->last_middle_width_) {
+        self->last_middle_width_ = middle_width;
+        gtk_widget_set_size_request(self->middle_section_, middle_width, -1);
     }
     return G_SOURCE_CONTINUE;
 }
@@ -209,10 +246,10 @@ void BottomPlayback::create_progress(GtkWidget* parent) {
     // child; the scale is an invisible but fully interactive layer on top.
     progress_box_ = gtk_overlay_new();
     gtk_widget_add_css_class(progress_box_, "bottom-playback-progress");
-    gtk_widget_set_hexpand(progress_box_, TRUE);
+    gtk_widget_set_hexpand(progress_box_, FALSE);
     gtk_widget_set_halign(progress_box_, GTK_ALIGN_FILL);
     gtk_widget_set_valign(progress_box_, GTK_ALIGN_CENTER);
-    gtk_widget_set_size_request(progress_box_, -1, 28);
+    gtk_widget_set_size_request(progress_box_, 1500, 28);
     gtk_widget_set_visible(progress_box_, TRUE);
 
     wave_area_ = gtk_drawing_area_new();
@@ -227,13 +264,14 @@ void BottomPlayback::create_progress(GtkWidget* parent) {
     gtk_widget_set_visible(wave_area_, TRUE);
     gtk_overlay_set_child(GTK_OVERLAY(progress_box_), wave_area_);
 
+    // GtkScale for seeking (when canSeek) - transparent overlay
     progress_bar_ = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL,
                                               0.0, 1.0, 0.001);
     gtk_widget_add_css_class(progress_bar_, "progress-wavy-scale");
     gtk_widget_set_hexpand(progress_bar_, TRUE);
     gtk_widget_set_halign(progress_bar_, GTK_ALIGN_FILL);
     gtk_widget_set_valign(progress_bar_, GTK_ALIGN_FILL);
-    gtk_widget_set_opacity(progress_bar_, 0.0);
+    gtk_widget_set_opacity(progress_bar_, 0.0); // Invisible, wave is visible
     gtk_scale_set_draw_value(GTK_SCALE(progress_bar_), FALSE);
     gtk_range_set_value(GTK_RANGE(progress_bar_), 0.0);
     gtk_accessible_update_property(GTK_ACCESSIBLE(progress_bar_),
@@ -249,13 +287,15 @@ void BottomPlayback::create_progress(GtkWidget* parent) {
     // committed once on release instead of once per value-changed tick.
     auto* seek_gesture = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(seek_gesture), GDK_BUTTON_PRIMARY);
-    // Do not steal the drag gesture GtkRange already uses for seeking.
     gtk_gesture_single_set_exclusive(GTK_GESTURE_SINGLE(seek_gesture), FALSE);
     g_signal_connect(seek_gesture, "pressed", G_CALLBACK(on_progress_pressed), this);
     g_signal_connect(seek_gesture, "released", G_CALLBACK(on_progress_released), this);
     gtk_widget_add_controller(progress_bar_, GTK_EVENT_CONTROLLER(seek_gesture));
 
     safe_box_append(GTK_BOX(parent), progress_box_);
+
+    // Initial seek mode setup
+    update_seek_mode();
 }
 
 void BottomPlayback::create_right_section() {
@@ -288,7 +328,7 @@ void BottomPlayback::create_right_section() {
         gtk_image_set_pixel_size(GTK_IMAGE(icon), 18);
         safe_button_set_child(GTK_BUTTON(button), icon);
         g_signal_connect(button, "toggled", toggled_cb, this);
-        gtk_widget_set_sensitive(button, FALSE);
+        gtk_widget_set_sensitive(button, FALSE); // Will be enabled by set_controls_sensitive
         gtk_accessible_update_property(GTK_ACCESSIBLE(button),
                                        GTK_ACCESSIBLE_PROPERTY_LABEL,
                                        acc_label, -1);
@@ -347,8 +387,8 @@ void BottomPlayback::create_right_section() {
 }
 
 void BottomPlayback::update_track_info(const std::string& title,
-                                       const std::string& artist,
-                                       const std::string& artwork_path) {
+                                        const std::string& artist,
+                                        const std::string& artwork_path) {
     gtk_label_set_text(GTK_LABEL(track_title_label_), title.c_str());
     gtk_label_set_text(GTK_LABEL(track_artist_label_), artist.c_str());
 
@@ -376,6 +416,17 @@ void BottomPlayback::update_playback_position(double position, double duration) 
         updating_progress_ = false;
     }
     gtk_widget_queue_draw(wave_area_);
+
+    // Update can_seek from backend periodically
+    if (main_window_) {
+        if (auto* backend = main_window_->get_backend()) {
+            bool new_can_seek = backend->can_seek();
+            if (new_can_seek != can_seek_) {
+                can_seek_ = new_can_seek;
+                update_seek_mode();
+            }
+        }
+    }
 }
 
 void BottomPlayback::set_playing(bool playing) {
@@ -387,6 +438,7 @@ void BottomPlayback::set_playing(bool playing) {
     } else {
         stop_wave_animation();
     }
+    update_play_pause_button();
 }
 
 void BottomPlayback::set_volume(double volume) {
@@ -397,6 +449,7 @@ void BottomPlayback::set_volume(double volume) {
 
 void BottomPlayback::set_controls_sensitive(bool sensitive) {
     gtk_widget_set_sensitive(prev_button_, sensitive);
+    gtk_widget_set_sensitive(play_pause_button_, sensitive);
     gtk_widget_set_sensitive(next_button_, sensitive);
     if (volume_dial_) {
         gtk_widget_set_sensitive(volume_dial_->get_widget(), sensitive);
@@ -435,6 +488,36 @@ void BottomPlayback::stop_wave_animation() {
     gtk_widget_queue_draw(wave_area_);
 }
 
+void BottomPlayback::update_play_pause_button() {
+    if (!play_pause_button_) return;
+
+    GtkWidget* icon = gtk_button_get_child(GTK_BUTTON(play_pause_button_));
+    if (GTK_IS_IMAGE(icon)) {
+        gtk_image_set_from_icon_name(GTK_IMAGE(icon),
+            playing_ ? "media-playback-pause-symbolic" : "media-playback-start-symbolic");
+    }
+    // CSS handles the morphing: circle (paused) vs rounded rect (playing)
+    // via :checked pseudo-class or playing_ state
+    if (playing_) {
+        gtk_widget_add_css_class(play_pause_button_, "playing");
+    } else {
+        gtk_widget_remove_css_class(play_pause_button_, "playing");
+    }
+}
+
+void BottomPlayback::update_seek_mode() {
+    if (!progress_bar_ || !wave_area_) return;
+
+    if (can_seek_) {
+        // Show interactive GtkScale, hide progress-only wave
+        gtk_widget_set_visible(progress_bar_, TRUE);
+        // Wave area still draws the wave (progress fill)
+    } else {
+        // Hide GtkScale, wave area shows progress-only (no seeking)
+        gtk_widget_set_visible(progress_bar_, FALSE);
+    }
+}
+
 void BottomPlayback::commit_pending_seek() {
     if (pending_seek_fraction_ < 0.0) return;
     if (!main_window_ || current_duration_ <= 0.0) {
@@ -451,7 +534,7 @@ void BottomPlayback::commit_pending_seek() {
 }
 
 void BottomPlayback::on_wave_draw(GtkDrawingArea*, cairo_t* cr,
-                                  int width, int height, gpointer user_data) {
+                                   int width, int height, gpointer user_data) {
     auto* self = static_cast<BottomPlayback*>(user_data);
     if (!self || width <= 0 || height <= 0) return;
 
@@ -467,8 +550,8 @@ void BottomPlayback::on_wave_draw(GtkDrawingArea*, cairo_t* cr,
 
     // Same colors as the rest of the liquid-glass UI: --bg-active and
     // --accent-color (#a78bfa) from style.css.
-    const GdkRGBA unplayed = {0.48, 0.44, 0.62, 0.80};
-    const GdkRGBA played = {0.655, 0.545, 0.980, 0.95};
+    const GdkRGBA unplayed = {0.48f, 0.44f, 0.62f, 0.80f};
+    const GdkRGBA played = {0.655f, 0.545f, 0.980f, 0.95f};
 
     cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
 
@@ -552,7 +635,7 @@ void BottomPlayback::on_progress_value_changed(GtkRange* range, gpointer user_da
 }
 
 gboolean BottomPlayback::on_progress_pressed(GtkGestureClick*, int, double, double,
-                                             gpointer user_data) {
+                                              gpointer user_data) {
     auto* self = static_cast<BottomPlayback*>(user_data);
     if (!self) return FALSE;
 
@@ -565,7 +648,7 @@ gboolean BottomPlayback::on_progress_pressed(GtkGestureClick*, int, double, doub
 }
 
 gboolean BottomPlayback::on_progress_released(GtkGestureClick*, int, double, double,
-                                              gpointer user_data) {
+                                               gpointer user_data) {
     auto* self = static_cast<BottomPlayback*>(user_data);
     if (!self) return FALSE;
 
@@ -596,6 +679,15 @@ void BottomPlayback::on_prev_clicked(GtkButton*, gpointer user_data) {
     }
 }
 
+void BottomPlayback::on_play_pause_clicked(GtkButton*, gpointer user_data) {
+    auto* self = static_cast<BottomPlayback*>(user_data);
+    if (self->main_window_) {
+        if (auto* backend = self->main_window_->get_backend()) {
+            backend->toggle_play_pause();
+        }
+    }
+}
+
 void BottomPlayback::on_next_clicked(GtkButton*, gpointer user_data) {
     auto* self = static_cast<BottomPlayback*>(user_data);
     if (self->main_window_) {
@@ -608,7 +700,17 @@ void BottomPlayback::on_next_clicked(GtkButton*, gpointer user_data) {
 void BottomPlayback::on_pip_clicked(GtkButton*, gpointer user_data) {
     auto* self = static_cast<BottomPlayback*>(user_data);
     if (self->main_window_ && self->main_window_->get_application()) {
-        self->main_window_->get_application()->show_pip();
+        auto* app = self->main_window_->get_application();
+        // Use Application's show_pip/hide_pip - they handle visibility internally
+        // We can't easily check visibility without full PiPWindow type, so just toggle
+        // The Application will create/show or hide appropriately
+        static bool pip_visible = false;
+        if (pip_visible) {
+            app->hide_pip();
+        } else {
+            app->show_pip();
+        }
+        pip_visible = !pip_visible;
     }
 }
 

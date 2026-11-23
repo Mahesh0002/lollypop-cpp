@@ -181,6 +181,9 @@ public:
     bool get_repeat() const;
     bool get_repeat_one() const;
 
+    // Capability queries
+    bool can_seek() const;
+
     // Favorites / Likes
     void toggle_like(const std::string& track_id);
     void toggle_favorite_album(const std::string& album_id);

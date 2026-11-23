@@ -1193,6 +1193,11 @@ bool BackendController::get_repeat_one() const {
     return queue_manager_->repeat_mode() == RepeatMode::Track;
 }
 
+bool BackendController::can_seek() const {
+    if (!audio_engine_) return false;
+    return audio_engine_->can_seek();
+}
+
 void BackendController::toggle_like(const std::string& track_id) {
     std::lock_guard<std::mutex> lock(storage_mutex_);
     storage_->toggle_like(track_id);

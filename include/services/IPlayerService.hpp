@@ -49,6 +49,9 @@ public:
     virtual void seek(double position_seconds) = 0;
     virtual void set_volume(double volume) = 0;  // 0.0 - 1.0
 
+    // Capability queries
+    virtual bool can_seek() const = 0;
+
     virtual void set_shuffle(bool enabled) = 0;
     virtual void set_repeat(bool enabled) = 0;          // repeat-all
     virtual void set_repeat_one(bool enabled) = 0;      // repeat-one

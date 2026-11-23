@@ -241,34 +241,34 @@ listboxrow:selected {
 .sidebar {
     background-color: var(--bg-secondary);
     border-right: 1px solid var(--border-subtle);
-    min-width: 42px;
+    min-width: 40px;
 }
 
 .sidebar-header {
     background-color: transparent;
+    min-height: 45px;
 }
 
+/* Every sidebar control is a single 40x45 button. Icons are centred by GTK
+   alignment in code, so no padding or nested shell is needed here. */
 .sidebar-menu-button,
-.sidebar-action-button {
+.sidebar-action-button,
+.sidebar-nav-item {
     min-width: 40px;
-    min-height: 40px;
+    min-height: 45px;
     border-radius: 10px;
-    padding: 8px;
+    padding: 0;
+    margin: 0;
 }
 
 .sidebar-menu-button:hover,
-.sidebar-action-button:hover {
+.sidebar-action-button:hover,
+.sidebar-nav-item:hover {
     background-color: var(--bg-hover);
 }
 
 .sidebar-nav {
-    margin-top: 8px;
-}
-
-.sidebar-nav-item {
-    border-radius: 10px;
-    padding: 10px 12px;
-    margin: 2px 8px;
+    margin-top: 0;
 }
 
 .sidebar-nav-item:hover {
@@ -300,34 +300,9 @@ listboxrow:selected {
     font-weight: 400;
 }
 
-/* Collapse button (chevron) - size LOCKED at 36px via gtk_widget_set_size_request
-   in LeftSidebar::setup_ui(). min-width/min-height keep it from shrinking below 36px. */
-.sidebar-collapse-button {
-    min-width: 36px;
-    min-height: 36px;
-    border-radius: 18px;
-    padding: 8px;
-}
-
-.sidebar-collapse-button:hover {
-    background-color: var(--bg-hover);
-}
-
-/* Menu button (hamburger) - size LOCKED at 36px via gtk_widget_set_size_request. */
-.sidebar-menu-button {
-    min-width: 36px;
-    min-height: 36px;
-    border-radius: 18px;
-    padding: 8px;
-}
-
-.sidebar-menu-button:hover {
-    background-color: var(--bg-hover);
-}
-
 /* Compact sidebar mode */
 .sidebar.compact {
-    min-width: 42px;
+    min-width: 40px;
 }
 
 /* Compact sidebar nav items - icon only, label hidden via revealer.
@@ -355,9 +330,9 @@ listboxrow:selected {
     color: var(--accent-color);
 }
 
-/* Compact header height */
+/* Compact header height matches the nav button height. */
 .sidebar.compact .sidebar-header {
-    min-height: 42px;
+    min-height: 45px;
 }
 
 /* ============================================================================
@@ -674,41 +649,9 @@ listboxrow:selected {
     margin-bottom: 16px;
 }
 
-/* detail-actions layout is handled by GtkBox in code */
-.detail-actions {
-    /* layout via GtkBox in implementation */
-}
-
-.detail-actions button {
-    border-radius: 24px;
-    padding: 10px 24px;
-    font-size: 13px;
-    font-weight: 600;
-    transition: background-color 0.1s ease, transform 0.1s ease;
-}
-
-.detail-actions button:first-child {
-    background-color: var(--accent-color);
-    color: white;
-}
-
-.detail-actions button:first-child:hover {
-    background-color: var(--accent-hover);
-    transform: scale(1.02);
-}
-
-.detail-actions button:nth-child(2) {
-    background-color: rgba(255, 255, 255, 0.12);
-    color: var(--text-primary);
-}
-
-.detail-actions button:nth-child(2):hover {
-    background-color: rgba(255, 255, 255, 0.20);
-}
-
 /* Search empty state */
 .search-empty {
-    text-align: center;
+    /* text-align not supported in GTK CSS - center via GtkWidget halign */
     padding: 48px 24px;
     color: var(--text-secondary);
 }
@@ -1084,13 +1027,13 @@ listboxrow:selected {
 
 .bottom-playback-left {
     /* Fixed metadata zone: artwork 56 + gap 10 + ellipsized text. */
-    min-width: 190px;
+    min-width: 250px;
 }
 
 .bottom-playback-middle {
-    /* Transport zone: starts at x=215 and is sized in code to 1000..1200px;
-       the tail spacer absorbs any remaining width. */
-    min-width: 1000px;
+    /* Transport zone starts at x=275; width is set in code from the
+       1500px progress bar plus the prev/next buttons. */
+    min-width: 0;
 }
 
 .bottom-playback-artwork {
@@ -1150,6 +1093,10 @@ listboxrow:selected {
     color: var(--text-disabled);
 }
 
+/* Play/Pause button - morphs like Quickshell:
+   - Paused: circle (56px), border-radius 28px
+   - Playing: rounded rect (56x44), border-radius 22px
+   Background: accent color when playing, primary text when paused */
 .bottom-playback-play-button {
     min-width: 56px;
     min-height: 56px;
@@ -1158,6 +1105,18 @@ listboxrow:selected {
     background-color: var(--text-primary);
     color: var(--bg-primary);
     box-shadow: 0 4px 16px var(--shadow-subtle);
+    transition: border-radius 200ms ease-out, background-color 200ms ease-out, box-shadow 200ms ease-out, min-height 200ms ease-out, min-width 200ms ease-out;
+}
+
+/* Playing state: morph to rounded rectangle */
+.bottom-playback-play-button.playing {
+    min-width: 56px;
+    min-height: 44px;
+    border-radius: 22px;
+    padding: 0;
+    background-color: var(--accent-color);
+    color: white;
+    box-shadow: 0 4px 16px var(--accent-shadow);
 }
 
 .bottom-playback-play-button:hover {
@@ -1165,8 +1124,17 @@ listboxrow:selected {
     box-shadow: 0 6px 24px var(--shadow-strong);
 }
 
+.bottom-playback-play-button.playing:hover {
+    background-color: var(--accent-hover);
+    box-shadow: 0 6px 24px var(--accent-shadow-strong);
+}
+
 .bottom-playback-play-button:active {
     background-color: var(--text-primary);
+}
+
+.bottom-playback-play-button.playing:active {
+    background-color: var(--accent-active);
 }
 
 .bottom-playback-play-button:disabled {
@@ -1187,6 +1155,7 @@ listboxrow:selected {
     background-color: transparent;
 }
 
+/* When canSeek: transparent GtkScale overlay for interactive seeking */
 .progress-wavy-scale {
     min-width: 0;
     min-height: 28px;
@@ -1203,6 +1172,9 @@ listboxrow:selected {
     background-color: transparent;
     box-shadow: none;
 }
+
+/* Seek mode is toggled in code via gtk_widget_set_visible(progress_bar_).
+   GTK CSS has no :has()/:visible selectors, so no selector is used here. */
 
 .bottom-playback-right {
     min-width: 0;
