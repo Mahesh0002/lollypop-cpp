@@ -34,6 +34,7 @@ public:
     void refresh() override;
     std::string get_page_id() const override { return "songs"; }
     void set_genre_filter(const std::string& genre);
+    void handle_scroll(GtkAdjustment* adjustment);
 
 private:
     struct WidgetDeleter {
@@ -41,11 +42,9 @@ private:
             if (w) g_object_unref(w);
         }
     };
-    std::unique_ptr<GtkWidget, WidgetDeleter> widget_;
-    std::unique_ptr<GtkWidget, WidgetDeleter> scrolled_window_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> widget_;  // Box (content: header + ListBox)
     std::unique_ptr<GtkWidget, WidgetDeleter> header_box_;
     std::unique_ptr<GtkWidget, WidgetDeleter> list_box_;
-    std::unique_ptr<GtkWidget, WidgetDeleter> scrolled_list_;
 
     MainWindow* main_window_;
     ILibraryService* library_service_;

@@ -19,15 +19,7 @@ ArtistsPage::ArtistsPage(MainWindow* main_window, ILibraryService* library_servi
 ArtistsPage::~ArtistsPage() = default;
 
 void ArtistsPage::setup_ui() {
-    widget_.reset(gtk_scrolled_window_new());
-    g_object_ref_sink(widget_.get());
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(widget_.get()),
-                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    gtk_widget_set_vexpand(widget_.get(), TRUE);
-    gtk_widget_set_hexpand(widget_.get(), TRUE);
-    gtk_widget_add_css_class(widget_.get(), "library-scrolled");
-    gtk_widget_set_visible(widget_.get(), TRUE);
-
+    // Root widget is the FlowBox directly (implements GtkScrollable)
     grid_.reset(gtk_flow_box_new());
     g_object_ref_sink(grid_.get());
     gtk_widget_add_css_class(grid_.get(), "artists-grid");
@@ -37,13 +29,13 @@ void ArtistsPage::setup_ui() {
     gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(grid_.get()), 24);
     gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(grid_.get()), 24);
     gtk_widget_set_hexpand(grid_.get(), TRUE);
+    gtk_widget_set_vexpand(grid_.get(), TRUE);
     gtk_widget_set_visible(grid_.get(), TRUE);
 
-    safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()), grid_.get());
+    widget_ = grid_.get();
 }
 
 void ArtistsPage::refresh() {
-    // Clear existing - use gtk_flow_box_remove for proper cleanup
     GtkWidget* child = gtk_widget_get_first_child(grid_.get());
     while (child) {
         GtkWidget* next = gtk_widget_get_next_sibling(child);

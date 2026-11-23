@@ -758,36 +758,44 @@ listboxrow:selected {
     font-weight: var(--font-weight-regular);
 }
 
-.now-playing-waveform {
-    margin-top: 2px;
+/* Shared wavy progress bar: bottom, right, and PiP differ only in width. */
+.progress-wave,
+.progress-wavy-area {
     min-width: 0;
-}
-
-.now-playing-elapsed,
-.now-playing-duration {
-    color: var(--text-tertiary);
-    font-size: 12px;
-    font-weight: var(--font-weight-medium);
-    font-variant-numeric: tabular-nums;
-}
-
-.waveform-view,
-.waveform-stub {
-    background-color: transparent;
-    border-radius: var(--radius-sm);
-    min-width: 0;
-}
-
-.waveform-playing {
+    min-height: 28px;
+    margin: 0;
     background-color: transparent;
 }
 
-.now-playing-transport {
+/* The visible progress is the Cairo wave; this scale is only an input layer. */
+.progress-wavy-scale {
     min-width: 0;
+    min-height: 28px;
+    opacity: 0;
+}
+
+.progress-wavy-scale trough,
+.progress-wavy-scale trough highlight,
+.progress-wavy-scale slider {
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    border: none;
+    background-color: transparent;
+    box-shadow: none;
+}
+
+.now-playing-progress-row {
+    min-width: 0;
+    min-height: 36px;
+}
+
+.now-playing-main-controls {
+    min-width: 0;
+    min-height: 48px;
 }
 
 .now-playing-control-button,
-.now-playing-play-button,
 .now-playing-mode-button {
     min-width: 40px;
     min-height: 40px;
@@ -795,22 +803,22 @@ listboxrow:selected {
     padding: 8px;
 }
 
-.now-playing-play-button {
-    min-width: 44px;
-    min-height: 44px;
-    border-radius: 22px;
-    color: var(--accent-color);
-    background-color: var(--accent-soft);
+.now-playing-progress-row .now-playing-control-button {
+    min-width: 36px;
+    min-height: 36px;
+}
+
+.now-playing-main-controls .now-playing-mode-button {
+    min-width: 40px;
+    min-height: 40px;
 }
 
 .now-playing-control-button:hover,
-.now-playing-mode-button:hover,
-.now-playing-play-button:hover {
+.now-playing-mode-button:hover {
     background-color: var(--bg-hover);
 }
 
 .now-playing-control-button:disabled,
-.now-playing-play-button:disabled,
 .now-playing-mode-button:disabled {
     color: var(--text-disabled);
     opacity: 0.4;
@@ -820,7 +828,8 @@ listboxrow:selected {
     color: var(--text-tertiary);
 }
 
-.now-playing-mode-button:checked {
+.now-playing-mode-button:checked,
+.now-playing-repeat-button.active {
     color: var(--accent-color);
     background-color: var(--accent-soft);
 }
@@ -966,78 +975,11 @@ listboxrow:selected {
     color: var(--text-disabled);
 }
 
-/* Play/Pause button - morphs like Quickshell */
-.bottom-playback-play-button {
-    min-width: 56px;
-    min-height: 56px;
-    border-radius: 28px;
-    padding: 14px;
-    background-color: var(--text-primary);
-    color: var(--bg-primary);
-    box-shadow: 0 4px 16px var(--shadow-subtle);
-    transition: border-radius 200ms ease-out,
-                background-color 200ms ease-out,
-                box-shadow 200ms ease-out,
-                min-height 200ms ease-out,
-                min-width 200ms ease-out;
-}
-
-.bottom-playback-play-button.playing {
-    min-width: 56px;
-    min-height: 44px;
-    border-radius: 22px;
-    padding: 0;
-    background-color: var(--accent-color);
-    color: white;
-    box-shadow: 0 4px 16px var(--accent-shadow);
-}
-
-.bottom-playback-play-button:hover {
-    background-color: var(--text-primary);
-    box-shadow: 0 6px 24px var(--shadow-strong);
-}
-
-.bottom-playback-play-button.playing:hover {
-    background-color: var(--accent-hover);
-    box-shadow: 0 6px 24px var(--accent-shadow-strong);
-}
-
-.bottom-playback-play-button:active {
-    background-color: var(--bg-active);
-}
-
-.bottom-playback-play-button.playing:active {
-    background-color: var(--accent-active);
-}
-
-.bottom-playback-play-button:disabled {
-    opacity: 0.4;
-}
-
-/* Cairo draws the visible sine wave; GtkScale overlay is for seeking */
+/* Bottom and PiP instances only change width; drawing is shared above. */
 .bottom-playback-progress,
-.progress-wavy-area {
+.pip-progress {
     min-width: 0;
     min-height: 28px;
-    margin: 0;
-    background-color: transparent;
-}
-
-.progress-wavy-scale {
-    min-width: 0;
-    min-height: 28px;
-    opacity: 0;
-}
-
-.progress-wavy-scale trough,
-.progress-wavy-scale trough highlight,
-.progress-wavy-scale slider {
-    min-width: 0;
-    min-height: 0;
-    margin: 0;
-    border: none;
-    background-color: transparent;
-    box-shadow: none;
 }
 
 .bottom-playback-mode-button {
@@ -1334,9 +1276,7 @@ searchentry:focus,
 .middle-toolbar-search:focus,
 .middle-toolbar-button:focus,
 .bottom-playback-control-button:focus,
-.bottom-playback-play-button:focus,
 .now-playing-control-button:focus,
-.now-playing-play-button:focus,
 .now-playing-mode-button:focus,
 .pip-control-button:focus,
 .pip-volume-button:focus,

@@ -110,26 +110,6 @@ void TrackRow::setup_ui() {
     gtk_widget_set_visible(like_button_.get(), TRUE);
     gtk_box_append(GTK_BOX(box), like_button_.get());
 
-    // Play button (hidden, revealed on hover)
-    play_button_.reset(gtk_button_new());
-    g_object_ref_sink(play_button_.get());
-    gtk_button_set_has_frame(GTK_BUTTON(play_button_.get()), FALSE);
-    gtk_widget_add_css_class(play_button_.get(), "track-row-play-button");
-    GtkWidget* play_icon = gtk_image_new_from_icon_name(
-        "media-playback-start-symbolic");
-    gtk_image_set_pixel_size(GTK_IMAGE(play_icon), 18);
-    gtk_button_set_child(GTK_BUTTON(play_button_.get()), play_icon);
-    gtk_widget_set_halign(play_button_.get(), GTK_ALIGN_END);
-    // Consistent spacing on all four sides.
-    gtk_widget_set_margin_start(play_button_.get(), 10);
-    gtk_widget_set_margin_end(play_button_.get(), 10);
-    gtk_widget_set_margin_top(play_button_.get(), 10);
-    gtk_widget_set_margin_bottom(play_button_.get(), 10);
-    gtk_widget_set_visible(play_button_.get(), FALSE);
-    g_signal_connect(play_button_.get(), "clicked",
-                     G_CALLBACK(on_play_clicked), this);
-    gtk_box_append(GTK_BOX(box), play_button_.get());
-
     gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(widget_.get()), box);
 
     g_signal_connect(widget_.get(), "activate",
@@ -179,12 +159,6 @@ void TrackRow::set_liked(bool liked) {
     }
 }
 
-void TrackRow::on_play_clicked(GtkButton* button, gpointer user_data) {
-    (void)button;
-    TrackRow* self = static_cast<TrackRow*>(user_data);
-    if (self->play_cb_) self->play_cb_(self->track_);
-}
-
 void TrackRow::on_like_clicked(GtkButton* button, gpointer user_data) {
     (void)button;
     TrackRow* self = static_cast<TrackRow*>(user_data);
@@ -201,7 +175,7 @@ gboolean TrackRow::on_enter(GtkEventControllerMotion* controller, double x,
                             double y, gpointer user_data) {
     (void)controller; (void)x; (void)y;
     TrackRow* self = static_cast<TrackRow*>(user_data);
-    gtk_widget_set_visible(self->play_button_.get(), TRUE);
+    self->animate_hover(true);
     return FALSE;
 }
 
@@ -209,7 +183,6 @@ gboolean TrackRow::on_leave(GtkEventControllerMotion* controller,
                             gpointer user_data) {
     (void)controller;
     TrackRow* self = static_cast<TrackRow*>(user_data);
-    gtk_widget_set_visible(self->play_button_.get(), FALSE);
     self->animate_hover(false);
     return FALSE;
 }

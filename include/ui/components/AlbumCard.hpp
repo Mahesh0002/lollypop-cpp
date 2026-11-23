@@ -2,9 +2,8 @@
  * Lollypop C++ - AlbumCard
  *
  * Album artwork card used by Albums and Favourite Albums pages.
- * Single click opens album detail page. Hover and keyboard focus
- * reveal Play button (plan Section 5.3).
- * Spring animations for hover/press states.
+ * Single click opens the album detail page. Hover and keyboard focus use
+ * spring animations; there is no inline play button.
  */
 
 #pragma once
@@ -49,7 +48,6 @@ private:
     std::unique_ptr<GtkWidget, WidgetDeleter> artwork_image_;
     std::unique_ptr<GtkWidget, WidgetDeleter> title_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> artist_label_;
-    std::unique_ptr<GtkWidget, WidgetDeleter> play_button_;
 
     MainWindow* main_window_;
     Album album_;
@@ -59,7 +57,6 @@ private:
 
     void setup_ui();
     static void on_clicked(GtkButton* button, gpointer user_data);
-    static void on_play_clicked(GtkButton* button, gpointer user_data);
     static gboolean on_enter(GtkEventControllerMotion* controller, double x,
                              double y, gpointer user_data);
     static gboolean on_leave(GtkEventControllerMotion* controller,

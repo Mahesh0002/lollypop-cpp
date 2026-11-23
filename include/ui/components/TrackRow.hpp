@@ -2,8 +2,8 @@
  * Lollypop C++ - TrackRow
  *
  * Shared track row component used by Songs, Album details, Artist details,
- * Liked Music, and Queue pages (plan Sections 5.7, 5.9, 5.10, 5.11).
- * Spring animations for hover/press states.
+ * Liked Music, and Queue pages. Activating the row starts playback; there is
+ * no inline play/pause button. Spring animations for hover/press states.
  */
 
 #pragma once
@@ -52,7 +52,6 @@ private:
     std::unique_ptr<GtkWidget, WidgetDeleter> album_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> duration_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> like_button_;
-    std::unique_ptr<GtkWidget, WidgetDeleter> play_button_;
 
     MainWindow* main_window_;
     Track track_;
@@ -63,7 +62,6 @@ private:
     bool liked_ = false;
 
     void setup_ui();
-    static void on_play_clicked(GtkButton* button, gpointer user_data);
     static void on_like_clicked(GtkButton* button, gpointer user_data);
     static void on_row_activated(GtkListBoxRow* row, gpointer user_data);
     static gboolean on_enter(GtkEventControllerMotion* controller, double x,

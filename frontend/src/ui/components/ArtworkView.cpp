@@ -15,7 +15,7 @@ namespace lollypop {
 namespace {
 struct DecodeData {
     ArtworkView* view;
-    GObject* widget;  // holds a ref so the callback cannot outlive the widget
+    std::shared_ptr<bool> alive;
     std::string path;
     int width;
     int height;
@@ -34,7 +34,6 @@ ArtworkView::ArtworkView()
     gtk_widget_set_vexpand(widget_.get(), FALSE);
     gtk_widget_add_css_class(widget_.get(), "artwork-view");
     gtk_widget_set_visible(widget_.get(), TRUE);
-    g_object_set_data(G_OBJECT(widget_.get()), "artwork-view-owner", this);
 
     // Artwork image
     artwork_image_.reset(gtk_picture_new());
@@ -62,11 +61,9 @@ ArtworkView::ArtworkView()
 }
 
 ArtworkView::~ArtworkView() {
-    // The completion callback runs on the main loop. Clear the owner marker
-    // first so a cancelled task can never touch this destroyed object.
-    if (widget_) {
-        g_object_set_data(G_OBJECT(widget_.get()), "artwork-view-owner", nullptr);
-    }
+    // The completion callback runs on the main loop. The shared flag makes it
+    // a no-op before any widget or task ref is released.
+    if (alive_) *alive_ = false;
     if (cancellable_) {
         g_cancellable_cancel(cancellable_);
         g_object_unref(cancellable_);
@@ -100,10 +97,10 @@ void ArtworkView::set_artwork_path(const std::string& path) {
         // Create new cancellable for this load
         cancellable_ = g_cancellable_new();
 
-        // Start async decode. The task data owns a widget ref so a late
-        // callback can safely check whether this ArtworkView is still alive.
+        // The task data captures a shared liveness flag. A late callback is a
+        // no-op after destruction, without needing to touch a widget ref.
         auto* data = new DecodeData{this,
-                                    G_OBJECT(g_object_ref(widget_.get())),
+                                    alive_,
                                     path,
                                     preferred_width_,
                                     preferred_height_};
@@ -175,11 +172,10 @@ void ArtworkView::decode_thread_func(GTask* task, gpointer /*source_object*/, gp
 void ArtworkView::on_decode_done(GObject* /*source*/, GAsyncResult* res, gpointer /*user_data*/) {
     auto* task = G_TASK(res);
     auto* data = static_cast<DecodeData*>(g_task_get_task_data(task));
-    if (!data) return;
+    if (!data || !data->alive || !*data->alive) return;
 
     ArtworkView* self = data->view;
-    const bool alive = g_object_get_data(data->widget, "artwork-view-owner") == self;
-    const bool current = alive && self->decode_task_ == task;
+    const bool current = self->decode_task_ == task;
 
     GError* error = nullptr;
     GdkTexture* texture = GDK_TEXTURE(g_task_propagate_pointer(task, &error));

@@ -36,9 +36,11 @@ Application::Application(const std::string& application_id)
 }
 
 Application::~Application() {
-    // pip_window_ needs complete type for destruction
-    pip_window_.reset();
+    // Destroy the main window first: it clears all backend callbacks, so the
+    // PiP window cannot receive a late callback while it is being torn down.
+    // PiP needs the complete type here for its own destruction.
     main_window_.reset();
+    pip_window_.reset();
     backend_.reset();
     theme_manager_.reset();
 }

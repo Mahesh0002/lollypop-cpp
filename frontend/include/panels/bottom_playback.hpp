@@ -2,15 +2,11 @@
  * Lollypop C++ - Bottom Playback Panel
  * Single-line playback controls spanning full width
  *
- * Layout (matching Quickshell PlayerControl.qml):
- *   [Artwork + Title/Artist] [Prev] [Play/Pause] [Wavy Progress] [Next] [Modes] [Volume] [PiP]
+ *   [Artwork + Title/Artist] [Prev] [Wavy Progress] [Next] [Modes] [Volume] [PiP]
  *
- * The progress bar is a real animated sine wave rendered with Cairo. A fully
- * transparent GtkScale sits on top so pointer/keyboard seeking and
- * accessibility keep working without faking the wave with CSS stripes.
- *
- * Play/Pause button morphs: circle (paused) → rounded rect (playing), like Quickshell.
- * Progress switches: GtkScale (canSeek) ↔ progress-only wave (can't seek).
+ * The progress strip is the shared Cairo sine wave used by the right panel and
+ * PiP window; only its width changes. A transparent GtkScale overlay keeps
+ * pointer/keyboard seeking and accessibility working.
  */
 
 #pragma once
@@ -24,6 +20,7 @@ namespace lollypop {
 class MainWindow;
 class ArtworkView;
 class VolumeDial;
+class ProgressWave;
 
 class BottomPlayback {
 public:
@@ -47,28 +44,17 @@ public:
     VolumeDial* get_volume_dial() const { return volume_dial_.get(); }
 
 private:
-    static constexpr guint kWaveFrameMs = 33;
-    static constexpr guint kSeekCommitDelayMs = 120;
-    static constexpr double kWaveLineWidth = 4.0;
-    static constexpr double kWaveAmplitudeMultiplier = 0.5;
-    static constexpr double kWaveFrequency = 6.0;
-
     MainWindow* main_window_;
     GtkWidget* main_box_;
 
-    // Stretched progress region: Cairo wave + transparent interactive scale.
-    GtkWidget* progress_box_;
-    GtkWidget* progress_bar_;        // GtkScale for seeking (when canSeek)
-    GtkWidget* wave_area_;
+    std::unique_ptr<ProgressWave> progress_wave_;
+    GtkWidget* progress_widget_;
 
-    // Left: Artwork + track info.
     std::unique_ptr<ArtworkView> artwork_view_;
     GtkWidget* track_title_label_;
     GtkWidget* track_artist_label_;
 
-    // Transport controls (Quickshell order: Prev | Play/Pause | Progress | Next)
     GtkWidget* prev_button_;
-    GtkWidget* play_pause_button_;   // NEW: Prominent play/pause with morphing
     GtkWidget* next_button_;
     GtkWidget* middle_section_;
     GtkWidget* right_box_;
@@ -78,53 +64,23 @@ private:
     GtkWidget* repeat_button_;
     GtkWidget* loop_button_;
 
-    // Playback/wave state.
-    double current_position_ = 0.0;
-    double current_duration_ = 0.0;
-    double current_progress_ = 0.0;
-    double pending_seek_fraction_ = -1.0;
-    double wave_phase_ = 0.0;
-    gint64 last_frame_time_ = 0;
-    guint wave_tick_source_ = 0;
-    guint seek_commit_source_ = 0;
-    bool playing_ = false;
-    bool seeking_ = false;
-    bool updating_progress_ = false;
-    bool can_seek_ = false;          // Track seek capability
+    int last_middle_width_ = 0;
+    int last_progress_width_ = 0;
 
     void setup_ui();
     void create_row();
+    void create_progress(GtkWidget* parent);
+    void create_right_section();
+
     static gboolean on_layout_tick(GtkWidget* widget, GdkFrameClock* clock,
                                     gpointer user_data);
 
-    int last_middle_width_ = 0;
-    int last_progress_width_ = 0;
-    void create_progress(GtkWidget* parent);
-    void create_right_section();
-    void start_wave_animation();
-    void stop_wave_animation();
-    void commit_pending_seek();
-    void update_play_pause_button(); // Update play/pause icon and morphing
-    void update_seek_mode();         // Switch between slider/progress-only
-
-    // Callbacks.
     static void on_prev_clicked(GtkButton* button, gpointer user_data);
-    static void on_play_pause_clicked(GtkButton* button, gpointer user_data);
     static void on_next_clicked(GtkButton* button, gpointer user_data);
     static void on_pip_clicked(GtkButton* button, gpointer user_data);
     static void on_shuffle_toggled(GtkToggleButton* button, gpointer user_data);
     static void on_repeat_toggled(GtkToggleButton* button, gpointer user_data);
     static void on_loop_toggled(GtkToggleButton* button, gpointer user_data);
-
-    static void on_wave_draw(GtkDrawingArea* area, cairo_t* cr,
-                              int width, int height, gpointer user_data);
-    static gboolean on_wave_tick(gpointer user_data);
-    static void on_progress_value_changed(GtkRange* range, gpointer user_data);
-    static gboolean on_progress_pressed(GtkGestureClick* gesture, int n_press,
-                                         double x, double y, gpointer user_data);
-    static gboolean on_progress_released(GtkGestureClick* gesture, int n_press,
-                                          double x, double y, gpointer user_data);
-    static gboolean on_seek_commit_timeout(gpointer user_data);
 };
 
 } // namespace lollypop

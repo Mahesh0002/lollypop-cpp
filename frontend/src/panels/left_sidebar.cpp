@@ -217,6 +217,11 @@ void LeftSidebar::set_active_item(const std::string& item_id) {
     }
 }
 
+void LeftSidebar::set_active_item_visual(const std::string& item_id) {
+    active_item_id_ = item_id;
+    update_active_state();
+}
+
 void LeftSidebar::toggle_expanded() {
     expanded_ = !expanded_;
     apply_expanded_state();

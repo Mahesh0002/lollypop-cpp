@@ -147,11 +147,41 @@ void MiddleLibrary::create_content_area() {
     // Set content box as child of scrolled window
     safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window_), content_box_);
 
+    // Content box must expand to fill scroller so pages can scroll
+    gtk_widget_set_vexpand(content_box_, TRUE);
+    gtk_widget_set_valign(content_box_, GTK_ALIGN_FILL);
+
     // Add top padding to content to account for floating toolbar
     // Toolbar height ~52px + gap ~12px = 64px
     gtk_widget_set_margin_top(content_box_, 64);
     // Bottom padding to clear bottom playback bar
     gtk_widget_set_margin_bottom(content_box_, 104);
+
+    // Connect scroll handling for pages that need it (SongsPage)
+    connect_scroll_handling();
+}
+
+void MiddleLibrary::connect_scroll_handling() {
+    GtkAdjustment* adjustment =
+        gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(scrolled_window_));
+    if (!adjustment) return;
+
+    g_signal_connect(adjustment, "value-changed",
+                     G_CALLBACK(on_scroll_changed), this);
+}
+
+void MiddleLibrary::on_scroll_changed(GtkAdjustment* adjustment,
+                                      gpointer user_data) {
+    auto* self = static_cast<MiddleLibrary*>(user_data);
+    if (!self || self->active_page_id_ != "songs") return;
+
+    auto it = self->pages_.find("songs");
+    if (it == self->pages_.end()) return;
+
+    auto* songs = dynamic_cast<SongsPage*>(it->second.get());
+    if (songs) {
+        songs->handle_scroll(adjustment);
+    }
 }
 
 void MiddleLibrary::create_glass_toolbar() {
@@ -329,6 +359,7 @@ void MiddleLibrary::register_page(std::unique_ptr<LibraryPage> page) {
 void MiddleLibrary::navigate_to_page(const std::string& page_id, bool add_to_history) {
     if (pages_.find(page_id) == pages_.end()) return;
 
+    // Don't add to history if already on that page (prevents duplicates from HomePage "View All")
     if (add_to_history && active_page_id_ != page_id) {
         // Truncate forward history
         history_.resize(history_index_ + 1);
@@ -344,6 +375,11 @@ void MiddleLibrary::navigate_to_page(const std::string& page_id, bool add_to_his
     active_page_id_ = page_id;
     gtk_stack_set_visible_child_name(GTK_STACK(stack_), page_id.c_str());
     update_toolbar_state();
+
+    // Notify sidebar of page change
+    if (page_change_cb_) {
+        page_change_cb_(page_id);
+    }
 }
 
 void MiddleLibrary::set_active_page(const std::string& page_id) {
@@ -435,6 +471,11 @@ void MiddleLibrary::on_back_clicked(GtkButton*, gpointer user_data) {
         self->active_page_id_ = self->history_[self->history_index_];
         gtk_stack_set_visible_child_name(GTK_STACK(self->stack_), self->active_page_id_.c_str());
         self->update_toolbar_state();
+
+        // Notify sidebar of page change
+        if (self->page_change_cb_) {
+            self->page_change_cb_(self->active_page_id_);
+        }
     }
 }
 
@@ -445,6 +486,11 @@ void MiddleLibrary::on_forward_clicked(GtkButton*, gpointer user_data) {
         self->active_page_id_ = self->history_[self->history_index_];
         gtk_stack_set_visible_child_name(GTK_STACK(self->stack_), self->active_page_id_.c_str());
         self->update_toolbar_state();
+
+        // Notify sidebar of page change
+        if (self->page_change_cb_) {
+            self->page_change_cb_(self->active_page_id_);
+        }
     }
 }
 
@@ -499,7 +545,19 @@ void MiddleLibrary::perform_search(const std::string& query, uint64_t generation
     if (!query.empty()) {
         navigate_to_page("search", true);
     } else {
-        navigate_to_page("home", true);
+        // Clear search -> go back to previous page in history (not home)
+        if (history_index_ > 0) {
+            // Navigate back without adding to history
+            history_index_--;
+            active_page_id_ = history_[history_index_];
+            gtk_stack_set_visible_child_name(GTK_STACK(stack_), active_page_id_.c_str());
+            update_toolbar_state();
+            if (page_change_cb_) {
+                page_change_cb_(active_page_id_);
+            }
+        } else {
+            navigate_to_page("home", true);
+        }
     }
 }
 

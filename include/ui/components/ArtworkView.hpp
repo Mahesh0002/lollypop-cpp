@@ -52,6 +52,9 @@ private:
     std::unique_ptr<GtkWidget, WidgetDeleter> fallback_image_;
     GTask* decode_task_ = nullptr;
     GCancellable* cancellable_ = nullptr;
+    // Async decode callbacks capture this flag; the destructor clears it so a
+    // late callback can never touch a destroyed ArtworkView.
+    std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
     std::string current_path_;
     int preferred_width_ = 56;
     int preferred_height_ = 56;

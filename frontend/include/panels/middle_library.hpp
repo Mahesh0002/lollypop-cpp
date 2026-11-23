@@ -9,9 +9,11 @@
 #pragma once
 
 #include <gtk/gtk.h>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "ui/components/LibraryPage.hpp"
@@ -39,6 +41,13 @@ public:
     void open_artist_detail(const std::string& artist_id);
     void show_genre(const std::string& genre);
 
+    // Callback for page changes (used to sync sidebar)
+    using PageChangeCallback = std::function<void(const std::string&)>;
+    void set_page_change_callback(PageChangeCallback cb) { page_change_cb_ = std::move(cb); }
+
+    // Connect SongsPage scroll handling to the shared scrolled window
+    void connect_scroll_handling();
+
 private:
     MainWindow* main_window_;
     ILibraryService* library_service_;
@@ -65,6 +74,8 @@ private:
     std::vector<std::string> history_;
     size_t history_index_ = 0;
 
+    PageChangeCallback page_change_cb_;
+
     void setup_ui();
     void create_glass_toolbar();
     void create_content_area();
@@ -72,6 +83,7 @@ private:
     void update_toolbar_state();
     void navigate_to_page(const std::string& page_id, bool add_to_history);
 
+    static void on_scroll_changed(GtkAdjustment* adjustment, gpointer user_data);
     static void on_search_changed(GtkEditable* editable, gpointer user_data);
     static void on_back_clicked(GtkButton*, gpointer user_data);
     static void on_forward_clicked(GtkButton*, gpointer user_data);

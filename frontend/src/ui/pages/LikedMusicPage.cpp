@@ -20,24 +20,17 @@ LikedMusicPage::LikedMusicPage(MainWindow* main_window, ILibraryService* library
 LikedMusicPage::~LikedMusicPage() = default;
 
 void LikedMusicPage::setup_ui() {
-    widget_.reset(gtk_scrolled_window_new());
-    g_object_ref_sink(widget_.get());
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(widget_.get()),
-                                   GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-    gtk_widget_set_vexpand(widget_.get(), TRUE);
-    gtk_widget_set_hexpand(widget_.get(), TRUE);
-    gtk_widget_add_css_class(widget_.get(), "library-scrolled");
-    gtk_widget_set_visible(widget_.get(), TRUE);
-
+    // Root widget is the ListBox directly (implements GtkScrollable)
     list_box_.reset(gtk_list_box_new());
     g_object_ref_sink(list_box_.get());
     gtk_widget_add_css_class(list_box_.get(), "liked-music-list");
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(list_box_.get()),
                                     GTK_SELECTION_NONE);
     gtk_widget_set_hexpand(list_box_.get(), TRUE);
+    gtk_widget_set_vexpand(list_box_.get(), TRUE);
     gtk_widget_set_visible(list_box_.get(), TRUE);
 
-    safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()), list_box_.get());
+    widget_ = list_box_.get();
 }
 
 void LikedMusicPage::refresh() {

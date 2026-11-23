@@ -130,6 +130,13 @@ void MainWindow::setup_layout() {
     right_now_playing_ = std::make_unique<RightNowPlaying>(this, lyrics_service, library_service);
     bottom_playback_ = std::make_unique<BottomPlayback>(this);
 
+    // Connect MiddleLibrary page changes to LeftSidebar for active state sync
+    middle_library_->set_page_change_callback([this](const std::string& page_id) {
+        if (left_sidebar_) {
+            left_sidebar_->set_active_item_visual(page_id);
+        }
+    });
+
     // Setup toolbar after panels are created
     setup_toolbar();
 
@@ -207,12 +214,6 @@ void MainWindow::connect_backend() {
                                                    double duration) {
         bottom_playback_->update_playback_position(position, duration);
         right_now_playing_->update_playback_position(position, duration);
-    });
-
-    // Visualization changed → update the now-playing panel only. The bottom
-    // bar uses a deterministic sine wave and deliberately has no visualizer.
-    backend->add_visualization_changed_callback([this](const std::vector<float>& points) {
-        right_now_playing_->set_points(points);
     });
 
     // Playback state changed → update both panels

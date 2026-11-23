@@ -1,7 +1,8 @@
 /**
  * Lollypop C++ - PlaylistItem
  *
- * Playlist card used by the Playlists page.
+ * Playlist card used by the Playlists page. Click opens the playlist; there
+ * is no inline play button.
  */
 
 #pragma once
@@ -43,7 +44,6 @@ private:
     std::unique_ptr<GtkWidget, WidgetDeleter> artwork_image_;
     std::unique_ptr<GtkWidget, WidgetDeleter> name_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> count_label_;
-    std::unique_ptr<GtkWidget, WidgetDeleter> play_button_;
 
     MainWindow* main_window_;
     Playlist playlist_;
@@ -52,9 +52,6 @@ private:
 
     void setup_ui();
     static void on_clicked(GtkButton* button, gpointer user_data);
-    static void on_play_clicked(GtkButton* button, gpointer user_data);
-    static gboolean on_enter(GtkEventControllerMotion* controller, double x, double y, gpointer user_data);
-    static gboolean on_leave(GtkEventControllerMotion* controller, gpointer user_data);
 };
 
 } // namespace lollypop

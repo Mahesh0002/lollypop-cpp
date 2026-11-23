@@ -3,12 +3,11 @@
  */
 
 #include "panels/right_now_playing.hpp"
-#include "panels/waveform_view.hpp"
+#include "panels/progress_wave.hpp"
 #include "main_window.hpp"
 #include "services/IPlayerService.hpp"
 #include "services/ILyricsService.hpp"
 #include "services/ILibraryService.hpp"
-#include "models/VisualizerModel.hpp"
 #include "types.hpp"
 #include "ui/components/ArtworkView.hpp"
 #include "ui/components/TrackRow.hpp"
@@ -17,8 +16,6 @@
 #include <gtk/gtk.h>
 
 #include <algorithm>
-#include <cstdio>
-#include <cstdlib>
 #include <map>
 #include <memory>
 #include <optional>
@@ -36,8 +33,8 @@ GtkWidget* create_icon_button(const char* icon_name,
                               GtkWidget** icon_out = nullptr) {
     GtkWidget* button = toggle ? gtk_toggle_button_new() : gtk_button_new();
     gtk_button_set_has_frame(GTK_BUTTON(button), FALSE);
-    gtk_widget_set_hexpand(button, TRUE);
-    gtk_widget_set_halign(button, GTK_ALIGN_FILL);
+    gtk_widget_set_hexpand(button, FALSE);
+    gtk_widget_set_halign(button, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(button, GTK_ALIGN_CENTER);
     gtk_widget_set_sensitive(button, FALSE);
     gtk_widget_set_visible(button, TRUE);
@@ -49,6 +46,10 @@ GtkWidget* create_icon_button(const char* icon_name,
 
     if (icon_out) *icon_out = icon;
     return button;
+}
+
+void set_button_size(GtkWidget* button, int width, int height) {
+    gtk_widget_set_size_request(button, width, height);
 }
 
 GtkWidget* create_page_scroller(GtkWidget* child) {
@@ -65,11 +66,9 @@ GtkWidget* create_page_scroller(GtkWidget* child) {
     return scroller;
 }
 
-std::string format_time(double seconds) {
-    const int total = std::max(0, static_cast<int>(seconds));
-    char buffer[32];
-    std::snprintf(buffer, sizeof(buffer), "%d:%02d", total / 60, total % 60);
-    return std::string(buffer);
+void set_accessible_label(GtkWidget* widget, const char* label) {
+    gtk_accessible_update_property(GTK_ACCESSIBLE(widget),
+                                   GTK_ACCESSIBLE_PROPERTY_LABEL, label, -1);
 }
 
 } // namespace
@@ -86,14 +85,10 @@ RightNowPlaying::RightNowPlaying(MainWindow* main_window,
       track_title_label_(nullptr),
       track_artist_label_(nullptr),
       progress_box_(nullptr),
-      time_label_(nullptr),
-      duration_label_(nullptr),
+      prev_button_(nullptr),
+      next_button_(nullptr),
       transport_box_(nullptr),
       shuffle_button_(nullptr),
-      prev_button_(nullptr),
-      play_pause_button_(nullptr),
-      play_pause_icon_(nullptr),
-      next_button_(nullptr),
       repeat_button_(nullptr),
       loop_button_(nullptr),
       tabs_box_(nullptr),
@@ -116,8 +111,6 @@ void RightNowPlaying::setup_ui() {
     gtk_widget_set_vexpand(main_box_, TRUE);
     gtk_widget_set_visible(main_box_, TRUE);
 
-    // One continuous column. Only the Lyrics/Queue pane scrolls, so the panel
-    // can never leave an unused empty region below a short content block.
     content_box_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     gtk_widget_add_css_class(content_box_, "now-playing-content");
     gtk_widget_set_hexpand(content_box_, TRUE);
@@ -187,94 +180,84 @@ void RightNowPlaying::create_track_info() {
 }
 
 void RightNowPlaying::create_progress_section() {
-    progress_box_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
-    gtk_widget_add_css_class(progress_box_, "now-playing-waveform");
+    // [rewind] [shared wavy progress] [fast-forward]
+    progress_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_add_css_class(progress_box_, "now-playing-progress-row");
     gtk_widget_set_hexpand(progress_box_, TRUE);
     gtk_widget_set_halign(progress_box_, GTK_ALIGN_FILL);
+    gtk_widget_set_valign(progress_box_, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(progress_box_, TRUE);
 
-    GtkWidget* times = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_widget_set_hexpand(times, TRUE);
-    gtk_widget_set_halign(times, GTK_ALIGN_FILL);
-    gtk_widget_set_visible(times, TRUE);
+    prev_button_ = create_icon_button("media-skip-backward-symbolic", 20, false);
+    gtk_widget_add_css_class(prev_button_, "now-playing-control-button");
+    set_button_size(prev_button_, 36, 36);
+    gtk_widget_set_tooltip_text(prev_button_, "Previous track");
+    set_accessible_label(prev_button_, "Rewind / previous track");
+    g_signal_connect(prev_button_, "clicked", G_CALLBACK(on_prev_clicked), this);
+    safe_box_append(GTK_BOX(progress_box_), prev_button_);
 
-    time_label_ = gtk_label_new("0:00");
-    gtk_widget_add_css_class(time_label_, "now-playing-elapsed");
-    gtk_label_set_xalign(GTK_LABEL(time_label_), 0.0);
-    gtk_widget_set_visible(time_label_, TRUE);
-    safe_box_append(GTK_BOX(times), time_label_);
+    progress_wave_ = std::make_unique<ProgressWave>();
+    GtkWidget* wave = progress_wave_->get_widget();
+    gtk_widget_add_css_class(wave, "now-playing-progress");
+    gtk_widget_set_hexpand(wave, TRUE);
+    gtk_widget_set_halign(wave, GTK_ALIGN_FILL);
+    gtk_widget_set_valign(wave, GTK_ALIGN_CENTER);
+    progress_wave_->set_seek_callback([this](double seconds) {
+        if (!main_window_) return;
+        if (IPlayerService* backend = main_window_->get_backend()) {
+            backend->seek(seconds);
+        }
+    });
+    safe_box_append(GTK_BOX(progress_box_), wave);
 
-    duration_label_ = gtk_label_new("0:00");
-    gtk_widget_add_css_class(duration_label_, "now-playing-duration");
-    gtk_label_set_xalign(GTK_LABEL(duration_label_), 1.0);
-    gtk_widget_set_hexpand(duration_label_, TRUE);
-    gtk_widget_set_visible(duration_label_, TRUE);
-    safe_box_append(GTK_BOX(times), duration_label_);
-
-    safe_box_append(GTK_BOX(progress_box_), times);
-
-    waveform_model_ = std::make_unique<VisualizerModel>();
-
-    waveform_view_ = std::make_unique<WaveformView>();
-    waveform_view_->set_model(waveform_model_.get());
-    waveform_view_->set_smoothing(2);
-    waveform_view_->set_preferred_size(-1, 56);
-
-    GtkWidget* waveform = waveform_view_->get_widget();
-    gtk_widget_set_hexpand(waveform, TRUE);
-    gtk_widget_set_halign(waveform, GTK_ALIGN_FILL);
-    gtk_widget_set_valign(waveform, GTK_ALIGN_CENTER);
-    safe_box_append(GTK_BOX(progress_box_), waveform);
+    next_button_ = create_icon_button("media-skip-forward-symbolic", 20, false);
+    gtk_widget_add_css_class(next_button_, "now-playing-control-button");
+    set_button_size(next_button_, 36, 36);
+    gtk_widget_set_tooltip_text(next_button_, "Next track");
+    set_accessible_label(next_button_, "Fast-forward / next track");
+    g_signal_connect(next_button_, "clicked", G_CALLBACK(on_next_clicked), this);
+    safe_box_append(GTK_BOX(progress_box_), next_button_);
 
     safe_box_append(GTK_BOX(content_box_), progress_box_);
 }
 
 void RightNowPlaying::create_transport_row() {
-    transport_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_box_set_homogeneous(GTK_BOX(transport_box_), TRUE);
-    gtk_widget_add_css_class(transport_box_, "now-playing-transport");
+    // Three mode buttons; playback is driven by track activation / media keys.
+    transport_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_add_css_class(transport_box_, "now-playing-main-controls");
     gtk_widget_set_hexpand(transport_box_, TRUE);
-    gtk_widget_set_halign(transport_box_, GTK_ALIGN_FILL);
+    gtk_widget_set_halign(transport_box_, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(transport_box_, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(transport_box_, TRUE);
 
     shuffle_button_ = create_icon_button("media-playlist-shuffle-symbolic",
                                          20, true);
     gtk_widget_add_css_class(shuffle_button_, "now-playing-mode-button");
+    set_button_size(shuffle_button_, 40, 40);
+    gtk_widget_set_tooltip_text(shuffle_button_, "Shuffle");
+    set_accessible_label(shuffle_button_, "Shuffle");
     g_signal_connect(shuffle_button_, "toggled",
                      G_CALLBACK(on_shuffle_toggled), this);
-
-    prev_button_ = create_icon_button("media-skip-backward-symbolic", 22, false);
-    gtk_widget_add_css_class(prev_button_, "now-playing-control-button");
-    g_signal_connect(prev_button_, "clicked",
-                     G_CALLBACK(on_prev_clicked), this);
-
-    play_pause_button_ = create_icon_button("media-playback-start-symbolic",
-                                            24, false, &play_pause_icon_);
-    gtk_widget_add_css_class(play_pause_button_, "now-playing-play-button");
-    g_signal_connect(play_pause_button_, "clicked",
-                     G_CALLBACK(on_play_pause_clicked), this);
-
-    next_button_ = create_icon_button("media-skip-forward-symbolic", 22, false);
-    gtk_widget_add_css_class(next_button_, "now-playing-control-button");
-    g_signal_connect(next_button_, "clicked",
-                     G_CALLBACK(on_next_clicked), this);
 
     repeat_button_ = create_icon_button("media-playlist-repeat-symbolic",
                                         20, true);
     gtk_widget_add_css_class(repeat_button_, "now-playing-mode-button");
+    set_button_size(repeat_button_, 40, 40);
+    gtk_widget_set_tooltip_text(repeat_button_, "Repeat playlist");
+    set_accessible_label(repeat_button_, "Repeat playlist");
     g_signal_connect(repeat_button_, "toggled",
                      G_CALLBACK(on_repeat_toggled), this);
 
     loop_button_ = create_icon_button("media-playlist-repeat-song-symbolic",
                                       20, true);
     gtk_widget_add_css_class(loop_button_, "now-playing-mode-button");
+    set_button_size(loop_button_, 40, 40);
+    gtk_widget_set_tooltip_text(loop_button_, "Repeat track");
+    set_accessible_label(loop_button_, "Repeat track");
     g_signal_connect(loop_button_, "toggled",
                      G_CALLBACK(on_loop_toggled), this);
 
     safe_box_append(GTK_BOX(transport_box_), shuffle_button_);
-    safe_box_append(GTK_BOX(transport_box_), prev_button_);
-    safe_box_append(GTK_BOX(transport_box_), play_pause_button_);
-    safe_box_append(GTK_BOX(transport_box_), next_button_);
     safe_box_append(GTK_BOX(transport_box_), repeat_button_);
     safe_box_append(GTK_BOX(transport_box_), loop_button_);
 
@@ -417,14 +400,6 @@ void RightNowPlaying::show_active_tab() {
     }
 }
 
-void RightNowPlaying::update_play_pause_icon() {
-    if (!play_pause_icon_) return;
-    gtk_image_set_from_icon_name(
-        GTK_IMAGE(play_pause_icon_),
-        playing_ ? "media-playback-pause-symbolic"
-                 : "media-playback-start-symbolic");
-}
-
 void RightNowPlaying::adapt_to_allocation(int width, int height) {
     if (width <= 0 || height <= 0) return;
 
@@ -450,18 +425,11 @@ void RightNowPlaying::adapt_to_allocation(int width, int height) {
         artwork_view_->set_corner_radius(static_cast<double>(side) / 24.0);
         last_artwork_side_ = side;
     }
-
-    const int waveform_height = height < 480 ? 40 : (height < 620 ? 48 : 56);
-    if (waveform_view_ && waveform_height != last_waveform_height_) {
-        // -1 width lets the drawing area use the entire panel width.
-        waveform_view_->set_preferred_size(-1, waveform_height);
-        last_waveform_height_ = waveform_height;
-    }
 }
 
 void RightNowPlaying::update_track_info(const std::string& title,
-                                         const std::string& artist,
-                                         const std::string& artwork_path) {
+                                        const std::string& artist,
+                                        const std::string& artwork_path) {
     gtk_label_set_text(GTK_LABEL(track_title_label_), title.c_str());
     gtk_label_set_text(GTK_LABEL(track_artist_label_), artist.c_str());
 
@@ -472,29 +440,22 @@ void RightNowPlaying::update_track_info(const std::string& title,
 }
 
 void RightNowPlaying::update_playback_position(double position,
-                                               double duration) {
-    const double safe_duration = std::max(0.0, duration);
-    const double safe_position = std::max(0.0, position);
-
-    gtk_label_set_text(GTK_LABEL(time_label_),
-                       format_time(safe_position).c_str());
-    gtk_label_set_text(GTK_LABEL(duration_label_),
-                       format_time(safe_duration).c_str());
-
-    const double progress = safe_duration > 0.0
-                                ? std::min(1.0, safe_position / safe_duration)
-                                : 0.0;
-    if (waveform_view_) {
-        waveform_view_->set_progress(progress);
+                                                double duration) {
+    if (progress_wave_) {
+        if (main_window_) {
+            if (IPlayerService* backend = main_window_->get_backend()) {
+                progress_wave_->set_can_seek(backend->can_seek());
+            }
+        }
+        progress_wave_->set_duration(duration);
+        progress_wave_->set_progress(duration > 0.0 ? position / duration : 0.0);
     }
 }
 
 void RightNowPlaying::set_playing(bool playing) {
-    playing_ = playing;
-    if (waveform_view_) {
-        waveform_view_->set_playing(playing);
+    if (progress_wave_) {
+        progress_wave_->set_playing(playing);
     }
-    update_play_pause_icon();
 }
 
 void RightNowPlaying::set_queue(
@@ -508,16 +469,6 @@ void RightNowPlaying::set_lyrics(const std::string& lyrics) {
     GtkTextBuffer* buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(lyrics_view_));
     gtk_text_buffer_set_text(buffer, lyrics.c_str(), -1);
     show_active_tab();
-}
-
-void RightNowPlaying::set_points(const std::vector<float>& points) {
-    if (!waveform_model_) return;
-
-    waveform_model_->samples = points;
-    waveform_model_->sequenceNumber++;
-    if (waveform_view_) {
-        waveform_view_->set_model(waveform_model_.get());
-    }
 }
 
 void RightNowPlaying::set_shuffle(bool enabled) {
@@ -534,16 +485,14 @@ void RightNowPlaying::set_loop(bool enabled) {
 
 void RightNowPlaying::set_controls_sensitive(bool sensitive) {
     gtk_widget_set_sensitive(shuffle_button_, sensitive);
-    gtk_widget_set_sensitive(prev_button_, sensitive);
-    gtk_widget_set_sensitive(play_pause_button_, sensitive);
-    gtk_widget_set_sensitive(next_button_, sensitive);
     gtk_widget_set_sensitive(repeat_button_, sensitive);
     gtk_widget_set_sensitive(loop_button_, sensitive);
+    gtk_widget_set_sensitive(prev_button_, sensitive);
+    gtk_widget_set_sensitive(next_button_, sensitive);
 }
 
 void RightNowPlaying::set_transport_controls_sensitive(bool sensitive) {
     gtk_widget_set_sensitive(prev_button_, sensitive);
-    gtk_widget_set_sensitive(play_pause_button_, sensitive);
     gtk_widget_set_sensitive(next_button_, sensitive);
 }
 
@@ -590,10 +539,10 @@ void RightNowPlaying::populate_queue(
 
     std::map<std::string, Track> tracks_by_id;
     if (library_service_) {
-        for (const Track& track :
+        for (const Track& item :
              library_service_->get_tracks_by_ids(queue_track_ids)) {
-            if (!track.id.empty()) {
-                tracks_by_id.emplace(track.id, track);
+            if (!item.id.empty()) {
+                tracks_by_id.emplace(item.id, item);
             }
         }
     }
@@ -629,10 +578,10 @@ void RightNowPlaying::populate_queue(
             }
         });
 
-        row->set_like_callback([this](const Track& track, bool liked) {
+        row->set_like_callback([this](const Track& item, bool liked) {
             (void)liked;
             if (library_service_) {
-                library_service_->toggle_like(track.id);
+                library_service_->toggle_like(item.id);
             }
         });
 
@@ -644,7 +593,7 @@ void RightNowPlaying::populate_queue(
 }
 
 gboolean RightNowPlaying::on_allocation_tick(GtkWidget* widget, GdkFrameClock*,
-                                             gpointer user_data) {
+                                              gpointer user_data) {
     auto* self = static_cast<RightNowPlaying*>(user_data);
     const int width = gtk_widget_get_width(widget);
     const int height = gtk_widget_get_height(widget);
@@ -662,15 +611,6 @@ void RightNowPlaying::on_prev_clicked(GtkButton*, gpointer user_data) {
     if (self->main_window_) {
         if (IPlayerService* backend = self->main_window_->get_backend()) {
             backend->previous_track();
-        }
-    }
-}
-
-void RightNowPlaying::on_play_pause_clicked(GtkButton*, gpointer user_data) {
-    auto* self = static_cast<RightNowPlaying*>(user_data);
-    if (self->main_window_) {
-        if (IPlayerService* backend = self->main_window_->get_backend()) {
-            backend->toggle_play_pause();
         }
     }
 }

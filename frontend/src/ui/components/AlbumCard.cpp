@@ -84,7 +84,7 @@ void AlbumCard::setup_ui() {
     // Click handler
     g_signal_connect(widget_.get(), "clicked", G_CALLBACK(on_clicked), this);
 
-    // Hover reveals play button via GtkEventControllerMotion (GTK4 compatible)
+    // Hover animation via GtkEventControllerMotion (GTK4 compatible)
     auto* motion_ctrl = gtk_event_controller_motion_new();
     g_object_set_data_full(G_OBJECT(motion_ctrl), "album-card-this", this,
                            nullptr);
@@ -115,17 +115,10 @@ void AlbumCard::on_clicked(GtkButton* button, gpointer user_data) {
     if (self->click_cb_) self->click_cb_(self->album_);
 }
 
-void AlbumCard::on_play_clicked(GtkButton* button, gpointer user_data) {
-    (void)button;
-    AlbumCard* self = static_cast<AlbumCard*>(user_data);
-    if (self->play_cb_) self->play_cb_(self->album_);
-}
-
 gboolean AlbumCard::on_enter(GtkEventControllerMotion* controller, double x,
                              double y, gpointer user_data) {
     (void)controller; (void)x; (void)y;
     AlbumCard* self = static_cast<AlbumCard*>(user_data);
-    if (self->play_button_) gtk_widget_set_visible(self->play_button_.get(), TRUE);
     self->animate_hover(true);
     return FALSE;
 }
@@ -134,7 +127,6 @@ gboolean AlbumCard::on_leave(GtkEventControllerMotion* controller,
                              gpointer user_data) {
     (void)controller;
     AlbumCard* self = static_cast<AlbumCard*>(user_data);
-    if (self->play_button_) gtk_widget_set_visible(self->play_button_.get(), FALSE);
     self->animate_hover(false);
     return FALSE;
 }

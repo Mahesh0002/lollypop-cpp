@@ -39,7 +39,10 @@ public:
     GtkWidget* get_widget() const { return sidebar_box_; }
     GtkWidget* get_collapse_button() const { return collapse_button_; }
 
+    // User-initiated navigation (triggers MiddleLibrary)
     void set_active_item(const std::string& item_id);
+    // External sync (e.g., from MiddleLibrary back/forward) - updates visual only
+    void set_active_item_visual(const std::string& item_id);
     void toggle_expanded();
     bool is_expanded() const { return expanded_; }
 

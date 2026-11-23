@@ -1,11 +1,14 @@
 /**
  * Lollypop C++ - Right Now Playing Panel
  *
- * Full-height Now Playing surface: square artwork, track metadata, a stretched
- * waveform/progress strip, transport controls, and a tab section that consumes
- * all remaining vertical space.
+ * Full-height Now Playing surface:
+ *   artwork, title/artist
+ *   [rewind] [shared wavy progress] [fast-forward]
+ *   [shuffle] [repeat] [repeat one]
+ *   Lyrics / Queue tabs
  *
- * The panel adapts to its own GTK allocation instead of a fixed height seed.
+ * The progress strip is the same shared Cairo sine wave used by the bottom
+ * bar and PiP window; only its width changes.
  */
 
 #pragma once
@@ -19,8 +22,7 @@ namespace lollypop {
 
 class MainWindow;
 class ArtworkView;
-class WaveformView;
-class VisualizerModel;
+class ProgressWave;
 class TrackRow;
 class ILibraryService;
 class ILyricsService;
@@ -44,19 +46,14 @@ public:
     void set_playing(bool playing);
     void set_queue(const std::vector<std::string>& queue_track_ids);
     void set_lyrics(const std::string& lyrics);
-    void set_points(const std::vector<float>& points);
     void set_shuffle(bool enabled);
     void set_repeat(bool enabled);
     void set_loop(bool enabled);
 
-    // Shell media controls are the playback authority. GTK buttons stay
-    // read-only by default; this allows a future pass-through mode if desired.
     void set_controls_sensitive(bool sensitive);
-
-    // Enable/disable only transport controls (prev/play/next), not mode buttons.
     void set_transport_controls_sensitive(bool sensitive);
 
-    // Kept for compatibility; the panel now also tracks live GTK allocation.
+    // Kept for compatibility; the panel also tracks live GTK allocation.
     void set_panel_height(int height);
 
     // Lyrics service integration (public for MainWindow callback).
@@ -76,18 +73,15 @@ private:
     GtkWidget* track_title_label_;
     GtkWidget* track_artist_label_;
 
+    // [prev] [shared wavy progress] [next]
     GtkWidget* progress_box_;
-    GtkWidget* time_label_;
-    GtkWidget* duration_label_;
-    std::unique_ptr<VisualizerModel> waveform_model_;
-    std::unique_ptr<WaveformView> waveform_view_;
+    GtkWidget* prev_button_;
+    GtkWidget* next_button_;
+    std::unique_ptr<ProgressWave> progress_wave_;
 
+    // Shuffle | Repeat playlist | Repeat track.
     GtkWidget* transport_box_;
     GtkWidget* shuffle_button_;
-    GtkWidget* prev_button_;
-    GtkWidget* play_pause_button_;
-    GtkWidget* play_pause_icon_;
-    GtkWidget* next_button_;
     GtkWidget* repeat_button_;
     GtkWidget* loop_button_;
 
@@ -102,10 +96,11 @@ private:
     int panel_width_ = 0;
     int panel_height_ = 0;
     int last_artwork_side_ = 0;
-    int last_waveform_height_ = 0;
+    int last_width_ = 0;
+    int last_height_ = 0;
+
     bool has_lyrics_ = false;
     bool lyrics_tab_active_ = true;
-    bool playing_ = false;
 
     std::string current_artwork_path_;
     std::string current_track_id_;
@@ -123,16 +118,12 @@ private:
 
     void adapt_to_allocation(int width, int height);
     void show_active_tab();
-    void update_play_pause_icon();
     void populate_queue(const std::vector<std::string>& queue_track_ids);
 
     static gboolean on_allocation_tick(GtkWidget* widget, GdkFrameClock* clock,
                                        gpointer user_data);
 
-    int last_width_ = 0;
-    int last_height_ = 0;
     static void on_prev_clicked(GtkButton* button, gpointer user_data);
-    static void on_play_pause_clicked(GtkButton* button, gpointer user_data);
     static void on_next_clicked(GtkButton* button, gpointer user_data);
     static void on_shuffle_toggled(GtkToggleButton* button, gpointer user_data);
     static void on_repeat_toggled(GtkToggleButton* button, gpointer user_data);

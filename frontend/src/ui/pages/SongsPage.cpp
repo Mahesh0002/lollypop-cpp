@@ -35,62 +35,43 @@ SongsPage::SongsPage(MainWindow* main_window, ILibraryService* library_service)
 }
 
 SongsPage::~SongsPage() {
-    // Idle callbacks hold a ref to the widget; clear the owner marker so they
-    // never touch a destroyed SongsPage.
     if (widget_) {
         g_object_set_data(G_OBJECT(widget_.get()), "songs-page-owner", nullptr);
     }
 }
 
 void SongsPage::setup_ui() {
-    widget_.reset(gtk_scrolled_window_new());
-    g_object_ref_sink(widget_.get());
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(widget_.get()),
-                                   GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-    gtk_widget_set_vexpand(widget_.get(), TRUE);
-    gtk_widget_set_hexpand(widget_.get(), TRUE);
-    gtk_widget_add_css_class(widget_.get(), "library-scrolled");
-    gtk_widget_set_visible(widget_.get(), TRUE);
-    g_object_set_data(G_OBJECT(widget_.get()), "songs-page-owner", this);
-
+    // Root widget is a Box containing header + ListBox (both implement GtkScrollable)
+    // MiddleLibrary provides the single shared scrolled window
     GtkWidget* main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_set_hexpand(main_box, TRUE);
     gtk_widget_set_vexpand(main_box, TRUE);
     gtk_widget_set_visible(main_box, TRUE);
+    g_object_set_data(G_OBJECT(main_box), "songs-page-owner", this);
 
-    // Column headers with sort buttons
     create_header(main_box);
 
-    // Track list with scrolled window for scroll detection
-    scrolled_list_.reset(gtk_scrolled_window_new());
-    g_object_ref_sink(scrolled_list_.get());
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled_list_.get()),
-                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    gtk_widget_set_vexpand(scrolled_list_.get(), TRUE);
-    gtk_widget_set_hexpand(scrolled_list_.get(), TRUE);
-    gtk_widget_add_css_class(scrolled_list_.get(), "songs-list-scrolled");
-    gtk_widget_set_visible(scrolled_list_.get(), TRUE);
-
+    // Track list - ListBox directly (implements GtkScrollable)
     list_box_.reset(gtk_list_box_new());
     g_object_ref_sink(list_box_.get());
     gtk_widget_add_css_class(list_box_.get(), "songs-list");
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(list_box_.get()),
                                     GTK_SELECTION_NONE);
     gtk_widget_set_hexpand(list_box_.get(), TRUE);
+    gtk_widget_set_vexpand(list_box_.get(), TRUE);
     gtk_widget_set_visible(list_box_.get(), TRUE);
 
-    safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_list_.get()), list_box_.get());
-    gtk_widget_set_vexpand(scrolled_list_.get(), TRUE);
-    gtk_widget_set_hexpand(scrolled_list_.get(), TRUE);
-
-    // Connect scroll to load more
-    GtkAdjustment* vadj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(scrolled_list_.get()));
-    g_signal_connect(vadj, "value-changed", G_CALLBACK(on_scroll_changed), this);
+    // Connect scroll to load more - use the ListBox's built-in scrolling
+    // The parent scrolled window (from MiddleLibrary) will handle the actual scrolling
+    // We just need to detect when we're near the bottom
+    GtkWidget* vadj_widget = list_box_.get();  // Will get adjustment from parent scrolled window
+    // We'll connect to the scrolled window's adjustment in MiddleLibrary via a signal
 
     safe_box_append(GTK_BOX(main_box), header_box_.get());
-    safe_box_append(GTK_BOX(main_box), scrolled_list_.get());
+    safe_box_append(GTK_BOX(main_box), list_box_.get());
 
-    safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()), main_box);
+    widget_.reset(main_box);
+    g_object_ref_sink(widget_.get());
 }
 
 void SongsPage::create_header(GtkWidget* main_box) {
@@ -116,7 +97,6 @@ void SongsPage::create_header(GtkWidget* main_box) {
             GtkWidget* genre_dropdown = gtk_drop_down_new(G_LIST_MODEL(string_list), nullptr);
             gtk_widget_add_css_class(genre_dropdown, "songs-genre-filter");
             gtk_widget_set_tooltip_text(genre_dropdown, "Filter by genre");
-            // A valid initial selection avoids GTK accessible-value criticals.
             gtk_drop_down_set_selected(GTK_DROP_DOWN(genre_dropdown), 0);
             g_signal_connect(genre_dropdown, "notify::selected", G_CALLBACK(on_genre_changed), this);
             gtk_box_append(GTK_BOX(header_box_.get()), genre_dropdown);
@@ -147,7 +127,6 @@ void SongsPage::create_header(GtkWidget* main_box) {
             gtk_button_set_has_frame(GTK_BUTTON(sort_btn), FALSE);
             gtk_widget_set_hexpand(sort_btn, TRUE);
             gtk_widget_set_halign(sort_btn, GTK_ALIGN_FILL);
-            // Consistent spacing on all four sides.
             gtk_widget_set_margin_start(sort_btn, 10);
             gtk_widget_set_margin_end(sort_btn, 10);
             gtk_widget_set_margin_top(sort_btn, 10);
@@ -252,6 +231,11 @@ void SongsPage::append_tracks(std::vector<Track>&& tracks) {
     loading_ = false;
 }
 
+void SongsPage::handle_scroll(GtkAdjustment* adjustment) {
+    on_scroll_changed(adjustment, this);
+}
+
+// This will be connected to the parent scrolled window's adjustment by MiddleLibrary
 void SongsPage::on_scroll_changed(GtkAdjustment* adjustment, gpointer user_data) {
     auto* self = static_cast<SongsPage*>(user_data);
     double value = gtk_adjustment_get_value(adjustment);
