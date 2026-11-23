@@ -122,7 +122,7 @@ void SongsPage::create_header(GtkWidget* main_box) {
         const char* field;
         TrackColumnRole role;
     } columns_info[] = {
-        {"#",        "number",   TrackColumnRole::Fixed},
+        {"",         "number",   TrackColumnRole::Fixed},
         {"Title",    "title",    TrackColumnRole::Title},
         {"Artist",   "artist",   TrackColumnRole::Artist},
         {"Album",    "album",    TrackColumnRole::Album},
@@ -134,7 +134,7 @@ void SongsPage::create_header(GtkWidget* main_box) {
         gtk_widget_add_css_class(col_label, "songs-column-header");
         gtk_label_set_xalign(GTK_LABEL(col_label), 0.0);
         if (i == 0) {
-            gtk_widget_set_size_request(col_label, 24, -1);
+            gtk_widget_set_size_request(col_label, 20, -1);
         } else if (i == 4) {
             gtk_widget_set_size_request(col_label, 40, -1);
         }
@@ -160,7 +160,7 @@ void SongsPage::create_header(GtkWidget* main_box) {
 
     // Reserve the same trailing space the like button occupies in each row.
     GtkWidget* like_spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_set_size_request(like_spacer, 38, 1);
+    gtk_widget_set_size_request(like_spacer, 28, 1);
     gtk_widget_set_visible(like_spacer, TRUE);
     gtk_box_append(GTK_BOX(columns), like_spacer);
 

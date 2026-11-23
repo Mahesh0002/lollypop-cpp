@@ -5,6 +5,7 @@
  */
 
 #include "ui/components/TrackRow.hpp"
+#include "ui/components/ArtworkView.hpp"
 #include "main_window.hpp"
 #include "ui/animation/SpringAnimation.hpp"
 
@@ -179,7 +180,8 @@ GtkLayoutManager* create_track_columns_layout() {
 }
 
 TrackRow::TrackRow(MainWindow* main_window, const Track& track, int track_number)
-    : main_window_(main_window), track_(track), track_number_(track_number) {
+    : main_window_(main_window), track_(track) {
+    (void)track_number;
     setup_ui();
 }
 
@@ -190,7 +192,7 @@ void TrackRow::setup_ui() {
     g_object_ref_sink(widget_.get());
     gtk_widget_add_css_class(widget_.get(), "track-row");
     gtk_widget_set_hexpand(widget_.get(), TRUE);
-    gtk_widget_set_size_request(widget_.get(), -1, 40);
+    gtk_widget_set_size_request(widget_.get(), -1, 20);
     gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(widget_.get()), TRUE);
     gtk_widget_set_visible(widget_.get(), TRUE);
 
@@ -198,19 +200,18 @@ void TrackRow::setup_ui() {
     gtk_widget_set_layout_manager(box, create_track_columns_layout());
     gtk_widget_set_margin_start(box, 12);
     gtk_widget_set_margin_end(box, 12);
-    gtk_widget_set_margin_top(box, 4);
-    gtk_widget_set_margin_bottom(box, 4);
+    gtk_widget_set_margin_top(box, 0);
+    gtk_widget_set_margin_bottom(box, 0);
     gtk_widget_set_visible(box, TRUE);
 
-    // Track number
-    number_label_.reset(gtk_label_new(
-        (track_number_ > 0 ? std::to_string(track_number_) : "").c_str()));
-    g_object_ref_sink(number_label_.get());
-    gtk_widget_add_css_class(number_label_.get(), "track-row-number");
-    gtk_label_set_xalign(GTK_LABEL(number_label_.get()), 0.0);
-    gtk_widget_set_size_request(number_label_.get(), 24, -1);
-    gtk_widget_set_visible(number_label_.get(), TRUE);
-    gtk_box_append(GTK_BOX(box), number_label_.get());
+    // Artwork thumbnail replaces the track number for an Apple Music look.
+    artwork_view_ = std::make_unique<ArtworkView>();
+    artwork_view_->set_preferred_size(20, 20);
+    artwork_view_->set_corner_radius(4);
+    gtk_widget_add_css_class(artwork_view_->get_widget(), "track-row-artwork");
+    artwork_view_->set_artwork_path(track_.artwork_path);
+    gtk_widget_set_visible(artwork_view_->get_widget(), TRUE);
+    gtk_box_append(GTK_BOX(box), artwork_view_->get_widget());
 
     // Title
     title_label_.reset(gtk_label_new(track_.title.c_str()));
@@ -271,14 +272,14 @@ void TrackRow::setup_ui() {
     gtk_widget_add_css_class(like_button_.get(), "track-row-like-button");
     GtkWidget* like_icon = gtk_image_new_from_icon_name(
         liked_ ? "starred-symbolic" : "non-starred-symbolic");
-    gtk_image_set_pixel_size(GTK_IMAGE(like_icon), 18);
+    gtk_image_set_pixel_size(GTK_IMAGE(like_icon), 16);
     gtk_button_set_child(GTK_BUTTON(like_button_.get()), like_icon);
     gtk_widget_set_halign(like_button_.get(), GTK_ALIGN_END);
     // Consistent spacing on all four sides.
-    gtk_widget_set_margin_start(like_button_.get(), 8);
-    gtk_widget_set_margin_end(like_button_.get(), 8);
-    gtk_widget_set_margin_top(like_button_.get(), 4);
-    gtk_widget_set_margin_bottom(like_button_.get(), 4);
+    gtk_widget_set_margin_start(like_button_.get(), 4);
+    gtk_widget_set_margin_end(like_button_.get(), 4);
+    gtk_widget_set_margin_top(like_button_.get(), 0);
+    gtk_widget_set_margin_bottom(like_button_.get(), 0);
     g_signal_connect(like_button_.get(), "clicked",
                      G_CALLBACK(on_like_clicked), this);
     gtk_widget_set_visible(like_button_.get(), TRUE);
@@ -327,7 +328,7 @@ void TrackRow::set_liked(bool liked) {
         // Fallback: create new icon if child is not an image
         GtkWidget* new_icon = gtk_image_new_from_icon_name(
             liked_ ? "starred-symbolic" : "non-starred-symbolic");
-        gtk_image_set_pixel_size(GTK_IMAGE(new_icon), 18);
+        gtk_image_set_pixel_size(GTK_IMAGE(new_icon), 16);
         gtk_button_set_child(GTK_BUTTON(like_button_.get()), new_icon);
         // gtk_button_set_child() automatically unrefs the old child
     }

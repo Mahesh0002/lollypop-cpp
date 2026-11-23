@@ -19,6 +19,7 @@
 namespace lollypop {
 
 class MainWindow;
+class ArtworkView;
 
 // Direct children tagged with one of these roles are laid out by
 // create_track_columns_layout(). Title/Artist/Album receive 20/30/25 of the
@@ -59,7 +60,7 @@ private:
         }
     };
     std::unique_ptr<GtkWidget, WidgetDeleter> widget_;
-    std::unique_ptr<GtkWidget, WidgetDeleter> number_label_;
+    std::unique_ptr<ArtworkView> artwork_view_;
     std::unique_ptr<GtkWidget, WidgetDeleter> title_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> artist_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> album_label_;
@@ -68,7 +69,6 @@ private:
 
     MainWindow* main_window_;
     Track track_;
-    int track_number_;
     PlayCallback play_cb_;
     LikeCallback like_cb_;
     bool playing_ = false;
