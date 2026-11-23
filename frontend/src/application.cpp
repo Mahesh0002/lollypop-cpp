@@ -77,19 +77,30 @@ void Application::on_activate() {
         return;
     }
 
-    // Create main window
+    // Create and present the window before any library scan work so the
+    // first frame is not blocked by filesystem or metadata parsing.
     main_window_ = std::make_unique<MainWindow>(this);
     main_window_->present();
 
-    // Scan the user's Music folder after the UI is connected, so the
-    // library-changed callback refreshes the visible page when it finishes.
-    backend_->scan_default_music_library();
+    // Delay the initial scan until the window has had a chance to paint.
+    g_timeout_add_full(
+        G_PRIORITY_DEFAULT, 1500,
+        [](gpointer data) -> gboolean {
+            auto* self = static_cast<Application*>(data);
+            if (self->backend_) self->backend_->scan_default_music_library();
+            return G_SOURCE_REMOVE;
+        },
+        this, nullptr);
 }
 
 void Application::on_startup() {
     // Create and initialize theme manager
     theme_manager_ = std::make_unique<ThemeManager>();
+#ifdef LOLLYPOP_DATA_DIR
+    theme_manager_->load_stylesheet(std::string(LOLLYPOP_DATA_DIR) + "/style.css");
+#else
     theme_manager_->load_stylesheet("resources/style.css");
+#endif
 
     // Apply development default accent color
     auto accent_r = 0.65, accent_g = 0.45, accent_b = 1.0;

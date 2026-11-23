@@ -117,6 +117,8 @@ private:
     // Static callbacks for staggered animations
     static gboolean on_track_anim_timeout(gpointer data);
     static gboolean on_album_anim_timeout(gpointer data);
+    static void on_track_view_all_clicked(GtkButton* button, gpointer data);
+    static void on_album_view_all_clicked(GtkButton* button, gpointer data);
 
     void on_track_played(const Track& track);
     void on_track_liked(const Track& track, bool liked);

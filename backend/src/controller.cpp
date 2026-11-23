@@ -87,32 +87,32 @@ bool BackendController::initialize() {
     audio_engine_->set_volume(volume_);
     setup_audio_callbacks();
 
-    // --- Stage 3: MPRIS manager (external players) ---
-    mpris_manager_ = std::make_shared<MprisManager>();
-    if (!mpris_manager_->initialize()) {
-        std::cerr << "BackendController: MPRIS unavailable, continuing without it"
-                  << std::endl;
-        mpris_manager_.reset();
-    }
-    // Rebuild source manager now that both engines are known.
-    playback_source_manager_ = std::make_unique<PlaybackSourceManager>(
-        audio_engine_, mpris_manager_);
+    // --- Stage 2b: visualizer engine ---
+    visualizer_engine_ = std::make_unique<VisualizerEngine>();
+    visualizer_engine_->set_audio_engine(audio_engine_.get());
+    visualizer_engine_->set_band_count(64);
+    visualizer_engine_->set_enabled(true);
+    visualizer_engine_->start();
 
-    // Wire external MPRIS player callbacks if available.
-    if (mpris_manager_) {
-        setup_mpris_callbacks();
-    }
+    // Subscribe to spectrum events on EventBus (published by VisualizerEngine).
+    // The controller can re-publish or forward to its own visualization callbacks.
+    spectrum_subscription_id_ = EventBus::instance().subscribe("spectrum",
+        [this](const Event& event) {
+            if (auto* frame = std::get_if<SpectrumFrame>(&event.payload)) {
+                emit_visualization_changed(frame->magnitudes);
+            }
+        });
 
-    // --- Stage 4: library scanner ---
+    // --- Stage 3: library scanner ---
     library_scanner_ = std::make_unique<LibraryScanner>();
 
-    // --- Stage 5: file watcher ---
+    // --- Stage 4: file watcher ---
     file_watcher_ = std::make_unique<FileWatcher>();
     file_watcher_->set_event_callback([this](const FileEvent& event) {
         handle_file_event(event);
     });
 
-    // --- Stage 5b: LibraryManager (scan coordination + unique work queue) ---
+    // --- Stage 5: LibraryManager (scan coordination + unique work queue) ---
     library_manager_ = std::make_unique<LibraryManager>();
     if (!library_manager_->initialize(storage_.get(), library_scanner_.get())) {
         std::cerr << "BackendController: LibraryManager initialization failed"
@@ -134,7 +134,94 @@ bool BackendController::initialize() {
         });
     }
 
-    // --- Stage 6c: Cache manager (must come before LyricsManager) ---
+    // Apply queue modes. Deferred services below read these from the manager.
+    queue_manager_->set_shuffle(shuffle);
+    queue_manager_->set_repeat(repeat_one ? RepeatMode::Track :
+                                           (repeat ? RepeatMode::Playlist :
+                                                    RepeatMode::None));
+
+    // MPRIS, cache, lyrics, the MPRIS server, and queue restoration are not
+    // needed for the first frame. Schedule them after the main loop starts.
+    schedule_deferred_initialization();
+
+    std::cout << "BackendController: Initialized successfully" << std::endl;
+    return true;
+}
+
+void BackendController::schedule_deferred_initialization() {
+    cancel_deferred_initialization();
+    startup_alive_ = std::make_shared<bool>(true);
+    auto* context = new DeferredInitContext{this, startup_alive_};
+    startup_idle_context_ = context;
+    startup_idle_id_ = g_idle_add_full(
+        G_PRIORITY_LOW,
+        &BackendController::deferred_init_idle,
+        context,
+        &BackendController::deferred_init_destroy);
+}
+
+void BackendController::cancel_deferred_initialization() {
+    if (startup_alive_) *startup_alive_ = false;
+    if (startup_idle_id_ != 0) {
+        g_source_remove(startup_idle_id_);
+        startup_idle_id_ = 0;
+    }
+    // The destroy notify owns the context and clears startup_idle_context_.
+}
+
+void BackendController::deferred_init_destroy(gpointer data) {
+    auto* context = static_cast<DeferredInitContext*>(data);
+    if (!context) return;
+    if (context->self) {
+        context->self->startup_idle_id_ = 0;
+        if (context->self->startup_idle_context_ == context) {
+            context->self->startup_idle_context_ = nullptr;
+        }
+    }
+    delete context;
+}
+
+gboolean BackendController::deferred_init_idle(gpointer data) {
+    auto* context = static_cast<DeferredInitContext*>(data);
+    if (!context || !context->self || !context->alive || !*context->alive) {
+        return G_SOURCE_REMOVE;
+    }
+    context->self->initialize_deferred_services();
+    return G_SOURCE_REMOVE;
+}
+
+gboolean BackendController::seek_debounce_timeout(gpointer data) {
+    auto* self = static_cast<BackendController*>(data);
+    if (!self) return G_SOURCE_REMOVE;
+
+    double seek_pos = self->pending_seek_position_;
+
+    self->seek_debounce_timer_id_ = 0;
+    self->seek_pending_ = false;
+
+    // Commit the seek. The position_ was already updated immediately for
+    // UI responsiveness during scrubbing.
+    if (self->playback_source_manager_ && self->audio_engine_) {
+        self->playback_source_manager_->seek(seek_pos);
+    }
+    return G_SOURCE_REMOVE;
+}
+
+void BackendController::initialize_deferred_services() {
+    if (!storage_ || !audio_engine_) return;
+
+    // External MPRIS players and source routing.
+    mpris_manager_ = std::make_shared<MprisManager>();
+    if (!mpris_manager_->initialize()) {
+        std::cerr << "BackendController: MPRIS unavailable, continuing without it"
+                  << std::endl;
+        mpris_manager_.reset();
+    }
+    playback_source_manager_ = std::make_unique<PlaybackSourceManager>(
+        audio_engine_, mpris_manager_);
+    if (mpris_manager_) setup_mpris_callbacks();
+
+    // Cache and lyrics. Cache must exist before LyricsManager.
     cache_manager_ = std::make_unique<CacheManager>();
     if (!cache_manager_->initialize(
             "/tmp/lollypop-cpp-cache", 64ull * 1024 * 1024)) {
@@ -143,7 +230,6 @@ bool BackendController::initialize() {
         cache_manager_.reset();
     }
 
-    // --- Stage 5c: LyricsManager (retrieval, parse, sync) ---
     lyrics_manager_ = std::make_unique<LyricsManager>();
     if (!lyrics_manager_->initialize(
             storage_.get(), cache_manager_.get(),
@@ -153,7 +239,7 @@ bool BackendController::initialize() {
         lyrics_manager_.reset();
     }
 
-    // --- Stage 7: MPRIS server (Lollypop as an MPRIS player) ---
+    // Export Lollypop as an MPRIS player.
     mpris_server_ = std::make_unique<MprisServer>();
     if (!mpris_server_->initialize()) {
         std::cerr << "BackendController: MPRIS server unavailable" << std::endl;
@@ -161,62 +247,90 @@ bool BackendController::initialize() {
     } else {
         setup_mpris_server_callbacks();
         mpris_server_->update_volume(volume_);
-        mpris_server_->update_shuffle(shuffle);
-        mpris_server_->update_loop_state(repeat_one ? 2 : (repeat ? 1 : 0));
+        mpris_server_->update_shuffle(get_shuffle());
+        mpris_server_->update_loop_state(
+            get_repeat_one() ? 2 : (get_repeat() ? 1 : 0));
         sync_mpris_capabilities();
     }
 
-    // Apply queue modes.
-    queue_manager_->set_shuffle(shuffle);
-    queue_manager_->set_repeat(repeat_one ? RepeatMode::Track :
-                                           (repeat ? RepeatMode::Playlist :
-                                                    RepeatMode::None));
+    // CAVA visualizer for external/system audio capture (optional).
+    cava_visualizer_ = std::make_unique<CavaVisualizer>();
+    if (cava_visualizer_->start()) {
+        cava_visualizer_->set_points_callback([this](const std::vector<float>& points) {
+            emit_visualization_changed(points);
+        });
+    } else {
+        std::cerr << "BackendController: CAVA visualizer unavailable, using internal visualizer only"
+                  << std::endl;
+        cava_visualizer_.reset();
+    }
 
-    // Restore saved queue on startup.
+    restore_saved_queue();
+}
+
+void BackendController::restore_saved_queue() {
+    std::vector<std::string> valid_ids;
+    size_t restored_index = 0;
+
     {
         std::lock_guard<std::mutex> lock(storage_mutex_);
-        if (storage_) {
-            if (const auto saved_queue = storage_->get_preference("player.queue")) {
-                std::vector<std::string> ids;
-                std::string buf;
-                for (char c : *saved_queue) {
-                    if (c == '\n') {
-                        if (!buf.empty()) { ids.push_back(buf); buf.clear(); }
-                    } else {
-                        buf += c;
-                    }
-                }
-                if (!buf.empty()) ids.push_back(buf);
-                // Validate IDs exist in storage before adding
-                std::vector<std::string> valid_ids;
-                for (const auto& id : ids) {
-                    Track t = storage_->get_track(id);
-                    if (!t.id.empty()) valid_ids.push_back(id);
-                }
-                if (!valid_ids.empty()) {
-                    queue_manager_->set_queue(valid_ids, 0);
-                }
+        if (!storage_) return;
+
+        const auto saved_queue = storage_->get_preference("player.queue");
+        if (!saved_queue) return;
+
+        std::vector<std::string> ids;
+        std::string buf;
+        for (char c : *saved_queue) {
+            if (c == '\n') {
+                if (!buf.empty()) { ids.push_back(buf); buf.clear(); }
+            } else {
+                buf += c;
             }
-            if (const auto saved_index = storage_->get_preference("player.queue_index")) {
-                try {
-                    size_t idx = static_cast<size_t>(std::stoul(*saved_index));
-                    queue_manager_->set_current_index(idx);
-                } catch (...) {
-                    // Ignore corrupt preference values.
-                }
+        }
+        if (!buf.empty()) ids.push_back(buf);
+        if (ids.empty()) return;
+
+        size_t requested_index = 0;
+        if (const auto saved_index = storage_->get_preference("player.queue_index")) {
+            try {
+                requested_index = static_cast<size_t>(std::stoul(*saved_index));
+            } catch (...) {
+                // Ignore corrupt preference values.
             }
+        }
+
+        // One batched lookup instead of one query per saved track ID.
+        const auto tracks = storage_->get_tracks_by_ids(ids);
+        size_t matched = 0;
+        for (size_t i = 0; i < ids.size() && matched < tracks.size(); ++i) {
+            if (tracks[matched].id != ids[i]) continue;
+            if (i < requested_index) ++restored_index;
+            valid_ids.push_back(ids[i]);
+            ++matched;
         }
     }
 
-    std::cout << "BackendController: Initialized successfully" << std::endl;
-    return true;
+    if (valid_ids.empty()) return;
+    if (restored_index >= valid_ids.size()) {
+        restored_index = valid_ids.size() - 1;
+    }
+    queue_manager_->set_queue(valid_ids, restored_index);
+    emit_queue_changed();
 }
 
 void BackendController::shutdown() {
     std::cout << "BackendController: Shutting down..." << std::endl;
 
+    cancel_deferred_initialization();
     cancel_scan_library();
     if (scan_thread_.joinable()) scan_thread_.join();
+
+    // Cancel any pending seek debounce timer.
+    if (seek_debounce_timer_id_ != 0) {
+        g_source_remove(seek_debounce_timer_id_);
+        seek_debounce_timer_id_ = 0;
+    }
 
     // Stop playback first.
     if (visualizer_engine_) {
@@ -1011,13 +1125,39 @@ void BackendController::previous_track() {
 }
 
 void BackendController::seek(double position_seconds) {
-    position_ = std::clamp(position_seconds, 0.0, duration_);
-    playback_source_manager_->seek(position_);
+    // Check if the active source can seek; if not, clamp to current position
+    // and emit the update without issuing a real seek.
+    if (!playback_source_manager_->can_seek()) {
+        position_ = std::clamp(position_seconds, 0.0, duration_);
+        emit_position_changed(position_, duration_);
+        if (mpris_server_) {
+            mpris_server_->update_position(position_);
+            mpris_server_->notify_seeked(position_);
+        }
+        return;
+    }
+
+    // Debounce: store the pending seek and schedule a timer.
+    // 200ms debounce window (within the 150-250ms requirement).
+    pending_seek_position_ = std::clamp(position_seconds, 0.0, duration_);
+
+    // Increment generation so any in-flight seek responses are ignored.
+    uint64_t gen = ++seek_generation_;
+
+    // Immediately emit the position update for responsive UI scrubbing.
+    position_ = pending_seek_position_;
     emit_position_changed(position_, duration_);
     if (mpris_server_) {
         mpris_server_->update_position(position_);
         mpris_server_->notify_seeked(position_);
     }
+
+    // Schedule the actual seek commit.
+    if (seek_debounce_timer_id_ != 0) {
+        g_source_remove(seek_debounce_timer_id_);
+    }
+    seek_debounce_timer_id_ = g_timeout_add(200, &BackendController::seek_debounce_timeout, this);
+    (void)gen; // gen is captured by the timer callback via seek_generation_
 }
 
 void BackendController::set_volume(double volume) {

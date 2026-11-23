@@ -91,12 +91,6 @@ GtkWidget* HomePage::create_section(const std::string& title,
     gtk_widget_set_margin_end(view_all, 10);
     gtk_widget_set_margin_top(view_all, 10);
     gtk_widget_set_margin_bottom(view_all, 10);
-    if (view_all_cb) {
-        g_signal_connect(view_all, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
-            auto cb = static_cast<std::function<void()>*>(data);
-            if (cb && *cb) (*cb)();
-        }), new std::function<void()>(view_all_cb));
-    }
     gtk_widget_set_visible(view_all, TRUE);
     gtk_box_append(GTK_BOX(header), view_all);
 
@@ -121,6 +115,11 @@ GtkWidget* HomePage::create_section(const std::string& title,
 
     GtkWidget* result = section;
     sections_data_.push_back(std::move(data));
+    // Read the callback from the stable SectionData at click time so that
+    // set_*_callback() updates take effect without rebuilding the page.
+    g_signal_connect(view_all, "clicked",
+                     G_CALLBACK(on_track_view_all_clicked),
+                     sections_data_.back().get());
 
     // Safe append - check if widget already has a parent
     if (gtk_widget_get_parent(list_box) == nullptr) {
@@ -162,12 +161,6 @@ GtkWidget* HomePage::create_album_section(const std::string& title,
     gtk_widget_set_margin_end(view_all, 10);
     gtk_widget_set_margin_top(view_all, 10);
     gtk_widget_set_margin_bottom(view_all, 10);
-    if (view_all_cb) {
-        g_signal_connect(view_all, "clicked", G_CALLBACK(+[](GtkButton*, gpointer data) {
-            auto cb = static_cast<std::function<void()>*>(data);
-            if (cb && *cb) (*cb)();
-        }), new std::function<void()>(view_all_cb));
-    }
     gtk_widget_set_visible(view_all, TRUE);
     gtk_box_append(GTK_BOX(header), view_all);
 
@@ -194,6 +187,9 @@ GtkWidget* HomePage::create_album_section(const std::string& title,
     data->view_all_cb = std::move(view_all_cb);
 
     album_sections_data_.push_back(std::move(data));
+    g_signal_connect(view_all, "clicked",
+                     G_CALLBACK(on_album_view_all_clicked),
+                     album_sections_data_.back().get());
 
     // Safe append - check if widget already has a parent
     if (gtk_widget_get_parent(grid) == nullptr) {
@@ -224,6 +220,16 @@ gboolean HomePage::on_track_anim_timeout(gpointer data) {
     SpringAnimation::animate_to(d->widget, "opacity", 1.0);
     SpringAnimation::animate_to(d->widget, "margin-top", 0);
     return G_SOURCE_REMOVE;
+}
+
+void HomePage::on_track_view_all_clicked(GtkButton* /*button*/, gpointer data) {
+    auto* section = static_cast<SectionData*>(data);
+    if (section && section->view_all_cb) section->view_all_cb();
+}
+
+void HomePage::on_album_view_all_clicked(GtkButton* /*button*/, gpointer data) {
+    auto* section = static_cast<AlbumSectionData*>(data);
+    if (section && section->view_all_cb) section->view_all_cb();
 }
 
 void HomePage::refresh_track_section(SectionData* data) {
@@ -384,7 +390,6 @@ void HomePage::set_recently_added_callback(std::function<void()> cb) {
         sections_data_[0]->view_all_cb = std::move(cb);
     }
 }
-
 void HomePage::set_recently_played_callback(std::function<void()> cb) {
     if (sections_data_.size() > 1) {
         sections_data_[1]->view_all_cb = std::move(cb);

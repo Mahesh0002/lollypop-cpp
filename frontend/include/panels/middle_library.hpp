@@ -68,10 +68,20 @@ private:
     // Search
     guint search_timeout_id_ = 0;
     uint64_t search_generation_ = 0;
-    GWeakRef self_weak_ref_; // For timeout callback lifetime safety
+    std::string search_return_page_;
+    gulong search_changed_handler_id_ = 0;
+    // Lifetime token for timeout callbacks. Plain C++ objects are not
+    // GObjects, so GWeakRef must never be used on `this`.
+    std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
 
-    // Navigation history
-    std::vector<std::string> history_;
+    // Navigation history. Each entry carries the page parameters and scroll
+    // offset so Back/Forward restores real state, not just a page id.
+    struct HistoryEntry {
+        std::string page_id;
+        std::string param;
+        double scroll_offset = 0.0;
+    };
+    std::vector<HistoryEntry> history_;
     size_t history_index_ = 0;
 
     PageChangeCallback page_change_cb_;
@@ -80,9 +90,18 @@ private:
     void create_glass_toolbar();
     void create_content_area();
     void create_placeholder_pages();
+    void ensure_page(const std::string& page_id);
+    void ensure_search_page();
     void update_toolbar_state();
-    void navigate_to_page(const std::string& page_id, bool add_to_history);
+    void navigate_to_page(const std::string& page_id, bool add_to_history,
+                          const std::string& param = std::string());
+    void apply_history_entry(const HistoryEntry& entry, bool restore_scroll);
+    void sync_search_entry(const std::string& page_id);
+    void schedule_scroll(double offset);
+    double current_scroll() const;
 
+    static gboolean on_scroll_restore_idle(gpointer data);
+    static gboolean on_search_timeout(gpointer data);
     static void on_scroll_changed(GtkAdjustment* adjustment, gpointer user_data);
     static void on_search_changed(GtkEditable* editable, gpointer user_data);
     static void on_back_clicked(GtkButton*, gpointer user_data);

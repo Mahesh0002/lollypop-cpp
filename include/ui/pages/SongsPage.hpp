@@ -53,6 +53,9 @@ private:
     std::string sort_column_ = "title";
     bool sort_ascending_ = true;
     std::string genre_filter_;
+    GtkWidget* genre_dropdown_ = nullptr;
+    guint genre_handler_id_ = 0;
+    bool updating_genre_dropdown_ = false;
     uint64_t generation_ = 0;
     bool loading_ = false;
     size_t loaded_count_ = 0;

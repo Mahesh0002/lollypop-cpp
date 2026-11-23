@@ -22,6 +22,8 @@
 #include <optional>
 #include <cstddef>
 
+#include <glib.h>
+
 #include "types.hpp"
 
 #include "services/IPlayerService.hpp"
@@ -269,6 +271,17 @@ private:
 
     // EventBus subscription ID for spectrum events (unsubscribed on shutdown).
     uint64_t spectrum_subscription_id_ = 0;
+
+    // Non-essential startup work is scheduled on the GLib main loop so the
+    // first window frame is not blocked by D-Bus, cache, or queue validation.
+    struct DeferredInitContext {
+        BackendController* self = nullptr;
+        std::shared_ptr<bool> alive;
+    };
+    unsigned int startup_idle_id_ = 0;
+    DeferredInitContext* startup_idle_context_ = nullptr;
+    std::shared_ptr<bool> startup_alive_;
+
     std::unique_ptr<QueueManager> queue_manager_;
     std::unique_ptr<PlaybackSourceManager> playback_source_manager_;
 
@@ -332,7 +345,22 @@ private:
     double position_ = 0.0;
     double duration_ = 0.0;
 
+    // Seek debounce and generation tracking.
+    std::atomic<uint64_t> seek_generation_{0};
+    guint seek_debounce_timer_id_ = 0;
+    double pending_seek_position_ = 0.0;
+    bool seek_pending_ = false;
+
+    static gboolean seek_debounce_timeout(gpointer data);
+
     void set_playing(bool playing);
+
+    void schedule_deferred_initialization();
+    void cancel_deferred_initialization();
+    void initialize_deferred_services();
+    void restore_saved_queue();
+    static gboolean deferred_init_idle(gpointer data);
+    static void deferred_init_destroy(gpointer data);
 
     void setup_audio_callbacks();
     void setup_mpris_callbacks();

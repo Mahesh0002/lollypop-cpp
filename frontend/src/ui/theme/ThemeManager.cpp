@@ -16,6 +16,27 @@ ThemeManager::ThemeManager() {
     accent_css_provider_.reset(gtk_css_provider_new());
     g_object_ref_sink(accent_css_provider_.get());
 
+    // GTK 4 no longer returns a GError from the load functions; parse errors
+    // arrive on this signal instead.
+    auto log_parse_error = +[](GtkCssProvider*, GtkCssSection* section,
+                               GError* error, gpointer) {
+        std::cerr << "[ThemeManager] CSS parse error";
+        if (section) {
+            const GtkCssLocation* location =
+                gtk_css_section_get_start_location(section);
+            if (location) {
+                std::cerr << " at line " << location->lines + 1
+                          << ", column " << location->line_chars + 1;
+            }
+        }
+        if (error) std::cerr << ": " << error->message;
+        std::cerr << std::endl;
+    };
+    g_signal_connect(base_css_provider_.get(), "parsing-error",
+                     G_CALLBACK(log_parse_error), nullptr);
+    g_signal_connect(accent_css_provider_.get(), "parsing-error",
+                     G_CALLBACK(log_parse_error), nullptr);
+
     // Initialize font scale from GTK settings
     GtkSettings* settings = gtk_settings_get_default();
     font_scale_ = 1.0;
@@ -36,7 +57,27 @@ ThemeManager::~ThemeManager() {
 void ThemeManager::load_stylesheet(const std::string& css_path) {
     // Load the base stylesheet once into the base provider. This provider
     // is never replaced — only the accent provider is updated dynamically.
-    gtk_css_provider_load_from_path(base_css_provider_.get(), css_path.c_str());
+    constexpr const char* kResourcePath = "/com/mahesh/lollypop/style.css";
+
+    if (!css_path.empty() && g_file_test(css_path.c_str(), G_FILE_TEST_EXISTS)) {
+        gtk_css_provider_load_from_path(base_css_provider_.get(),
+                                        css_path.c_str());
+    } else {
+        GError* error = nullptr;
+        GBytes* data = g_resources_lookup_data(
+            kResourcePath, G_RESOURCE_LOOKUP_FLAGS_NONE, &error);
+        if (data) {
+            g_bytes_unref(data);
+            gtk_css_provider_load_from_resource(base_css_provider_.get(),
+                                                kResourcePath);
+        } else {
+            std::cerr << "[ThemeManager] Failed to load stylesheet";
+            if (!css_path.empty()) std::cerr << " from " << css_path;
+            if (error) std::cerr << ": " << error->message;
+            std::cerr << std::endl;
+            g_clear_error(&error);
+        }
+    }
 
     // Attach both providers to the default display. Base first, then accent
     // (accent has higher priority so its :root variables override).
@@ -84,7 +125,7 @@ void ThemeManager::set_font_scale(double scale) {
 
 void ThemeManager::on_gtk_font_scale_changed(GtkSettings* settings, GParamSpec* pspec, gpointer user_data) {
     (void)pspec;
-    auto* self = static_cast<ThemeManager*>(user_data);
+    (void)user_data;
     // GTK font name changed - in GTK 4, we can query the property
     // For now, we just note the change and could parse the font size
     // For now, we just trigger a refresh
@@ -99,7 +140,7 @@ void ThemeManager::update_css_font_scale() {
         "}\n",
         font_scale_);
 
-    gtk_css_provider_load_from_data(accent_css_provider_.get(), css, -1);
+    gtk_css_provider_load_from_string(accent_css_provider_.get(), css);
     g_free(css);
 }
 
@@ -116,7 +157,7 @@ void ThemeManager::update_css_accent() {
         static_cast<int>(accent_r_ * 255), static_cast<int>(accent_g_ * 255),
         static_cast<int>(accent_b_ * 255), accent_a_ * 0.15);
 
-    gtk_css_provider_load_from_data(accent_css_provider_.get(), css, -1);
+    gtk_css_provider_load_from_string(accent_css_provider_.get(), css);
     g_free(css);
 }
 

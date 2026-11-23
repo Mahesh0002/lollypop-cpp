@@ -52,7 +52,9 @@ bool PlaybackSourceManager::can_control() const {
 }
 
 bool PlaybackSourceManager::can_seek() const {
-    if (impl_->current_source == PlaybackSource::Internal) return true;
+    if (impl_->current_source == PlaybackSource::Internal) {
+        return impl_->audio_engine && impl_->audio_engine->can_seek();
+    }
     return impl_->mpris_manager && impl_->mpris_manager->can_seek();
 }
 

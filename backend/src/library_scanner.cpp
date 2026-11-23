@@ -223,6 +223,22 @@ struct LibraryScanner::Impl {
     ErrorCallback error_cb;
     std::atomic<bool> cancelled{false};
 
+    using ProgressClock = std::chrono::steady_clock;
+    static constexpr auto kProgressInterval = std::chrono::milliseconds(100);
+    ProgressClock::time_point last_progress_emit_{};
+
+    void reset_progress_state() {
+        last_progress_emit_ = ProgressClock::time_point{};
+    }
+
+    void emit_progress(bool force = false) {
+        if (!progress_cb) return;
+        const auto now = ProgressClock::now();
+        if (!force && now - last_progress_emit_ < kProgressInterval) return;
+        last_progress_emit_ = now;
+        progress_cb(progress);
+    }
+
     void scan_recursive(const std::filesystem::path& path) {
         if (cancelled.load()) return;
         try {
@@ -254,15 +270,16 @@ struct LibraryScanner::Impl {
 
                 progress.files_found++;
                 progress.current_file = file_path.string();
-                if (progress_cb) progress_cb(progress);
+                emit_progress();
 
                 process_file_safe(file_path.string());
                 progress.files_processed++;
-                if (progress_cb) progress_cb(progress);
+                emit_progress();
             }
         } catch (const std::filesystem::filesystem_error& e) {
             std::cerr << "LibraryScanner: filesystem error: " << e.what() << std::endl;
         }
+        emit_progress(true);
     }
 
     void process_file_safe(const std::string& file_path) {
@@ -423,6 +440,7 @@ LibraryScanner::~LibraryScanner() = default;
 void LibraryScanner::scan_directory(const std::string& path, bool recursive) {
     impl_->progress = ScanProgress{};
     impl_->cancelled = false;
+    impl_->reset_progress_state();
     if (recursive) {
         impl_->scan_recursive(path);
     } else {
@@ -443,16 +461,19 @@ void LibraryScanner::scan_directory(const std::string& path, bool recursive) {
             if (!is_audio_file(ext)) continue;
             impl_->progress.files_found++;
             impl_->progress.current_file = it->path().string();
-            if (impl_->progress_cb) impl_->progress_cb(impl_->progress);
+            impl_->emit_progress();
             impl_->process_file_safe(it->path().string());
             impl_->progress.files_processed++;
-            if (impl_->progress_cb) impl_->progress_cb(impl_->progress);
+            impl_->emit_progress();
         }
+        impl_->emit_progress(true);
     }
 }
 
 void LibraryScanner::scan_file(const std::string& path) {
+    impl_->progress = ScanProgress{};
     impl_->cancelled = false;
+    impl_->reset_progress_state();
     std::error_code ec;
     if (!std::filesystem::is_regular_file(path, ec)) {
         if (impl_->error_cb) impl_->error_cb(path, "Not a regular file");
@@ -465,10 +486,10 @@ void LibraryScanner::scan_file(const std::string& path) {
     }
     impl_->progress.files_found++;
     impl_->progress.current_file = path;
-    if (impl_->progress_cb) impl_->progress_cb(impl_->progress);
+    impl_->emit_progress();
     impl_->process_file_safe(path);
     impl_->progress.files_processed++;
-    if (impl_->progress_cb) impl_->progress_cb(impl_->progress);
+    impl_->emit_progress(true);
 }
 
 void LibraryScanner::cancel() {

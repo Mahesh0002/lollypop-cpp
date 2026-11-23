@@ -66,3 +66,20 @@ target_link_libraries(test_queue_manager PRIVATE
 )
 
 add_test(NAME queue_manager_tests COMMAND test_queue_manager)
+
+# Seek tests
+add_executable(test_seek
+    test_seek.cpp
+)
+
+target_link_libraries(test_seek PRIVATE
+    lollypop-backend
+    lollypop-storage
+    ${SQLITE3_LIBRARIES}
+    ${GLIB_LIBRARIES}
+    ${GIO_LIBRARIES}
+    GTest::gtest
+    GTest::gtest_main
+)
+
+add_test(NAME seek_tests COMMAND test_seek)

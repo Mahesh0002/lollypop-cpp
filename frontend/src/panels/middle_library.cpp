@@ -28,6 +28,23 @@
 
 namespace lollypop {
 
+namespace {
+struct ScrollPayload {
+    MiddleLibrary* self;
+    std::shared_ptr<bool> alive;
+    double offset;
+};
+
+struct SearchTimeoutPayload {
+    MiddleLibrary* self;
+    std::shared_ptr<bool> alive;
+};
+
+void free_search_timeout(gpointer data) {
+    delete static_cast<SearchTimeoutPayload*>(data);
+}
+} // namespace
+
 // Placeholder page implementation (for pages not yet implemented)
 class PlaceholderPage : public LibraryPage {
 public:
@@ -87,12 +104,12 @@ MiddleLibrary::MiddleLibrary(MainWindow* main_window,
 }
 
 MiddleLibrary::~MiddleLibrary() {
-    // Remove search timeout if pending
+    // Invalidate any pending callbacks before tearing down widgets.
+    if (alive_) *alive_ = false;
     if (search_timeout_id_) {
         g_source_remove(search_timeout_id_);
         search_timeout_id_ = 0;
     }
-    g_weak_ref_clear(&self_weak_ref_);
 }
 
 void MiddleLibrary::setup_ui() {
@@ -173,14 +190,20 @@ void MiddleLibrary::connect_scroll_handling() {
 void MiddleLibrary::on_scroll_changed(GtkAdjustment* adjustment,
                                       gpointer user_data) {
     auto* self = static_cast<MiddleLibrary*>(user_data);
-    if (!self || self->active_page_id_ != "songs") return;
+    if (!self) return;
 
-    auto it = self->pages_.find("songs");
-    if (it == self->pages_.end()) return;
-
-    auto* songs = dynamic_cast<SongsPage*>(it->second.get());
-    if (songs) {
-        songs->handle_scroll(adjustment);
+    if (self->active_page_id_ == "songs") {
+        auto it = self->pages_.find("songs");
+        if (it == self->pages_.end()) return;
+        if (auto* songs = dynamic_cast<SongsPage*>(it->second.get())) {
+            songs->handle_scroll(adjustment);
+        }
+    } else if (self->active_page_id_ == "search") {
+        auto it = self->pages_.find("search");
+        if (it == self->pages_.end()) return;
+        if (auto* search = dynamic_cast<SearchResultsPage*>(it->second.get())) {
+            search->handle_scroll(adjustment);
+        }
     }
 }
 
@@ -237,106 +260,24 @@ void MiddleLibrary::create_glass_toolbar() {
     gtk_entry_set_placeholder_text(GTK_ENTRY(search_entry_), "Search your library");
     gtk_entry_set_icon_from_icon_name(GTK_ENTRY(search_entry_), GTK_ENTRY_ICON_PRIMARY, "system-search-symbolic");
     gtk_widget_set_visible(search_entry_, TRUE);
-    g_signal_connect(search_entry_, "changed", G_CALLBACK(on_search_changed), this);
+    search_changed_handler_id_ =
+        g_signal_connect(search_entry_, "changed", G_CALLBACK(on_search_changed), this);
     gtk_box_append(GTK_BOX(glass_toolbar_), search_entry_);
 
-    // Menu button (density, view options, etc.)
-    menu_button_ = gtk_menu_button_new();
-    gtk_widget_add_css_class(menu_button_, "middle-toolbar-button");
-    GtkWidget* menu_icon = gtk_image_new_from_icon_name("view-more-symbolic");
-    gtk_image_set_pixel_size(GTK_IMAGE(menu_icon), 20);
-    gtk_menu_button_set_child(GTK_MENU_BUTTON(menu_button_), menu_icon);
-    gtk_widget_set_visible(menu_button_, TRUE);
-
-    GtkWidget* popover = gtk_popover_new();
-    GtkWidget* popover_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
-    gtk_widget_set_margin_top(popover_box, 8);
-    gtk_widget_set_margin_bottom(popover_box, 8);
-    gtk_widget_set_margin_start(popover_box, 8);
-    gtk_widget_set_margin_end(popover_box, 8);
-    gtk_widget_set_visible(popover_box, TRUE);
-
-    const char* menu_items[] = {"View Options", "Sort By", "Group By", "Settings"};
-    for (const char* item : menu_items) {
-        GtkWidget* btn = gtk_button_new_with_label(item);
-        gtk_button_set_has_frame(GTK_BUTTON(btn), FALSE);
-        gtk_widget_set_halign(btn, GTK_ALIGN_START);
-        gtk_widget_set_hexpand(btn, TRUE);
-        gtk_widget_set_margin_start(btn, 10);
-        gtk_widget_set_margin_end(btn, 10);
-        gtk_widget_set_margin_top(btn, 10);
-        gtk_widget_set_margin_bottom(btn, 10);
-        gtk_widget_set_visible(btn, TRUE);
-        gtk_box_append(GTK_BOX(popover_box), btn);
-    }
-    gtk_popover_set_child(GTK_POPOVER(popover), popover_box);
-    gtk_menu_button_set_popover(GTK_MENU_BUTTON(menu_button_), popover);
-
-    gtk_box_append(GTK_BOX(glass_toolbar_), menu_button_);
+    // The previous "View Options / Sort By / Group By / Settings" popover had
+    // no handlers attached; dead controls were removed rather than left to
+    // mislead the user.
 }
 
 void MiddleLibrary::create_placeholder_pages() {
-    // Home page (real page with library data)
+    // Only the Home page is built eagerly. Every other page is constructed on
+    // first navigation, which keeps the first frame cheap even for large
+    // libraries. All pages share the middle panel's single scroller.
     auto hp = std::make_unique<HomePage>(main_window_, library_service_);
     GtkWidget* hw = hp->get_widget();
     safe_stack_add_named(GTK_STACK(stack_), hw, "home");
     pages_["home"] = std::move(hp);
 
-    // Albums (real grid page)
-    auto albums = std::make_unique<AlbumsPage>(main_window_, library_service_);
-    GtkWidget* aw = albums->get_widget();
-    safe_stack_add_named(GTK_STACK(stack_), aw, "albums");
-    pages_["albums"] = std::move(albums);
-
-    // Artists (real grid page)
-    auto artists = std::make_unique<ArtistsPage>(main_window_, library_service_);
-    GtkWidget* arw = artists->get_widget();
-    safe_stack_add_named(GTK_STACK(stack_), arw, "artists");
-    pages_["artists"] = std::move(artists);
-
-    // Playlists (real grid page)
-    auto playlists = std::make_unique<PlaylistsPage>(main_window_, library_service_);
-    GtkWidget* pw = playlists->get_widget();
-    safe_stack_add_named(GTK_STACK(stack_), pw, "playlists");
-    pages_["playlists"] = std::move(playlists);
-
-    // Genres (real list page)
-    auto genres = std::make_unique<GenresPage>(main_window_, library_service_);
-    GtkWidget* gw = genres->get_widget();
-    safe_stack_add_named(GTK_STACK(stack_), gw, "genres");
-    pages_["genres"] = std::move(genres);
-
-    // Songs (GtkColumnView page)
-    auto songs = std::make_unique<SongsPage>(main_window_, library_service_);
-    GtkWidget* sw = songs->get_widget();
-    safe_stack_add_named(GTK_STACK(stack_), sw, "songs");
-    pages_["songs"] = std::move(songs);
-
-    // Favourite Albums (real grid page)
-    auto fav = std::make_unique<FavouriteAlbumsPage>(main_window_, library_service_);
-    GtkWidget* fw = fav->get_widget();
-    safe_stack_add_named(GTK_STACK(stack_), fw, "favorites");
-    pages_["favorites"] = std::move(fav);
-
-    // Liked Music (real list page)
-    auto liked = std::make_unique<LikedMusicPage>(main_window_, library_service_);
-    GtkWidget* lw = liked->get_widget();
-    safe_stack_add_named(GTK_STACK(stack_), lw, "liked");
-    pages_["liked"] = std::move(liked);
-
-    // Album details (detail page)
-    auto album_detail = std::make_unique<AlbumDetailPage>(main_window_, library_service_);
-    GtkWidget* adw = album_detail->get_widget();
-    safe_stack_add_named(GTK_STACK(stack_), adw, "album_detail");
-    pages_["album_detail"] = std::move(album_detail);
-
-    // Artist details (detail page)
-    auto artist_detail = std::make_unique<ArtistDetailPage>(main_window_, library_service_);
-    GtkWidget* ardw = artist_detail->get_widget();
-    safe_stack_add_named(GTK_STACK(stack_), ardw, "artist_detail");
-    pages_["artist_detail"] = std::move(artist_detail);
-
-    // Set up HomePage navigation callbacks now that all pages exist
     if (auto it = pages_.find("home"); it != pages_.end()) {
         if (auto* home = dynamic_cast<HomePage*>(it->second.get())) {
             home->set_recently_added_callback([this]() { navigate_to_page("songs", true); });
@@ -345,8 +286,52 @@ void MiddleLibrary::create_placeholder_pages() {
         }
     }
 
-    // Show home page by default
     navigate_to_page("home", false);
+}
+
+void MiddleLibrary::ensure_page(const std::string& page_id) {
+    if (page_id == "search") {
+        ensure_search_page();
+        return;
+    }
+    if (pages_.find(page_id) != pages_.end()) return;
+
+    std::unique_ptr<LibraryPage> page;
+    if (page_id == "albums") {
+        page = std::make_unique<AlbumsPage>(main_window_, library_service_);
+    } else if (page_id == "artists") {
+        page = std::make_unique<ArtistsPage>(main_window_, library_service_);
+    } else if (page_id == "playlists") {
+        page = std::make_unique<PlaylistsPage>(main_window_, library_service_);
+    } else if (page_id == "genres") {
+        page = std::make_unique<GenresPage>(main_window_, library_service_);
+    } else if (page_id == "songs") {
+        page = std::make_unique<SongsPage>(main_window_, library_service_);
+    } else if (page_id == "favorites") {
+        page = std::make_unique<FavouriteAlbumsPage>(main_window_, library_service_);
+    } else if (page_id == "liked") {
+        page = std::make_unique<LikedMusicPage>(main_window_, library_service_);
+    } else if (page_id == "album_detail") {
+        page = std::make_unique<AlbumDetailPage>(main_window_, library_service_);
+    } else if (page_id == "artist_detail") {
+        page = std::make_unique<ArtistDetailPage>(main_window_, library_service_);
+    }
+
+    if (!page) return;
+
+    GtkWidget* widget = page->get_widget();
+    safe_stack_add_named(GTK_STACK(stack_), widget, page_id.c_str());
+    page->refresh();
+    pages_[page_id] = std::move(page);
+}
+
+void MiddleLibrary::ensure_search_page() {
+    if (pages_.find("search") != pages_.end()) return;
+
+    auto search_page = std::make_unique<SearchResultsPage>(main_window_, library_service_);
+    GtkWidget* sw = search_page->get_widget();
+    safe_stack_add_named(GTK_STACK(stack_), sw, "search");
+    pages_["search"] = std::move(search_page);
 }
 
 void MiddleLibrary::register_page(std::unique_ptr<LibraryPage> page) {
@@ -356,30 +341,122 @@ void MiddleLibrary::register_page(std::unique_ptr<LibraryPage> page) {
     pages_[page_id] = std::move(page);
 }
 
-void MiddleLibrary::navigate_to_page(const std::string& page_id, bool add_to_history) {
+void MiddleLibrary::navigate_to_page(const std::string& page_id,
+                                     bool add_to_history,
+                                     const std::string& param) {
+    ensure_page(page_id);
     if (pages_.find(page_id) == pages_.end()) return;
 
-    // Don't add to history if already on that page (prevents duplicates from HomePage "View All")
+    // Capture where the user actually was before leaving the current page.
+    if (add_to_history && !active_page_id_.empty() && active_page_id_ != page_id &&
+        !history_.empty() && history_index_ < history_.size()) {
+        history_[history_index_].scroll_offset = current_scroll();
+    }
+
     if (add_to_history && active_page_id_ != page_id) {
-        // Truncate forward history
+        // Truncate forward history and record the full entry (page, params,
+        // scroll offset). The current scroll is captured as zero here; it is
+        // saved before Back/Forward moves away from a page.
         history_.resize(history_index_ + 1);
-        history_.push_back(page_id);
+        history_.push_back(HistoryEntry{page_id, param, 0.0});
         history_index_ = history_.size() - 1;
     } else if (!add_to_history) {
-        // Initial navigation or programmatic - reset history
         history_.clear();
-        history_.push_back(page_id);
+        history_.push_back(HistoryEntry{page_id, param, 0.0});
         history_index_ = 0;
+    } else {
+        // Same page, different params (e.g. search query changed, another
+        // album opened). Update the current entry instead of stacking.
+        if (!history_.empty()) history_[history_index_].param = param;
     }
 
     active_page_id_ = page_id;
     gtk_stack_set_visible_child_name(GTK_STACK(stack_), page_id.c_str());
+    sync_search_entry(page_id);
     update_toolbar_state();
 
-    // Notify sidebar of page change
-    if (page_change_cb_) {
-        page_change_cb_(page_id);
+    if (page_change_cb_) page_change_cb_(page_id);
+
+    // Top-level navigation starts at the top; history restores its own
+    // offset through apply_history_entry().
+    schedule_scroll(0.0);
+}
+
+void MiddleLibrary::sync_search_entry(const std::string& page_id) {
+    if (!search_entry_ || !search_changed_handler_id_) return;
+
+    std::string desired;
+    if (page_id == "search" && history_index_ < history_.size()) {
+        desired = history_[history_index_].param;
     }
+    if (desired == gtk_editable_get_text(GTK_EDITABLE(search_entry_))) return;
+
+    g_signal_handler_block(search_entry_, search_changed_handler_id_);
+    gtk_editable_set_text(GTK_EDITABLE(search_entry_), desired.c_str());
+    g_signal_handler_unblock(search_entry_, search_changed_handler_id_);
+}
+
+double MiddleLibrary::current_scroll() const {
+    if (!scrolled_window_) return 0.0;
+    GtkAdjustment* adjustment = gtk_scrolled_window_get_vadjustment(
+        GTK_SCROLLED_WINDOW(scrolled_window_));
+    return adjustment ? gtk_adjustment_get_value(adjustment) : 0.0;
+}
+
+gboolean MiddleLibrary::on_scroll_restore_idle(gpointer data) {
+    auto* payload = static_cast<ScrollPayload*>(data);
+    if (payload->alive && *payload->alive && payload->self &&
+        payload->self->scrolled_window_) {
+        GtkAdjustment* adjustment = gtk_scrolled_window_get_vadjustment(
+            GTK_SCROLLED_WINDOW(payload->self->scrolled_window_));
+        if (adjustment) {
+            gtk_adjustment_set_value(adjustment, payload->offset);
+        }
+    }
+    delete payload;
+    return G_SOURCE_REMOVE;
+}
+
+void MiddleLibrary::schedule_scroll(double offset) {
+    auto* payload = new ScrollPayload{this, alive_, offset};
+    g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, on_scroll_restore_idle, payload,
+                    nullptr);
+}
+
+void MiddleLibrary::apply_history_entry(const HistoryEntry& entry,
+                                         bool restore_scroll) {
+    ensure_page(entry.page_id);
+    auto it = pages_.find(entry.page_id);
+    if (it == pages_.end()) return;
+
+    if (entry.page_id == "album_detail") {
+        if (auto* detail = dynamic_cast<AlbumDetailPage*>(it->second.get())) {
+            detail->set_album(entry.param);
+        }
+    } else if (entry.page_id == "artist_detail") {
+        if (auto* detail = dynamic_cast<ArtistDetailPage*>(it->second.get())) {
+            detail->set_artist(entry.param);
+        }
+    } else if (entry.page_id == "songs") {
+        if (auto* songs = dynamic_cast<SongsPage*>(it->second.get())) {
+            songs->set_genre_filter(entry.param);
+        }
+    } else if (entry.page_id == "search") {
+        if (auto* search = dynamic_cast<SearchResultsPage*>(it->second.get())) {
+            if (!entry.param.empty()) {
+                search->search(entry.param, ++search_generation_);
+            }
+        }
+    }
+
+    active_page_id_ = entry.page_id;
+    gtk_stack_set_visible_child_name(GTK_STACK(stack_), entry.page_id.c_str());
+    sync_search_entry(entry.page_id);
+    update_toolbar_state();
+
+    if (page_change_cb_) page_change_cb_(entry.page_id);
+
+    schedule_scroll(restore_scroll ? entry.scroll_offset : 0.0);
 }
 
 void MiddleLibrary::set_active_page(const std::string& page_id) {
@@ -438,127 +515,108 @@ void MiddleLibrary::refresh_active_page() {
 }
 
 void MiddleLibrary::open_album_detail(const std::string& album_id) {
+    ensure_page("album_detail");
     if (auto it = pages_.find("album_detail"); it != pages_.end()) {
         if (auto* detail = dynamic_cast<AlbumDetailPage*>(it->second.get())) {
             detail->set_album(album_id);
-            navigate_to_page("album_detail", true);
         }
     }
+    navigate_to_page("album_detail", true, album_id);
 }
 
 void MiddleLibrary::open_artist_detail(const std::string& artist_id) {
+    ensure_page("artist_detail");
     if (auto it = pages_.find("artist_detail"); it != pages_.end()) {
         if (auto* detail = dynamic_cast<ArtistDetailPage*>(it->second.get())) {
             detail->set_artist(artist_id);
-            navigate_to_page("artist_detail", true);
         }
     }
+    navigate_to_page("artist_detail", true, artist_id);
 }
 
 void MiddleLibrary::show_genre(const std::string& genre) {
+    ensure_page("songs");
     if (auto it = pages_.find("songs"); it != pages_.end()) {
         if (auto* songs = dynamic_cast<SongsPage*>(it->second.get())) {
             songs->set_genre_filter(genre);
         }
     }
-    navigate_to_page("songs", true);
+    navigate_to_page("songs", true, genre);
 }
 
 void MiddleLibrary::on_back_clicked(GtkButton*, gpointer user_data) {
     auto* self = static_cast<MiddleLibrary*>(user_data);
-    if (self->history_index_ > 0) {
-        self->history_index_--;
-        self->active_page_id_ = self->history_[self->history_index_];
-        gtk_stack_set_visible_child_name(GTK_STACK(self->stack_), self->active_page_id_.c_str());
-        self->update_toolbar_state();
+    if (self->history_index_ == 0 || self->history_.empty()) return;
 
-        // Notify sidebar of page change
-        if (self->page_change_cb_) {
-            self->page_change_cb_(self->active_page_id_);
-        }
-    }
+    // Remember where the user was on the page being left.
+    self->history_[self->history_index_].scroll_offset = self->current_scroll();
+    self->history_index_--;
+    self->apply_history_entry(self->history_[self->history_index_], true);
 }
 
 void MiddleLibrary::on_forward_clicked(GtkButton*, gpointer user_data) {
     auto* self = static_cast<MiddleLibrary*>(user_data);
-    if (self->history_index_ + 1 < self->history_.size()) {
-        self->history_index_++;
-        self->active_page_id_ = self->history_[self->history_index_];
-        gtk_stack_set_visible_child_name(GTK_STACK(self->stack_), self->active_page_id_.c_str());
-        self->update_toolbar_state();
+    if (self->history_index_ + 1 >= self->history_.size()) return;
 
-        // Notify sidebar of page change
-        if (self->page_change_cb_) {
-            self->page_change_cb_(self->active_page_id_);
-        }
-    }
+    self->history_[self->history_index_].scroll_offset = self->current_scroll();
+    self->history_index_++;
+    self->apply_history_entry(self->history_[self->history_index_], true);
 }
 
-void MiddleLibrary::on_search_changed(GtkEditable* editable, gpointer user_data) {
-    auto* self = static_cast<MiddleLibrary*>(user_data);
-    const char* text = gtk_editable_get_text(editable);
-    std::string query(text);
+gboolean MiddleLibrary::on_search_timeout(gpointer data) {
+    auto* payload = static_cast<SearchTimeoutPayload*>(data);
+    if (!payload->alive || !*payload->alive || !payload->self) {
+        return G_SOURCE_REMOVE;
+    }
+    MiddleLibrary* self = payload->self;
+    self->search_timeout_id_ = 0;
+    uint64_t generation = ++self->search_generation_;
+    std::string query;
+    if (self->search_entry_) {
+        query = gtk_editable_get_text(GTK_EDITABLE(self->search_entry_));
+    }
+    self->perform_search(query, generation);
+    return G_SOURCE_REMOVE;
+}
 
-    // Cancel previous timeout
+void MiddleLibrary::on_search_changed(GtkEditable* /*editable*/, gpointer user_data) {
+    auto* self = static_cast<MiddleLibrary*>(user_data);
+    if (!self || !*self->alive_) return;
+
     if (self->search_timeout_id_) {
         g_source_remove(self->search_timeout_id_);
         self->search_timeout_id_ = 0;
     }
 
-    // Initialize weak ref if not already
-    if (!g_weak_ref_get(&self->self_weak_ref_)) {
-        g_weak_ref_init(&self->self_weak_ref_, self);
-    }
-
-    // Debounce: wait 250ms before searching
-    self->search_timeout_id_ = g_timeout_add(250, [](gpointer data) -> gboolean {
-        auto* self = static_cast<MiddleLibrary*>(g_weak_ref_get(&((MiddleLibrary*)data)->self_weak_ref_));
-        if (!self) return G_SOURCE_REMOVE;
-
-        self->search_timeout_id_ = 0;
-        uint64_t gen = ++self->search_generation_;
-        const char* query_text = gtk_editable_get_text(GTK_EDITABLE(self->search_entry_));
-        std::string query(query_text);
-        self->perform_search(query, gen);
-        return G_SOURCE_REMOVE;
-    }, self);
+    auto* payload = new SearchTimeoutPayload{self, self->alive_};
+    self->search_timeout_id_ = g_timeout_add_full(
+        G_PRIORITY_DEFAULT, 250, on_search_timeout, payload, free_search_timeout);
 }
 
 void MiddleLibrary::perform_search(const std::string& query, uint64_t generation) {
-    if (generation != search_generation_) return; // Stale request
+    if (generation != search_generation_) return;  // Stale request
 
-    // Ensure search results page exists
-    if (pages_.find("search") == pages_.end()) {
-        auto search_page = std::make_unique<SearchResultsPage>(main_window_, library_service_);
-        GtkWidget* sw = search_page->get_widget();
-        safe_stack_add_named(GTK_STACK(stack_), sw, "search");
-        pages_["search"] = std::move(search_page);
-    }
-
-    // Perform search
-    if (auto it = pages_.find("search"); it != pages_.end()) {
-        if (auto* search_page = dynamic_cast<SearchResultsPage*>(it->second.get())) {
-            search_page->search(query, generation);
-        }
-    }
-
-    if (!query.empty()) {
-        navigate_to_page("search", true);
-    } else {
-        // Clear search -> go back to previous page in history (not home)
-        if (history_index_ > 0) {
-            // Navigate back without adding to history
-            history_index_--;
-            active_page_id_ = history_[history_index_];
-            gtk_stack_set_visible_child_name(GTK_STACK(stack_), active_page_id_.c_str());
-            update_toolbar_state();
-            if (page_change_cb_) {
-                page_change_cb_(active_page_id_);
+    if (query.empty()) {
+        // Clearing the field returns to the page the search started from.
+        if (active_page_id_ == "search") {
+            if (history_index_ > 0 && !history_.empty()) {
+                history_index_--;
+                apply_history_entry(history_[history_index_], true);
+            } else {
+                navigate_to_page("home", false);
             }
-        } else {
-            navigate_to_page("home", true);
         }
+        return;
     }
+
+    ensure_search_page();
+    auto it = pages_.find("search");
+    if (it == pages_.end()) return;
+    if (auto* search_page = dynamic_cast<SearchResultsPage*>(it->second.get())) {
+        search_page->search(query, generation);
+    }
+
+    navigate_to_page("search", true, query);
 }
 
 } // namespace lollypop

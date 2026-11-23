@@ -138,12 +138,17 @@ bool StorageManager::initialize(const std::string& db_path) {
         }
         sqlite3_finalize(version_stmt);
     }
+    const bool schema_changed = current_version != impl_->schema_version;
     if (!migrate_schema(current_version, impl_->schema_version)) return false;
     if (!create_schema()) return false;
     if (!create_fts5_index()) return false;
     if (!create_triggers()) return false;
 
-    backfill_library_index(impl_->db);
+    // Rebuilding the FTS index is only needed after a schema change; doing it
+    // on every launch makes startup scale with library size.
+    if (schema_changed) {
+        backfill_library_index(impl_->db);
+    }
 
     return true;
 }

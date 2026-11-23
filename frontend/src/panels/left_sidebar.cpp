@@ -14,7 +14,6 @@
 
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 
 namespace lollypop {
 namespace {
@@ -32,6 +31,19 @@ int content_width(int outer_width) {
 std::filesystem::path state_path() {
     return std::filesystem::path(g_get_user_config_dir())
         / "lollypop-cpp" / "sidebar-expanded";
+}
+
+// Detail and transient pages have no sidebar row of their own. Map them to
+// the section they belong to so the visual highlight never points at nothing.
+std::string sidebar_page_for(const std::string& page_id) {
+    if (page_id == "album_detail" || page_id == "album") return "albums";
+    if (page_id == "artist_detail" || page_id == "artist") return "artists";
+    if (page_id == "search") return "songs";
+    if (page_id == "genre_detail" || page_id == "genre") return "genres";
+    if (page_id == "playlist_detail" || page_id == "playlist") return "playlists";
+    if (page_id == "favourites" || page_id == "favorite_albums") return "favorites";
+    if (page_id == "liked_music") return "liked";
+    return page_id;
 }
 
 LeftSidebar::ActionButton create_action_button(const char* icon_name,
@@ -77,7 +89,9 @@ LeftSidebar::LeftSidebar(MainWindow* main_window)
     create_navigation_items();
     load_sidebar_state();
     apply_expanded_state();
-    set_active_item("home");
+    // Visual-only: MainWindow owns the initial page navigation. Calling
+    // set_active_item() here would feed a navigation event back into it.
+    set_active_item_visual("home");
 }
 
 LeftSidebar::~LeftSidebar() = default;
@@ -92,7 +106,7 @@ void LeftSidebar::setup_ui() {
                                    GTK_ACCESSIBLE_PROPERTY_LABEL,
                                    "Library navigation", -1);
 
-    // Header: three fixed-width cells. Settings/fullscreen are hidden in
+    // Header: three fixed-width cells. About/fullscreen are hidden in
     // compact mode, so the collapse control stays in the same position.
     header_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(header_box_, "sidebar-header");
@@ -104,16 +118,16 @@ void LeftSidebar::setup_ui() {
     collapse_ = create_action_button("pan-start-symbolic", "Collapse sidebar",
                                      G_CALLBACK(on_collapse_clicked), this,
                                      TRUE);
-    settings_ = create_action_button("preferences-system-symbolic", "Settings",
-                                     G_CALLBACK(on_settings_clicked), this,
-                                     FALSE);
+    about_ = create_action_button("help-about-symbolic", "About",
+                                  G_CALLBACK(on_about_clicked), this,
+                                  FALSE);
     fullscreen_ = create_action_button("view-fullscreen-symbolic", "Fullscreen",
                                        G_CALLBACK(on_fullscreen_clicked), this,
                                        FALSE);
     collapse_button_ = collapse_.button;
 
     safe_box_append(GTK_BOX(header_box_), collapse_.button);
-    safe_box_append(GTK_BOX(header_box_), settings_.button);
+    safe_box_append(GTK_BOX(header_box_), about_.button);
     safe_box_append(GTK_BOX(header_box_), fullscreen_.button);
 
     nav_list_box_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -207,18 +221,19 @@ void LeftSidebar::add_nav_row(const NavigationItem& item) {
 }
 
 void LeftSidebar::set_active_item(const std::string& item_id) {
-    active_item_id_ = item_id;
+    const std::string nav_id = sidebar_page_for(item_id);
+    active_item_id_ = nav_id;
     update_active_state();
 
     if (main_window_) {
         if (MiddleLibrary* middle = main_window_->get_middle_library()) {
-            middle->set_active_page(item_id);
+            middle->set_active_page(nav_id);
         }
     }
 }
 
 void LeftSidebar::set_active_item_visual(const std::string& item_id) {
-    active_item_id_ = item_id;
+    active_item_id_ = sidebar_page_for(item_id);
     update_active_state();
 }
 
@@ -234,7 +249,7 @@ void LeftSidebar::apply_expanded_state() {
     } else {
         gtk_widget_add_css_class(sidebar_box_, "compact");
     }
-    gtk_widget_set_visible(settings_.button, expanded_);
+    gtk_widget_set_visible(about_.button, expanded_);
     gtk_widget_set_visible(fullscreen_.button, expanded_);
 
     update_sidebar_width();
@@ -299,8 +314,24 @@ void LeftSidebar::on_collapse_clicked(GtkButton*, gpointer user_data) {
     static_cast<LeftSidebar*>(user_data)->toggle_expanded();
 }
 
-void LeftSidebar::on_settings_clicked(GtkButton*, gpointer) {
-    std::cout << "Settings clicked" << std::endl;
+void LeftSidebar::on_about_clicked(GtkButton*, gpointer user_data) {
+    auto* self = static_cast<LeftSidebar*>(user_data);
+    GtkWidget* dialog = gtk_about_dialog_new();
+    gtk_about_dialog_set_program_name(GTK_ABOUT_DIALOG(dialog), "Lollypop C++");
+    gtk_about_dialog_set_version(GTK_ABOUT_DIALOG(dialog), "1.0");
+    gtk_about_dialog_set_comments(GTK_ABOUT_DIALOG(dialog),
+                                  "A GTK4 music player built with C++20.");
+    if (self->main_window_) {
+        GtkWindow* parent = self->main_window_->get_window();
+        if (parent) gtk_window_set_transient_for(GTK_WINDOW(dialog), parent);
+    }
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    g_signal_connect(dialog, "response",
+                     G_CALLBACK(+[](GtkDialog* d, gint, gpointer) {
+                         gtk_window_destroy(GTK_WINDOW(d));
+                     }),
+                     nullptr);
+    gtk_window_present(GTK_WINDOW(dialog));
 }
 
 void LeftSidebar::on_fullscreen_clicked(GtkButton*, gpointer user_data) {

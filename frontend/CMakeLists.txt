@@ -32,3 +32,5 @@ target_link_libraries(lollypop-frontend PUBLIC
 )
 
 target_compile_features(lollypop-frontend PUBLIC cxx_std_20)
+target_compile_definitions(lollypop-frontend PRIVATE
+    LOLLYPOP_DATA_DIR="${CMAKE_SOURCE_DIR}/resources")

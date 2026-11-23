@@ -19,6 +19,7 @@ struct SongsPageLoadData {
     SongsPage* page;
     GObject* page_widget;  // keeps the widget alive until the idle callback runs
     std::vector<Track> tracks;
+    uint64_t generation = 0;
 };
 
 static void free_load_data(gpointer data) {
@@ -98,7 +99,9 @@ void SongsPage::create_header(GtkWidget* main_box) {
             gtk_widget_add_css_class(genre_dropdown, "songs-genre-filter");
             gtk_widget_set_tooltip_text(genre_dropdown, "Filter by genre");
             gtk_drop_down_set_selected(GTK_DROP_DOWN(genre_dropdown), 0);
-            g_signal_connect(genre_dropdown, "notify::selected", G_CALLBACK(on_genre_changed), this);
+            genre_dropdown_ = genre_dropdown;
+            genre_handler_id_ = g_signal_connect(genre_dropdown, "notify::selected",
+                                                 G_CALLBACK(on_genre_changed), this);
             gtk_box_append(GTK_BOX(header_box_.get()), genre_dropdown);
         }
     }
@@ -163,6 +166,7 @@ void SongsPage::reload() {
 
     std::lock_guard lock(load_mutex_);
     generation_++;
+    loading_ = false;
     loaded_count_ = 0;
     total_count_ = 0;
 
@@ -180,8 +184,8 @@ void SongsPage::reload() {
     {
         std::lock_guard lock(ids_mutex_);
         sorted_ids_ = std::move(track_ids);
+        total_count_ = sorted_ids_.size();
     }
-    total_count_ = sorted_ids_.size();
 
     // Load first page
     load_page(0);
@@ -191,6 +195,7 @@ void SongsPage::load_page(size_t start) {
     std::lock_guard lock(load_mutex_);
     if (loading_ || start >= sorted_ids_.size()) return;
     loading_ = true;
+    const uint64_t generation = generation_;
 
     size_t end = std::min(start + PAGE_SIZE, sorted_ids_.size());
     std::vector<std::string> batch;
@@ -202,12 +207,13 @@ void SongsPage::load_page(size_t start) {
     auto tracks = library_service_->get_tracks_by_ids(batch);
     
     // Append on the main thread. The GObject ref keeps the widget alive; the
-    // owner marker lets us drop stale results if the page was destroyed.
+    // owner marker and generation guard drop results from a superseded load.
     auto* load_data = new SongsPageLoadData{
-        this, G_OBJECT(g_object_ref(widget_.get())), std::move(tracks)};
+        this, G_OBJECT(g_object_ref(widget_.get())), std::move(tracks), generation};
     g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, [](gpointer data) -> gboolean {
         auto* ld = static_cast<SongsPageLoadData*>(data);
-        if (g_object_get_data(ld->page_widget, "songs-page-owner") == ld->page) {
+        if (g_object_get_data(ld->page_widget, "songs-page-owner") == ld->page &&
+            ld->generation == ld->page->generation_) {
             ld->page->append_tracks(std::move(ld->tracks));
         }
         return G_SOURCE_REMOVE;
@@ -252,8 +258,9 @@ void SongsPage::on_scroll_changed(GtkAdjustment* adjustment, gpointer user_data)
 }
 
 void SongsPage::on_genre_changed(GtkDropDown* dropdown, gpointer user_data) {
-    (void)dropdown;
     auto* self = static_cast<SongsPage*>(user_data);
+    if (!self || self->updating_genre_dropdown_) return;
+
     guint selected = gtk_drop_down_get_selected(dropdown);
     if (selected == GTK_INVALID_LIST_POSITION) return;
     
@@ -268,6 +275,29 @@ void SongsPage::on_genre_changed(GtkDropDown* dropdown, gpointer user_data) {
 }
 
 void SongsPage::set_genre_filter(const std::string& genre) {
+    // Keep the visible dropdown in sync when navigation sets the filter
+    // programmatically (e.g. from the Genres page).
+    if (genre_dropdown_ && genre_handler_id_) {
+        GtkStringList* model = GTK_STRING_LIST(
+            gtk_drop_down_get_model(GTK_DROP_DOWN(genre_dropdown_)));
+        const char* target = genre.empty() ? "All Genres" : genre.c_str();
+        guint count = g_list_model_get_n_items(G_LIST_MODEL(model));
+        guint selected = 0;
+        for (guint i = 0; i < count; ++i) {
+            const char* item = gtk_string_list_get_string(model, i);
+            if (item && genre == item) {
+                selected = i;
+                break;
+            }
+        }
+        if (gtk_drop_down_get_selected(GTK_DROP_DOWN(genre_dropdown_)) != selected) {
+            updating_genre_dropdown_ = true;
+            gtk_drop_down_set_selected(GTK_DROP_DOWN(genre_dropdown_), selected);
+            updating_genre_dropdown_ = false;
+        }
+        (void)target;
+    }
+    if (genre_filter_ == genre) return;
     genre_filter_ = genre;
     reload();
 }
