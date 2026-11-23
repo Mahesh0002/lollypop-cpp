@@ -1,11 +1,11 @@
 # Storage - SQLite Persistence Layer
 
-file(GLOB_RECURSE STORAGE_SOURCES
+file(GLOB_RECURSE STORAGE_SOURCES CONFIGURE_DEPENDS
     src/*.cpp
     src/**/*.cpp
 )
 
-file(GLOB_RECURSE STORAGE_HEADERS
+file(GLOB_RECURSE STORAGE_HEADERS CONFIGURE_DEPENDS
     include/*.hpp
     include/**/*.hpp
 )

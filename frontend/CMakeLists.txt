@@ -1,11 +1,11 @@
 # Frontend - GTK4 Presentation Layer
 
-file(GLOB_RECURSE FRONTEND_SOURCES
+file(GLOB_RECURSE FRONTEND_SOURCES CONFIGURE_DEPENDS
     src/*.cpp
     src/**/*.cpp
 )
 
-file(GLOB_RECURSE FRONTEND_HEADERS
+file(GLOB_RECURSE FRONTEND_HEADERS CONFIGURE_DEPENDS
     include/*.hpp
     include/**/*.hpp
 )

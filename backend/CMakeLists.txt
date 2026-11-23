@@ -1,11 +1,11 @@
 # Backend - Core Logic, Audio Engine, Business Logic
 
-file(GLOB_RECURSE BACKEND_SOURCES
+file(GLOB_RECURSE BACKEND_SOURCES CONFIGURE_DEPENDS
     src/*.cpp
     src/**/*.cpp
 )
 
-file(GLOB_RECURSE BACKEND_HEADERS
+file(GLOB_RECURSE BACKEND_HEADERS CONFIGURE_DEPENDS
     include/*.hpp
     include/**/*.hpp
 )
