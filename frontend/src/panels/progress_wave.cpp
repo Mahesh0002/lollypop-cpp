@@ -204,7 +204,7 @@ void rounded_rect(cairo_t* cr, double x, double y, double w, double h,
 
 } // namespace
 
-void ProgressWave::on_draw(GtkDrawingArea*, cairo_t* cr, int width,
+void ProgressWave::on_draw(GtkDrawingArea* area, cairo_t* cr, int width,
                            int height, gpointer user_data) {
     auto* self = static_cast<ProgressWave*>(user_data);
     if (!self || width <= 0 || height <= 0) return;
@@ -222,8 +222,12 @@ void ProgressWave::on_draw(GtkDrawingArea*, cairo_t* cr, int width,
     const double phase =
         self->animations_enabled() ? self->wave_phase_ : 0.0;
 
-    // Matches --accent-color / --accent-shadow tokens in resources/style.css.
-    const double accent_r = 0.655, accent_g = 0.545, accent_b = 0.980;
+    // Read the live --accent-color through the widget's CSS `color` property
+    // so custom drawing follows ThemeManager accent changes without plumbing.
+    GdkRGBA accent;
+    gtk_widget_get_color(GTK_WIDGET(area), &accent);
+    const double accent_r = accent.red, accent_g = accent.green,
+                 accent_b = accent.blue;
 
     auto wave_y = [&](double x) {
         double local_amplitude = amplitude;

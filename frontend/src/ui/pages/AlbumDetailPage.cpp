@@ -48,6 +48,7 @@ void AlbumDetailPage::setup_ui() {
     gtk_picture_set_content_fit(GTK_PICTURE(artwork_image_.get()),
                                 GTK_CONTENT_FIT_COVER);
     gtk_widget_add_css_class(artwork_image_.get(), "now-playing-artwork-image");
+    gtk_widget_add_css_class(artwork_image_.get(), "detail-artwork");
     gtk_widget_set_size_request(artwork_image_.get(), 300, 300);
     gtk_widget_set_halign(artwork_image_.get(), GTK_ALIGN_CENTER);
     gtk_widget_set_visible(artwork_image_.get(), TRUE);
@@ -57,6 +58,7 @@ void AlbumDetailPage::setup_ui() {
     title_label_.reset(gtk_label_new(""));
     g_object_ref_sink(title_label_.get());
     gtk_widget_add_css_class(title_label_.get(), "title-2");
+    gtk_widget_add_css_class(title_label_.get(), "detail-title");
     gtk_label_set_xalign(GTK_LABEL(title_label_.get()), 0.5);
     gtk_widget_set_visible(title_label_.get(), TRUE);
     safe_box_append(GTK_BOX(content_box_.get()), title_label_.get());
@@ -73,6 +75,7 @@ void AlbumDetailPage::setup_ui() {
     meta_label_.reset(gtk_label_new(""));
     g_object_ref_sink(meta_label_.get());
     gtk_widget_add_css_class(meta_label_.get(), "caption");
+    gtk_widget_add_css_class(meta_label_.get(), "detail-meta");
     gtk_label_set_xalign(GTK_LABEL(meta_label_.get()), 0.5);
     gtk_widget_set_visible(meta_label_.get(), TRUE);
     safe_box_append(GTK_BOX(content_box_.get()), meta_label_.get());

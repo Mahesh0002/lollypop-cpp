@@ -139,20 +139,19 @@ void VolumeDial::emit_volume_changed() {
 // Static callback for drawing the circular dial
 void VolumeDial::on_draw(GtkDrawingArea* area, cairo_t* cr, int width, int height, gpointer user_data) {
     VolumeDial* self = static_cast<VolumeDial*>(user_data);
-    (void)area;
 
     double center_x = width / 2.0;
     double center_y = height / 2.0;
     double radius = std::min(center_x, center_y) - 4; // 4px padding
     double stroke_width = 3.0;
 
-    // Use hardcoded colors for now (CSS variables not easily accessible in cairo)
-    // Background: semi-transparent dark
-    // Foreground: blue accent
-    // Muted: gray
-    GdkRGBA bg_color = {0.2, 0.2, 0.25, 0.3};
-    GdkRGBA fg_color = {0.0, 0.6, 1.0, 0.9};
-    GdkRGBA muted_color = {0.5, 0.5, 0.5, 0.9};
+    // Cairo cannot read custom properties directly, but the widget's CSS
+    // `color` is bound to --accent-color, so the arc tracks ThemeManager.
+    GdkRGBA accent;
+    gtk_widget_get_color(GTK_WIDGET(area), &accent);
+    GdkRGBA bg_color = {0.48, 0.44, 0.62, 0.28};
+    GdkRGBA fg_color = {accent.red, accent.green, accent.blue, 0.95};
+    GdkRGBA muted_color = {0.55, 0.55, 0.62, 0.90};
 
     // Draw background circle
     cairo_set_line_width(cr, stroke_width);

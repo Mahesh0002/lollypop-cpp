@@ -44,6 +44,7 @@ void ArtistDetailPage::setup_ui() {
     gtk_picture_set_content_fit(GTK_PICTURE(artwork_image_.get()),
                                 GTK_CONTENT_FIT_COVER);
     gtk_widget_add_css_class(artwork_image_.get(), "now-playing-artwork-image");
+    gtk_widget_add_css_class(artwork_image_.get(), "detail-artwork");
     gtk_widget_set_size_request(artwork_image_.get(), 300, 300);
     gtk_widget_set_halign(artwork_image_.get(), GTK_ALIGN_CENTER);
     gtk_widget_set_visible(artwork_image_.get(), TRUE);
@@ -53,6 +54,7 @@ void ArtistDetailPage::setup_ui() {
     name_label_.reset(gtk_label_new(""));
     g_object_ref_sink(name_label_.get());
     gtk_widget_add_css_class(name_label_.get(), "title-2");
+    gtk_widget_add_css_class(name_label_.get(), "detail-title");
     gtk_label_set_xalign(GTK_LABEL(name_label_.get()), 0.5);
     gtk_widget_set_visible(name_label_.get(), TRUE);
     safe_box_append(GTK_BOX(content_box_.get()), name_label_.get());
