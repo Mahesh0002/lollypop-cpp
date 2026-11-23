@@ -134,7 +134,7 @@ void SongsPage::create_header(GtkWidget* main_box) {
         gtk_widget_add_css_class(col_label, "songs-column-header");
         gtk_label_set_xalign(GTK_LABEL(col_label), 0.0);
         if (i == 0) {
-            gtk_widget_set_size_request(col_label, 20, -1);
+            gtk_widget_set_size_request(col_label, 18, -1);
         } else if (i == 4) {
             gtk_widget_set_size_request(col_label, 40, -1);
         }

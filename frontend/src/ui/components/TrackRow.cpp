@@ -206,8 +206,8 @@ void TrackRow::setup_ui() {
 
     // Artwork thumbnail replaces the track number for an Apple Music look.
     artwork_view_ = std::make_unique<ArtworkView>();
-    artwork_view_->set_preferred_size(20, 20);
-    artwork_view_->set_corner_radius(4);
+    artwork_view_->set_preferred_size(18, 18);
+    artwork_view_->set_corner_radius(3);
     gtk_widget_add_css_class(artwork_view_->get_widget(), "track-row-artwork");
     artwork_view_->set_artwork_path(track_.artwork_path);
     gtk_widget_set_visible(artwork_view_->get_widget(), TRUE);

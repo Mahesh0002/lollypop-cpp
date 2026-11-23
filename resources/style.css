@@ -1569,7 +1569,7 @@ searchentry:focus,
 
 .track-row-artwork .artwork-view-image,
 .track-row-artwork .artwork-view-fallback {
-    border-radius: 4px;
+    border-radius: 3px;
     box-shadow: none;
 }
 
