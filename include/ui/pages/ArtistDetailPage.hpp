@@ -32,6 +32,7 @@ public:
     std::string get_page_id() const override { return "artist_detail"; }
 
     void set_artist(const std::string& artist_id);
+    std::string get_current_artist_name() const { return current_artist_.name; }
 
 private:
     struct WidgetDeleter {

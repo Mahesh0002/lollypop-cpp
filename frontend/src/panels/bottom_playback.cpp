@@ -35,6 +35,7 @@ BottomPlayback::BottomPlayback(MainWindow* main_window)
       track_artist_label_(nullptr),
       prev_button_(nullptr),
       next_button_(nullptr),
+      middle_section_(nullptr),
       right_box_(nullptr),
       volume_dial_(nullptr),
       pip_button_(nullptr),
@@ -42,6 +43,7 @@ BottomPlayback::BottomPlayback(MainWindow* main_window)
       repeat_button_(nullptr),
       loop_button_(nullptr) {
     setup_ui();
+    gtk_widget_add_tick_callback(main_box_, on_layout_tick, this, nullptr);
 
     // The backend restores player.volume before the UI exists. Seed the dial
     // from it so the first click never has to reconcile two different values.
@@ -75,15 +77,20 @@ void BottomPlayback::setup_ui() {
 }
 
 void BottomPlayback::create_row() {
-    // One row only: left info, transport, stretched wave, then right controls.
-    // Keeping every control in this box removes the old gap where the right
-    // section used to be a sibling of a separately expanding row.
+    // Four zones in one row, in order:
+    //   1. artwork + metadata, fixed 190px (12px inset -> occupies 0..202)
+    //   2. 13px gap, so the transport starts at x = 215px
+    //   3. transport: prev + wavy progress + next, 1000..1200px
+    //   4. playback modes + volume + PiP, right-aligned
 
     GtkWidget* left_section = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
     gtk_widget_add_css_class(left_section, "bottom-playback-left");
     gtk_widget_set_valign(left_section, GTK_ALIGN_CENTER);
+    gtk_widget_set_hexpand(left_section, FALSE);
+    gtk_widget_set_halign(left_section, GTK_ALIGN_START);
+    gtk_widget_set_size_request(left_section, 190, -1);
     gtk_widget_set_margin_start(left_section, 12);
-    gtk_widget_set_margin_end(left_section, 2);
+    gtk_widget_set_margin_end(left_section, 13);
     gtk_widget_set_visible(left_section, TRUE);
 
     artwork_view_ = std::make_unique<ArtworkView>();
@@ -91,6 +98,7 @@ void BottomPlayback::create_row() {
     artwork_view_->set_corner_radius(6.0);
     gtk_widget_add_css_class(artwork_view_->get_widget(), "bottom-playback-artwork");
     gtk_widget_set_size_request(artwork_view_->get_widget(), 56, 56);
+    gtk_widget_set_hexpand(artwork_view_->get_widget(), FALSE);
     safe_box_append(GTK_BOX(left_section), artwork_view_->get_widget());
 
     GtkWidget* info_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
@@ -102,7 +110,7 @@ void BottomPlayback::create_row() {
     gtk_widget_add_css_class(track_title_label_, "bottom-playback-title");
     gtk_label_set_xalign(GTK_LABEL(track_title_label_), 0.0);
     gtk_label_set_ellipsize(GTK_LABEL(track_title_label_), PANGO_ELLIPSIZE_END);
-    gtk_widget_set_size_request(track_title_label_, 110, -1);
+    gtk_widget_set_size_request(track_title_label_, 40, -1);
     gtk_accessible_update_property(GTK_ACCESSIBLE(track_title_label_),
                                    GTK_ACCESSIBLE_PROPERTY_LABEL, "Track title", -1);
     gtk_widget_set_visible(track_title_label_, TRUE);
@@ -111,7 +119,7 @@ void BottomPlayback::create_row() {
     gtk_widget_add_css_class(track_artist_label_, "bottom-playback-artist");
     gtk_label_set_xalign(GTK_LABEL(track_artist_label_), 0.0);
     gtk_label_set_ellipsize(GTK_LABEL(track_artist_label_), PANGO_ELLIPSIZE_END);
-    gtk_widget_set_size_request(track_artist_label_, 110, -1);
+    gtk_widget_set_size_request(track_artist_label_, 40, -1);
     gtk_accessible_update_property(GTK_ACCESSIBLE(track_artist_label_),
                                    GTK_ACCESSIBLE_PROPERTY_LABEL, "Track artist", -1);
     gtk_widget_set_visible(track_artist_label_, TRUE);
@@ -120,6 +128,15 @@ void BottomPlayback::create_row() {
     safe_box_append(GTK_BOX(info_box), track_artist_label_);
     safe_box_append(GTK_BOX(left_section), info_box);
     safe_box_append(GTK_BOX(main_box_), left_section);
+
+    // Transport starts at x=215px and owns the flexible center region.
+    middle_section_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class(middle_section_, "bottom-playback-middle");
+    gtk_widget_set_hexpand(middle_section_, FALSE);
+    gtk_widget_set_halign(middle_section_, GTK_ALIGN_START);
+    gtk_widget_set_valign(middle_section_, GTK_ALIGN_CENTER);
+    gtk_widget_set_size_request(middle_section_, 1000, -1);
+    gtk_widget_set_visible(middle_section_, TRUE);
 
     prev_button_ = gtk_button_new();
     gtk_button_set_has_frame(GTK_BUTTON(prev_button_), FALSE);
@@ -134,9 +151,9 @@ void BottomPlayback::create_row() {
     gtk_widget_set_margin_end(prev_button_, 2);
     gtk_widget_set_size_request(prev_button_, 36, 36);
     gtk_widget_set_visible(prev_button_, TRUE);
-    safe_box_append(GTK_BOX(main_box_), prev_button_);
+    safe_box_append(GTK_BOX(middle_section_), prev_button_);
 
-    create_progress();
+    create_progress(middle_section_);
 
     next_button_ = gtk_button_new();
     gtk_button_set_has_frame(GTK_BUTTON(next_button_), FALSE);
@@ -151,12 +168,43 @@ void BottomPlayback::create_row() {
     gtk_widget_set_margin_end(next_button_, 4);
     gtk_widget_set_size_request(next_button_, 36, 36);
     gtk_widget_set_visible(next_button_, TRUE);
-    safe_box_append(GTK_BOX(main_box_), next_button_);
+    safe_box_append(GTK_BOX(middle_section_), next_button_);
+
+    safe_box_append(GTK_BOX(main_box_), middle_section_);
+
+    // Absorbs any window width beyond the 1200px center cap so the right
+    // controls stay pinned to the end instead of drifting inward.
+    GtkWidget* tail_spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_hexpand(tail_spacer, TRUE);
+    gtk_widget_set_visible(tail_spacer, TRUE);
+    safe_box_append(GTK_BOX(main_box_), tail_spacer);
 
     create_right_section();
 }
 
-void BottomPlayback::create_progress() {
+gboolean BottomPlayback::on_layout_tick(GtkWidget* widget, GdkFrameClock*,
+                                        gpointer user_data) {
+    auto* self = static_cast<BottomPlayback*>(user_data);
+    if (!self->middle_section_ || !self->right_box_) return G_SOURCE_CONTINUE;
+
+    const int total_width = gtk_widget_get_width(widget);
+    if (total_width <= 0) return G_SOURCE_CONTINUE;
+
+    // 215px is the fixed left zone (12 inset + 190 metadata + 13 gap).
+    // Reserve the measured right control cluster plus its 12px trailing inset,
+    // then give the transport the remaining space, clamped to 1000..1200px.
+    const int right_width = gtk_widget_get_width(self->right_box_);
+    const int available = total_width - 215 - right_width - 12;
+    const int target = std::clamp(available, 1000, 1200);
+
+    if (target != self->last_middle_width_) {
+        self->last_middle_width_ = target;
+        gtk_widget_set_size_request(self->middle_section_, target, -1);
+    }
+    return G_SOURCE_CONTINUE;
+}
+
+void BottomPlayback::create_progress(GtkWidget* parent) {
     // The overlay owns all remaining horizontal space. The wave is the visible
     // child; the scale is an invisible but fully interactive layer on top.
     progress_box_ = gtk_overlay_new();
@@ -207,7 +255,7 @@ void BottomPlayback::create_progress() {
     g_signal_connect(seek_gesture, "released", G_CALLBACK(on_progress_released), this);
     gtk_widget_add_controller(progress_bar_, GTK_EVENT_CONTROLLER(seek_gesture));
 
-    safe_box_append(GTK_BOX(main_box_), progress_box_);
+    safe_box_append(GTK_BOX(parent), progress_box_);
 }
 
 void BottomPlayback::create_right_section() {

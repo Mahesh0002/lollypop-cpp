@@ -42,6 +42,7 @@ public:
 
     /// Set the album to display.
     void set_album(const std::string& album_id);
+    std::string get_current_album_title() const { return current_album_.title; }
 
 private:
     struct WidgetDeleter {

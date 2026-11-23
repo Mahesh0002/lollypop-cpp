@@ -4,6 +4,9 @@
  * Real Home page with library sections: Recently Played, Recently Added,
  * Favourite Albums, etc. Uses actual library data via ILibraryService.
  * Displays proper empty state when no data exists.
+ *
+ * No nested scroller - content is meant to be placed inside the
+ * middle panel's single scroller.
  */
 
 #pragma once
@@ -40,7 +43,7 @@ public:
     HomePage(const HomePage&) = delete;
     HomePage& operator=(const HomePage&) = delete;
 
-    GtkWidget* get_widget() const { return widget_.get(); }
+    GtkWidget* get_widget() const { return main_box_.get(); }
     void refresh() override;
     std::string get_page_id() const override { return "home"; }
 
@@ -80,7 +83,6 @@ private:
         std::vector<guint> anim_timeout_ids;
     };
 
-    std::unique_ptr<GtkWidget, WidgetDeleter> widget_;
     std::unique_ptr<GtkWidget, WidgetDeleter> main_box_;
 
     MainWindow* main_window_ = nullptr;

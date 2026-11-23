@@ -3,7 +3,8 @@
  * Single-line playback controls spanning full width
  *
  * Layout:
- *   [Artwork + Title/Artist] [Prev] [Stretched Wavy Progress] [Next]
+ *   [Artwork + Title/Artist 190px] [gap 25px]
+ *   [Prev] [Stretched Wavy Progress 1000-1200px] [Next]
  *   [Shuffle] [Repeat] [Loop] [Volume Dial] [PiP]
  *
  * The progress bar is a real animated sine wave rendered with Cairo. A fully
@@ -67,6 +68,7 @@ private:
     // Transport and right-side controls.
     GtkWidget* prev_button_;
     GtkWidget* next_button_;
+    GtkWidget* middle_section_;
     GtkWidget* right_box_;
     std::unique_ptr<VolumeDial> volume_dial_;
     GtkWidget* pip_button_;
@@ -89,7 +91,11 @@ private:
 
     void setup_ui();
     void create_row();
-    void create_progress();
+    static gboolean on_layout_tick(GtkWidget* widget, GdkFrameClock* clock,
+                                   gpointer user_data);
+
+    int last_middle_width_ = 0;
+    void create_progress(GtkWidget* parent);
     void create_right_section();
     void start_wave_animation();
     void stop_wave_animation();

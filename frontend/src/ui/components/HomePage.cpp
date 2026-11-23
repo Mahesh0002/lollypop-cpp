@@ -1,6 +1,7 @@
 /**
  * Lollypop C++ - Home Page Implementation
  * Dashboard showing recently added, recently played, favourite albums.
+ * No nested scroller - content flows in middle panel's single scroller.
  */
 
 #include "ui/components/HomePage.hpp"
@@ -24,25 +25,18 @@ HomePage::HomePage(MainWindow* main_window, ILibraryService* library_service)
 HomePage::~HomePage() = default;
 
 void HomePage::setup_ui() {
-    widget_.reset(gtk_scrolled_window_new());
-    g_object_ref_sink(widget_.get());
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(widget_.get()),
-                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    gtk_widget_set_vexpand(widget_.get(), TRUE);
-    gtk_widget_set_hexpand(widget_.get(), TRUE);
-    gtk_widget_add_css_class(widget_.get(), "library-scrolled");
-    gtk_widget_set_visible(widget_.get(), TRUE);
-
+    // Main content box - no scroller, just a vertical box
+    // The middle panel's scroller will handle scrolling
     main_box_.reset(gtk_box_new(GTK_ORIENTATION_VERTICAL, 24));
     g_object_ref_sink(main_box_.get());
     gtk_widget_add_css_class(main_box_.get(), "home-page");
-    gtk_widget_set_margin_top(main_box_.get(), 24);
+    gtk_widget_set_margin_top(main_box_.get(), 0);
     gtk_widget_set_margin_bottom(main_box_.get(), 24);
     gtk_widget_set_margin_start(main_box_.get(), 24);
     gtk_widget_set_margin_end(main_box_.get(), 24);
+    gtk_widget_set_hexpand(main_box_.get(), TRUE);
+    gtk_widget_set_vexpand(main_box_.get(), FALSE);
     gtk_widget_set_visible(main_box_.get(), TRUE);
-
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()), main_box_.get());
 
     create_welcome_section();
 
@@ -50,19 +44,22 @@ void HomePage::setup_ui() {
     create_section("Recently Added",
                    [this]() { return library_service_ ? library_service_->get_recently_added(8) : std::vector<Track>{}; },
                    [this](const Track& t) { on_track_played(t); },
-                   [this](const Track& t, bool liked) { on_track_liked(t, liked); });
+                   [this](const Track& t, bool liked) { on_track_liked(t, liked); },
+                   [this]() { if (recently_added_cb_) recently_added_cb_(); });
 
     // Recently Played
     create_section("Recently Played",
                    [this]() { return library_service_ ? library_service_->get_recently_played(8) : std::vector<Track>{}; },
                    [this](const Track& t) { on_track_played(t); },
-                   [this](const Track& t, bool liked) { on_track_liked(t, liked); });
+                   [this](const Track& t, bool liked) { on_track_liked(t, liked); },
+                   [this]() { if (recently_played_cb_) recently_played_cb_(); });
 
     // Favourite Albums
     create_album_section("Favourite Albums",
                          [this]() { return library_service_ ? library_service_->get_favourite_albums() : std::vector<Album>{}; },
                          [this](const Album& a) { on_album_played(a); },
-                         [this](const Album& a) { on_album_clicked(a); });
+                         [this](const Album& a) { on_album_clicked(a); },
+                         [this]() { if (favourite_albums_cb_) favourite_albums_cb_(); });
 
     initialized_ = true;
 }
@@ -90,7 +87,6 @@ GtkWidget* HomePage::create_section(const std::string& title,
     GtkWidget* view_all = gtk_button_new_with_label("View all");
     gtk_button_set_has_frame(GTK_BUTTON(view_all), FALSE);
     gtk_widget_add_css_class(view_all, "section-view-all");
-    // Consistent spacing on all four sides.
     gtk_widget_set_margin_start(view_all, 10);
     gtk_widget_set_margin_end(view_all, 10);
     gtk_widget_set_margin_top(view_all, 10);
@@ -141,10 +137,10 @@ GtkWidget* HomePage::create_section(const std::string& title,
 }
 
 GtkWidget* HomePage::create_album_section(const std::string& title,
-                                           std::function<std::vector<Album>()> fetcher,
-                                           std::function<void(const Album&)> play_cb,
-                                           std::function<void(const Album&)> click_cb,
-                                           std::function<void()> view_all_cb) {
+                                          std::function<std::vector<Album>()> fetcher,
+                                          std::function<void(const Album&)> play_cb,
+                                          std::function<void(const Album&)> click_cb,
+                                          std::function<void()> view_all_cb) {
     GtkWidget* section = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
     gtk_widget_set_hexpand(section, TRUE);
     gtk_widget_set_visible(section, TRUE);
@@ -162,7 +158,6 @@ GtkWidget* HomePage::create_album_section(const std::string& title,
     GtkWidget* view_all = gtk_button_new_with_label("View all");
     gtk_button_set_has_frame(GTK_BUTTON(view_all), FALSE);
     gtk_widget_add_css_class(view_all, "section-view-all");
-    // Consistent spacing on all four sides.
     gtk_widget_set_margin_start(view_all, 10);
     gtk_widget_set_margin_end(view_all, 10);
     gtk_widget_set_margin_top(view_all, 10);
@@ -228,7 +223,6 @@ gboolean HomePage::on_track_anim_timeout(gpointer data) {
     auto* d = static_cast<TrackAnimData*>(data);
     SpringAnimation::animate_to(d->widget, "opacity", 1.0);
     SpringAnimation::animate_to(d->widget, "margin-top", 0);
-    // Don't delete d here - destroy notify handles it
     return G_SOURCE_REMOVE;
 }
 
@@ -254,15 +248,17 @@ void HomePage::refresh_track_section(SectionData* data) {
 
     // Fetch and populate with staggered spring animations
     auto tracks = data->fetcher();
+
     for (size_t i = 0; i < tracks.size(); ++i) {
-        auto row = std::make_unique<TrackRow>(main_window_, tracks[i], static_cast<int>(i + 1));
+        auto row = std::make_unique<TrackRow>(main_window_, tracks[i],
+                                              static_cast<int>(i + 1));
         row->set_play_callback(data->play_cb);
         row->set_like_callback(data->like_cb);
-        GtkWidget* w = row->get_widget();
 
-        // Start invisible for spring animation
+        GtkWidget* w = row->get_widget();
+        // Start invisible for stagger animation
         gtk_widget_set_opacity(w, 0.0);
-        gtk_widget_set_margin_top(w, 20); // Start 20px down
+        gtk_widget_set_margin_top(w, 20);
 
         safe_list_box_append(GTK_LIST_BOX(data->list_box), w);
         data->track_rows.push_back(std::move(row));
@@ -282,7 +278,6 @@ void HomePage::refresh_track_section(SectionData* data) {
 gboolean HomePage::on_album_anim_timeout(gpointer data) {
     auto* d = static_cast<HomePage::AlbumAnimData*>(data);
     SpringAnimation::animate_to(d->widget, "opacity", 1.0);
-    // Don't delete d here - destroy notify handles it
     return G_SOURCE_REMOVE;
 }
 
@@ -297,7 +292,7 @@ void HomePage::refresh_album_section(AlbumSectionData* data) {
     }
     data->anim_timeout_ids.clear();
 
-    // Clear existing - use gtk_flow_box_remove for proper cleanup
+    // Clear existing
     GtkWidget* child = gtk_widget_get_first_child(data->grid);
     while (child) {
         GtkWidget* next = gtk_widget_get_next_sibling(child);
@@ -308,13 +303,14 @@ void HomePage::refresh_album_section(AlbumSectionData* data) {
 
     // Fetch and populate with staggered spring animations
     auto albums = data->fetcher();
+
     for (size_t i = 0; i < albums.size(); ++i) {
         auto card = std::make_unique<AlbumCard>(main_window_, albums[i]);
         card->set_play_callback(data->play_cb);
         card->set_click_callback(data->click_cb);
-        GtkWidget* w = card->get_widget();
 
-        // Start invisible for spring animation
+        GtkWidget* w = card->get_widget();
+        // Start invisible for stagger animation
         gtk_widget_set_opacity(w, 0.0);
 
         safe_flow_box_append(GTK_FLOW_BOX(data->grid), w);
@@ -386,11 +382,6 @@ void HomePage::on_album_clicked(const Album& album) {
 void HomePage::set_recently_added_callback(std::function<void()> cb) {
     if (!sections_data_.empty()) {
         sections_data_[0]->view_all_cb = std::move(cb);
-        if (sections_data_[0]->view_all_button && sections_data_[0]->view_all_cb) {
-            // Reconnect the signal with new callback
-            // Note: This is a simplified approach - in practice we'd need to disconnect old signal
-            // For now, the button will call the new callback when clicked
-        }
     }
 }
 
