@@ -1,8 +1,10 @@
 /**
  * Lollypop C++ - Shared Wavy Progress Bar
  *
- * One Cairo sine-wave progress strip used by the bottom bar, the right
- * Now Playing panel, and the PiP window. A fully transparent GtkScale sits on
+ * One Cairo progress strip used by the bottom bar, the right Now Playing
+ * panel, and the PiP window. The look follows the Quickshell "Wavy" slider:
+ * a rounded unplayed track, a sine wave clipped to the played fraction, and a
+ * thin pill handle at the play position. A fully transparent GtkScale sits on
  * top so pointer/keyboard seeking and accessibility keep working while the
  * wave remains the only visible progress element.
  *
@@ -48,6 +50,12 @@ private:
     static constexpr double kWaveLineWidth = 4.0;
     static constexpr double kWaveAmplitudeMultiplier = 0.5;
     static constexpr double kWaveFrequency = 6.0;
+    static constexpr double kTrackHeight = 4.0;
+    static constexpr double kTrackRadius = 2.0;
+    static constexpr double kEdgePadding = 4.0;
+    static constexpr double kHandleHeight = 24.0;
+    static constexpr double kHandleWidth = 3.0;
+    static constexpr double kHandlePressedWidth = 1.5;
 
     GtkWidget* overlay_ = nullptr;
     GtkWidget* wave_area_ = nullptr;
@@ -71,6 +79,7 @@ private:
     void stop_animation();
     void commit_pending_seek();
     void remove_weak_pointers();
+    bool animations_enabled() const;
 
     static void on_draw(GtkDrawingArea* area, cairo_t* cr, int width,
                         int height, gpointer user_data);

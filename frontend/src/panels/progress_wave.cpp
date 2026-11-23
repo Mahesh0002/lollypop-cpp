@@ -160,6 +160,11 @@ void ProgressWave::set_spectrum(const std::vector<float>& magnitudes) {
 
 void ProgressWave::start_animation() {
     if (wave_tick_source_ != 0) return;
+    if (!animations_enabled()) {
+        // Reduced motion: keep the wave static instead of animating it.
+        if (wave_area_) gtk_widget_queue_draw(wave_area_);
+        return;
+    }
 
     last_frame_time_ = g_get_monotonic_time();
     wave_tick_source_ = g_timeout_add(kWaveFrameMs, on_tick, this);
@@ -183,81 +188,124 @@ void ProgressWave::commit_pending_seek() {
     seek_callback_(fraction * duration_);
 }
 
+namespace {
+
+// Rounded rectangle with an automatically clamped corner radius.
+void rounded_rect(cairo_t* cr, double x, double y, double w, double h,
+                  double radius) {
+    const double r = std::min(radius, std::min(w, h) / 2.0);
+    cairo_new_path(cr);
+    cairo_arc(cr, x + w - r, y + r, r, -M_PI / 2.0, 0.0);
+    cairo_arc(cr, x + w - r, y + h - r, r, 0.0, M_PI / 2.0);
+    cairo_arc(cr, x + r, y + h - r, r, M_PI / 2.0, M_PI);
+    cairo_arc(cr, x + r, y + r, r, M_PI, 3.0 * M_PI / 2.0);
+    cairo_close_path(cr);
+}
+
+} // namespace
+
 void ProgressWave::on_draw(GtkDrawingArea*, cairo_t* cr, int width,
                            int height, gpointer user_data) {
     auto* self = static_cast<ProgressWave*>(user_data);
     if (!self || width <= 0 || height <= 0) return;
 
+    // Quickshell "Wavy" layout: inset track, wave across the played fraction
+    // only, and a pill handle that narrows while pressed.
+    const double track_left = kEdgePadding;
+    const double track_right = std::max(track_left, width - kEdgePadding);
+    const double track_length = std::max(1.0, track_right - track_left);
+    const double center_y = std::round(height / 2.0);
+    const double progress = std::clamp(self->progress_, 0.0, 1.0);
+    const double played_end = track_left + progress * track_length;
     const double line_width = kWaveLineWidth;
     const double amplitude = line_width * kWaveAmplitudeMultiplier;
-    const double center_y = height / 2.0;
-    const double phase = self->wave_phase_;
+    const double phase =
+        self->animations_enabled() ? self->wave_phase_ : 0.0;
 
-    // When spectrum data is available, modulate the sine amplitude per band
-    // so the progress wave reacts to audio. Otherwise keep the decorative
-    // sine wave used before backend publication starts.
+    // Matches --accent-color / --accent-shadow tokens in resources/style.css.
+    const double accent_r = 0.655, accent_g = 0.545, accent_b = 0.980;
+
     auto wave_y = [&](double x) {
         double local_amplitude = amplitude;
         if (!self->spectrum_.empty()) {
-            const double ratio = std::clamp(x / static_cast<double>(width),
-                                            0.0, 1.0);
+            const double ratio = std::clamp(
+                (x - track_left) / track_length, 0.0, 1.0);
             const size_t band = std::min<size_t>(
                 static_cast<size_t>(ratio * self->spectrum_.size()),
                 self->spectrum_.size() - 1);
             const float magnitude = std::clamp(self->spectrum_[band], 0.0f, 1.0f);
             local_amplitude = amplitude * (0.4 + 1.6 * magnitude);
         }
+        // Wavelength is fixed to the full track length so the wave keeps its
+        // shape while the played fraction grows (Quickshell fullLength).
         return center_y + local_amplitude *
-            std::sin((2.0 * M_PI * kWaveFrequency * x / width) + phase);
+            std::sin((2.0 * M_PI * kWaveFrequency * (x - track_left) /
+                      track_length) + phase);
     };
 
-    const GdkRGBA unplayed = {0.48f, 0.44f, 0.62f, 0.80f};
-    const GdkRGBA played = {0.655f, 0.545f, 0.980f, 0.95f};
-
-    cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
-
-    cairo_set_line_width(cr, line_width + 6.0);
-    cairo_set_source_rgba(cr, played.red, played.green, played.blue, 0.12);
-    cairo_move_to(cr, 0.0, wave_y(0.0));
-    for (int x = 1; x <= width; ++x) {
-        cairo_line_to(cr, static_cast<double>(x), wave_y(x));
-    }
-    cairo_stroke(cr);
-
-    cairo_set_line_width(cr, line_width);
-    cairo_set_source_rgba(cr, unplayed.red, unplayed.green,
-                          unplayed.blue, unplayed.alpha);
-    cairo_move_to(cr, 0.0, wave_y(0.0));
-    for (int x = 1; x <= width; ++x) {
-        cairo_line_to(cr, static_cast<double>(x), wave_y(x));
-    }
-    cairo_stroke(cr);
-
-    const double progress = std::clamp(self->progress_, 0.0, 1.0);
-    const double end_x = progress * width;
-    if (end_x > 0.0) {
-        cairo_set_source_rgba(cr, played.red, played.green,
-                              played.blue, played.alpha);
-        cairo_move_to(cr, 0.0, wave_y(0.0));
-        for (int x = 1; x < static_cast<int>(end_x); ++x) {
-            cairo_line_to(cr, static_cast<double>(x), wave_y(x));
-        }
-        cairo_line_to(cr, end_x, wave_y(end_x));
-        cairo_stroke(cr);
-    }
-
-    cairo_set_source_rgba(cr, played.red, played.green, played.blue, 1.0);
-    cairo_set_line_width(cr, 2.0);
-    cairo_move_to(cr, end_x, center_y - 9.0);
-    cairo_line_to(cr, end_x, center_y + 9.0);
-    cairo_stroke(cr);
-    cairo_arc(cr, end_x, center_y, 4.0, 0.0, 2.0 * M_PI);
+    // 1. Rounded unplayed track.
+    rounded_rect(cr, track_left, center_y - kTrackHeight / 2.0,
+                 track_length, kTrackHeight, kTrackRadius);
+    cairo_set_source_rgba(cr, 0.58, 0.54, 0.70, 0.28);
     cairo_fill(cr);
+
+    // 2. Wavy fill, clipped to the played fraction. The stroke is inset by
+    // half a line width on each side so the round caps stay inside the clip.
+    if (played_end - track_left > line_width) {
+        cairo_save(cr);
+        cairo_rectangle(cr, track_left, 0.0,
+                        played_end - track_left, height);
+        cairo_clip(cr);
+
+        auto stroke_wave = [&](double stroke_width, double alpha) {
+            const double x0 = track_left + stroke_width / 2.0;
+            const double x1 = std::max(x0, played_end - stroke_width / 2.0);
+            cairo_set_line_width(cr, stroke_width);
+            cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+            cairo_set_source_rgba(cr, accent_r, accent_g, accent_b, alpha);
+            cairo_move_to(cr, x0, wave_y(x0));
+            for (double x = x0 + 1.0; x < x1; x += 1.0) {
+                cairo_line_to(cr, x, wave_y(x));
+            }
+            cairo_line_to(cr, x1, wave_y(x1));
+            cairo_stroke(cr);
+        };
+
+        stroke_wave(line_width + 6.0, 0.10); // soft glow behind the wave
+        stroke_wave(line_width, 0.95);
+        cairo_restore(cr);
+    }
+
+    // 3. Thin pill handle at the play position (narrows while dragging).
+    const double handle_width =
+        self->seeking_ ? kHandlePressedWidth : kHandleWidth;
+    rounded_rect(cr, played_end - handle_width / 2.0,
+                 center_y - kHandleHeight / 2.0, handle_width, kHandleHeight,
+                 handle_width / 2.0);
+    cairo_set_source_rgba(cr, accent_r, accent_g, accent_b, 1.0);
+    cairo_fill(cr);
+}
+
+bool ProgressWave::animations_enabled() const {
+    if (!wave_area_) return false;
+    GtkSettings* settings = gtk_widget_get_settings(wave_area_);
+    if (!settings) return true;
+    gboolean enable = TRUE;
+    g_object_get(settings, "gtk-enable-animations", &enable, nullptr);
+    return enable != FALSE;
 }
 
 gboolean ProgressWave::on_tick(gpointer user_data) {
     auto* self = static_cast<ProgressWave*>(user_data);
     if (!self || !self->wave_area_) return G_SOURCE_REMOVE;
+
+    // Honour reduced motion while running: drop the timer so no idle 30fps
+    // work is scheduled. Playback state changes restart it when enabled again.
+    if (!self->animations_enabled()) {
+        self->wave_tick_source_ = 0;
+        self->last_frame_time_ = 0;
+        return G_SOURCE_REMOVE;
+    }
 
     const gint64 now = g_get_monotonic_time();
     if (self->last_frame_time_ > 0) {

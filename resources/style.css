@@ -121,6 +121,8 @@ button {
                 border-color 150ms ease-out,
                 box-shadow 150ms ease-out,
                 transform 150ms ease-out;
+    /* Apple-like deceleration curve for interactive state changes. */
+    transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 button:hover {
@@ -765,12 +767,15 @@ listboxrow:selected {
     font-weight: var(--font-weight-regular);
 }
 
-/* Shared wavy progress bar: bottom, right, and PiP differ only in width. */
+/* Shared wavy progress bar: bottom, right, and PiP differ only in width.
+ * The played fill is the Cairo wave; GTK only sizes the transparent scale
+ * used for pointer, keyboard and accessibility input. */
 .progress-wave,
 .progress-wavy-area {
     min-width: 0;
     min-height: 28px;
     margin: 0;
+    padding: 0;
     background-color: transparent;
 }
 
@@ -778,6 +783,7 @@ listboxrow:selected {
 .progress-wavy-scale {
     min-width: 0;
     min-height: 28px;
+    padding: 0;
     opacity: 0;
 }
 
@@ -787,14 +793,18 @@ listboxrow:selected {
     min-width: 0;
     min-height: 0;
     margin: 0;
+    padding: 0;
     border: none;
     background-color: transparent;
     box-shadow: none;
 }
 
+/* Apple-style breathing room around the shared strip. */
 .now-playing-progress-row {
     min-width: 0;
-    min-height: 36px;
+    min-height: 32px;
+    margin-top: 2px;
+    margin-bottom: 2px;
 }
 
 .now-playing-main-controls {
@@ -987,6 +997,8 @@ listboxrow:selected {
 .pip-progress {
     min-width: 0;
     min-height: 28px;
+    padding: 0;
+    background-color: transparent;
 }
 
 .bottom-playback-mode-button {
