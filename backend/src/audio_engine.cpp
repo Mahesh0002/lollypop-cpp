@@ -93,6 +93,7 @@ struct AudioEngine::Impl {
     void destroy_pipeline();
     static void on_decodebin_pad_added(GstElement* decodebin, GstPad* pad,
                                        gpointer user_data);
+    static GstFlowReturn on_viz_sample(GstAppSink* sink, gpointer user_data);
     GstPad* request_tee_pad(const char* pad_name);
 };
 
@@ -176,26 +177,8 @@ bool AudioEngine::initialize() {
         return true;
     }
 
-    // Create the pipeline (NOT playbin - playbin wrapper caused crashes).
-    impl->pipeline = gst_pipeline_new("audio-pipeline");
-    if (!impl->pipeline) {
-        std::cerr << "AudioEngine: Failed to create pipeline" << std::endl;
-        return false;
-    }
-
-    // Bus watch for messages.
-    GstBus* bus = gst_pipeline_get_bus(GST_PIPELINE(impl->pipeline));
-    impl->bus_watch_id = gst_bus_add_watch(bus, Impl::bus_callback, this);
-    gst_object_unref(bus);
-
-    // Position polling timer (100ms = 10fps).
-    impl->position_timeout_id = g_timeout_add(100, Impl::position_timeout,
-                                              this);
-
-    // Build the pipeline elements.
-    if (!impl->build_pipeline("")) {
-        return false;
-    }
+    // Lazy initialization: only initialize GStreamer, don't create pipeline yet.
+    // Pipeline will be created on first load_track() call.
 
     impl->initialized = true;
     impl->current_state = PlaybackState::Stopped;
@@ -226,9 +209,12 @@ void AudioEngine::shutdown() {
         impl->bus_watch_id = 0;
     }
 
-    // Disconnect appsink callbacks before tearing down the pipeline.
+    // Disconnect appsink callbacks before tearing down the pipeline. The
+    // visualization handler is connected with the Impl pointer as its data,
+    // not the AudioEngine pointer, so both data keys are cleared.
     if (impl->appsink) {
         g_signal_handlers_disconnect_by_data(impl->appsink, this);
+        g_signal_handlers_disconnect_by_data(impl->appsink, impl);
         g_object_set(impl->appsink, "emit-signals", FALSE, nullptr);
     }
 
@@ -309,6 +295,14 @@ void AudioEngine::Impl::on_decodebin_pad_added(GstElement* /*decodebin*/,
 }
 
 bool AudioEngine::Impl::build_pipeline(const std::string& uri) {
+    // Create the top-level pipeline bin first: every element below is added
+    // to it. Without this the add/link calls operate on a null bin.
+    pipeline = gst_pipeline_new("lollypop-pipeline");
+    if (!pipeline) {
+        std::cerr << "AudioEngine: Failed to create pipeline" << std::endl;
+        return false;
+    }
+
     // filesrc
     filesrc = gst_element_factory_make("filesrc", "filesrc");
     if (!filesrc) {
@@ -421,6 +415,11 @@ bool AudioEngine::Impl::build_pipeline(const std::string& uri) {
     g_object_set(appsink, "drop", TRUE, nullptr);
     g_object_set(appsink, "sync", FALSE, nullptr);
     g_object_set(appsink, "async", FALSE, nullptr);
+    // Feed the visualizer from the appsink branch. The handler runs on the
+    // streaming thread, converts interleaved S16 stereo to mono float, then
+    // hands the samples to VisualizerEngine (via set_viz_samples_callback).
+    g_signal_connect(appsink, "new-sample",
+                     G_CALLBACK(on_viz_sample), this);
 
     // Set the post-tee volume to the initial level.
     g_object_set(volume_element, "volume", volume_, nullptr);
@@ -485,6 +484,43 @@ bool AudioEngine::Impl::build_pipeline(const std::string& uri) {
     return true;
 }
 
+GstFlowReturn AudioEngine::Impl::on_viz_sample(GstAppSink* sink,
+                                               gpointer user_data) {
+    auto* impl = static_cast<Impl*>(user_data);
+    GstSample* sample = gst_app_sink_pull_sample(sink);
+    if (!sample) {
+        return gst_app_sink_is_eos(sink) ? GST_FLOW_EOS : GST_FLOW_ERROR;
+    }
+
+    GstBuffer* buffer = gst_sample_get_buffer(sample);
+    GstMapInfo map;
+    if (buffer && gst_buffer_map(buffer, &map, GST_MAP_READ)) {
+        // The capsfilter negotiates S16LE, 2 channels, interleaved. Mix down
+        // to mono float because the FFT consumes a single channel.
+        const auto* pcm = reinterpret_cast<const gint16*>(map.data);
+        const std::size_t frames = map.size / (sizeof(gint16) * 2);
+        std::vector<float> mono(frames);
+        for (std::size_t i = 0; i < frames; ++i) {
+            mono[i] = 0.5f *
+                      (static_cast<float>(pcm[2 * i]) +
+                       static_cast<float>(pcm[2 * i + 1])) /
+                      32768.0f;
+        }
+
+        std::function<void(const float*, size_t)> cb;
+        {
+            std::lock_guard<std::mutex> lock(impl->callback_mutex);
+            cb = impl->viz_cb;
+        }
+        if (cb && !mono.empty()) cb(mono.data(), mono.size());
+
+        gst_buffer_unmap(buffer, &map);
+    }
+
+    gst_sample_unref(sample);
+    return GST_FLOW_OK;
+}
+
 void AudioEngine::Impl::destroy_pipeline() {
     // Release requested tee pads before destroying the pipeline.
     // Requested pads hold an extra reference that must be released.
@@ -536,7 +572,7 @@ GstPad* AudioEngine::Impl::request_tee_pad(const char* pad_name) {
 
 bool AudioEngine::load_track(const std::string& file_path) {
     Impl* impl = impl_.get();
-    if (!impl || !impl->pipeline) return false;
+    if (!impl) return false;
 
     if (file_path.empty()) {
         std::cerr << "AudioEngine: Empty file path" << std::endl;
@@ -547,6 +583,25 @@ bool AudioEngine::load_track(const std::string& file_path) {
         std::cerr << "AudioEngine: File does not exist: " << file_path
                   << std::endl;
         return false;
+    }
+
+    // Lazy pipeline creation: build pipeline on first load.
+    if (!impl->pipeline) {
+        if (!impl->build_pipeline(file_path)) {
+            // Tear down any partially built elements so a retry can rebuild.
+            impl->destroy_pipeline();
+            return false;
+        }
+        // Bus watch for messages.
+        GstBus* bus = gst_pipeline_get_bus(GST_PIPELINE(impl->pipeline));
+        impl->bus_watch_id = gst_bus_add_watch(bus, Impl::bus_callback, this);
+        gst_object_unref(bus);
+
+        // Position polling timer (100ms = 10fps).
+        impl->position_timeout_id = g_timeout_add(100, Impl::position_timeout,
+                                                  this);
+
+        impl->current_state = PlaybackState::Stopped;
     }
 
     // Increment load generation to invalidate any pending callbacks
@@ -679,8 +734,10 @@ void AudioEngine::seek(double position_seconds) {
     if (target_ns > duration_ns) target_ns = duration_ns;
     position_seconds = static_cast<double>(target_ns) / GST_SECOND;
 
-    // Store pending seek with generation
-    uint64_t gen = ++impl->seek_generation;
+    // Store pending seek. Position queries report this target until the
+    // pipeline confirms the flush with ASYNC_DONE, so the UI never snaps
+    // back to the pre-seek position.
+    ++impl->seek_generation;
     impl->pending_seek_position.store(target_ns);
     impl->seek_pending.store(true);
 
@@ -964,10 +1021,19 @@ void AudioEngine::Impl::update_position() {
         gst_element_query_duration(GST_ELEMENT(pipeline), GST_FORMAT_TIME,
                                    &dur_ns);
 
-    double position =
-        have_pos ? static_cast<double>(pos_ns) / GST_SECOND : 0.0;
     double duration =
         have_dur ? static_cast<double>(dur_ns) / GST_SECOND : 0.0;
+
+    double position;
+    if (seek_pending.load(std::memory_order_relaxed)) {
+        // A flush seek is in flight; report the requested target instead of
+        // the stale pre-seek pipeline position.
+        position = static_cast<double>(
+            pending_seek_position.load(std::memory_order_relaxed)) / GST_SECOND;
+    } else {
+        position =
+            have_pos ? static_cast<double>(pos_ns) / GST_SECOND : 0.0;
+    }
 
     PositionCallback cb;
     {

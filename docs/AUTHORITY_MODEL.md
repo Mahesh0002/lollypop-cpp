@@ -173,6 +173,65 @@ struct PlaybackState {
 
 ---
 
+## Playback Source Authority (Internal vs External MPRIS)
+
+In addition to the shell→GTK authority model, `lollypop-cpp` supports two playback
+sources that can be active at any time:
+
+| Source | Description | Control Path |
+|--------|-------------|--------------|
+| **Internal** | Local `AudioEngine` (GStreamer) | Direct `AudioEngine` calls via `BackendController` |
+| **External** | Remote MPRIS player (Spotify, etc.) | MPRIS D-Bus calls via `MprisManager` |
+
+Only **one source is authoritative** at a time, managed by `PlaybackSourceManager`.
+The active source is selected via:
+- `BackendController::set_playback_source_internal()`
+- `BackendController::set_playback_source_external()`
+- `BackendController::is_playback_source_internal()`
+
+### Transport Verb Routing
+
+All transport verbs route through `PlaybackSourceManager`:
+
+| Verb | Internal Source | External Source |
+|------|-----------------|-----------------|
+| `play_pause` | `AudioEngine::play()/pause()` | `MprisManager::play_pause()` |
+| `play` | `AudioEngine::play()` | `MprisManager::play()` |
+| `pause` | `AudioEngine::pause()` | `MprisManager::pause()` |
+| `stop` | `AudioEngine::stop()` + clear track | `MprisManager::stop()` |
+| `next` | `QueueManager::next_index()` + `start_queue_index()` | `MprisManager::next()` |
+| `previous` | `QueueManager::previous_index()` + `start_queue_index()` (or seek 0) | `MprisManager::previous()` |
+| `seek` | `AudioEngine::seek()` (debounced, 200ms) | `MprisManager::seek()` (absolute) |
+| `seek_by` | `AudioEngine::seek(current + offset)` | `MprisManager::seek_by()` (relative) |
+| `set_volume` | `AudioEngine::set_volume()` | `MprisManager::set_volume()` |
+
+### Capability Queries
+
+Capabilities reflect the active source:
+
+| Capability | Internal | External |
+|------------|----------|----------|
+| `can_control` | Always true (if AudioEngine exists) | `MprisManager::can_control()` |
+| `can_seek` | `AudioEngine::can_seek()` (requires loaded track) | `MprisManager::can_seek()` |
+| `can_go_next` | Always true (queue manager handles) | `MprisManager::can_go_next()` |
+| `can_go_previous` | Always true (queue manager handles) | `MprisManager::can_go_previous()` |
+
+### Unsupported Verb Behavior
+
+When a verb is not supported by the active source (e.g., `seek` on unseekable stream,
+`next` on external player with `CanGoNext=false`), the call:
+- **Does not silently fake success**
+- Returns early or emits current state without change
+- `can_*()` queries allow UI to disable insensitive controls proactively
+
+### Source Switching
+
+- Switching sources stops playback on the previous source
+- Queue/track state is preserved for internal source
+- External player state is managed by the external player itself
+
+---
+
 ## Acceptance Criteria (Authority Model)
 
 - [ ] Shell media keys control `lollypop-cpp` playback via MPRIS.
@@ -181,3 +240,7 @@ struct PlaybackState {
 - [ ] GTK panels do **not** call SQL or GStreamer directly.
 - [ ] Bottom bar height ≤112 px.
 - [ ] `MprisServer` identity discoverable by shell `MprisController.qml`.
+- [ ] Transport verbs route through `PlaybackSourceManager` based on active source.
+- [ ] `can_seek()` returns false for unseekable sources (no track loaded / external player without CanSeek).
+- [ ] Unsupported verbs on external source don't crash; fail gracefully.
+- [ ] Source switching via `set_playback_source_internal/external()` works correctly.

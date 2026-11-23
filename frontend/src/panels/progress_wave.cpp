@@ -153,6 +153,11 @@ void ProgressWave::set_seek_callback(SeekCallback callback) {
     seek_callback_ = std::move(callback);
 }
 
+void ProgressWave::set_spectrum(const std::vector<float>& magnitudes) {
+    spectrum_ = magnitudes;
+    if (wave_area_) gtk_widget_queue_draw(wave_area_);
+}
+
 void ProgressWave::start_animation() {
     if (wave_tick_source_ != 0) return;
 
@@ -188,8 +193,21 @@ void ProgressWave::on_draw(GtkDrawingArea*, cairo_t* cr, int width,
     const double center_y = height / 2.0;
     const double phase = self->wave_phase_;
 
+    // When spectrum data is available, modulate the sine amplitude per band
+    // so the progress wave reacts to audio. Otherwise keep the decorative
+    // sine wave used before backend publication starts.
     auto wave_y = [&](double x) {
-        return center_y + amplitude *
+        double local_amplitude = amplitude;
+        if (!self->spectrum_.empty()) {
+            const double ratio = std::clamp(x / static_cast<double>(width),
+                                            0.0, 1.0);
+            const size_t band = std::min<size_t>(
+                static_cast<size_t>(ratio * self->spectrum_.size()),
+                self->spectrum_.size() - 1);
+            const float magnitude = std::clamp(self->spectrum_[band], 0.0f, 1.0f);
+            local_amplitude = amplitude * (0.4 + 1.6 * magnitude);
+        }
+        return center_y + local_amplitude *
             std::sin((2.0 * M_PI * kWaveFrequency * x / width) + phase);
     };
 

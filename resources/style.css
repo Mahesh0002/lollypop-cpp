@@ -293,7 +293,7 @@ listboxrow:selected {
 
 .sidebar-nav-icon {
     color: var(--text-secondary);
-    min-width: 22px;
+    min-width: 26px;
     min-height: 22px;
 }
 
@@ -582,6 +582,13 @@ listboxrow:selected {
     border-radius: var(--radius-sm);
     transition: background-color 100ms ease-out;
 }
+
+.track-row-title,
+.track-row-artist,
+.track-row-album {
+    min-width: 0;
+}
+
 
 .track-row:hover {
     background-color: var(--bg-hover);

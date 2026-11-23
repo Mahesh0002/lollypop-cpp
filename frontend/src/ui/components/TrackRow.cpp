@@ -9,9 +9,174 @@
 #include "ui/animation/SpringAnimation.hpp"
 
 #include <gtk/gtk.h>
+#include <algorithm>
 #include <iostream>
+#include <vector>
 
 namespace lollypop {
+
+namespace {
+
+constexpr int kColumnSpacing = 12;
+constexpr const char* kTrackColumnRoleKey = "track-column-role";
+constexpr int kTitleShare = 20;
+constexpr int kArtistShare = 30;
+constexpr int kAlbumShare = 25;
+constexpr int kTotalShare = kTitleShare + kArtistShare + kAlbumShare;
+
+int role_index(TrackColumnRole role) {
+    switch (role) {
+        case TrackColumnRole::Title:  return 0;
+        case TrackColumnRole::Artist: return 1;
+        case TrackColumnRole::Album:  return 2;
+        case TrackColumnRole::Fixed:  break;
+    }
+    return -1;
+}
+
+TrackColumnRole column_role(GtkWidget* widget) {
+    return static_cast<TrackColumnRole>(
+        GPOINTER_TO_INT(g_object_get_data(G_OBJECT(widget),
+                                          kTrackColumnRoleKey)));
+}
+
+GtkSizeRequestMode track_columns_request_mode(GtkWidget*) {
+    return GTK_SIZE_REQUEST_HEIGHT_FOR_WIDTH;
+}
+
+void track_columns_measure(GtkWidget* widget, GtkOrientation orientation,
+                           int for_size, int* minimum, int* natural,
+                           int* minimum_baseline, int* natural_baseline) {
+    int min_size = 0;
+    int nat_size = 0;
+    int min_baseline = -1;
+    int nat_baseline = -1;
+    int visible_children = 0;
+
+    for (GtkWidget* child = gtk_widget_get_first_child(widget); child;
+         child = gtk_widget_get_next_sibling(child)) {
+        if (!gtk_widget_get_visible(child)) continue;
+        ++visible_children;
+
+        int child_min = 0;
+        int child_nat = 0;
+        int child_min_baseline = -1;
+        int child_nat_baseline = -1;
+        gtk_widget_measure(child, orientation, for_size,
+                           &child_min, &child_nat,
+                           &child_min_baseline, &child_nat_baseline);
+
+        if (orientation == GTK_ORIENTATION_HORIZONTAL) {
+            min_size += child_min;
+            nat_size += child_nat;
+        } else {
+            min_size = std::max(min_size, child_min);
+            nat_size = std::max(nat_size, child_nat);
+        }
+        min_baseline = std::max(min_baseline, child_min_baseline);
+        nat_baseline = std::max(nat_baseline, child_nat_baseline);
+    }
+
+    if (visible_children > 1) {
+        const int gaps = (visible_children - 1) * kColumnSpacing;
+        min_size += gaps;
+        nat_size += gaps;
+    }
+
+    if (minimum) *minimum = min_size;
+    if (natural) *natural = nat_size;
+    if (minimum_baseline) {
+        *minimum_baseline = orientation == GTK_ORIENTATION_HORIZONTAL
+                                ? -1 : min_baseline;
+    }
+    if (natural_baseline) {
+        *natural_baseline = orientation == GTK_ORIENTATION_HORIZONTAL
+                                ? -1 : nat_baseline;
+    }
+}
+
+void track_columns_allocate(GtkWidget* widget, int width, int height,
+                            int baseline) {
+    std::vector<GtkWidget*> children;
+    for (GtkWidget* child = gtk_widget_get_first_child(widget); child;
+         child = gtk_widget_get_next_sibling(child)) {
+        if (gtk_widget_get_visible(child)) children.push_back(child);
+    }
+    if (children.empty()) return;
+
+    const int gaps = static_cast<int>(children.size() - 1) * kColumnSpacing;
+    std::vector<int> widths(children.size(), 0);
+    int fixed_total = 0;
+    int flex_minimum[3] = {0, 0, 0};
+
+    for (size_t i = 0; i < children.size(); ++i) {
+        int child_min = 0;
+        int child_nat = 0;
+        gtk_widget_measure(children[i], GTK_ORIENTATION_HORIZONTAL, -1,
+                           &child_min, &child_nat, nullptr, nullptr);
+        const int idx = role_index(column_role(children[i]));
+        if (idx < 0) {
+            widths[i] = std::max(child_min, child_nat);
+            fixed_total += widths[i];
+        } else {
+            flex_minimum[idx] = child_min;
+        }
+    }
+
+    int available = width - fixed_total - gaps;
+    int shares[3] = {0, 0, 0};
+    if (available > 0) {
+        shares[0] = available * kTitleShare / kTotalShare;
+        shares[1] = available * kArtistShare / kTotalShare;
+        shares[2] = available - shares[0] - shares[1];
+    }
+    for (int i = 0; i < 3; ++i) {
+        shares[i] = std::max(shares[i], flex_minimum[i]);
+    }
+
+    int flex_total = shares[0] + shares[1] + shares[2];
+    while (available >= 0 && flex_total > available) {
+        int largest = -1;
+        int largest_excess = 0;
+        for (int i = 0; i < 3; ++i) {
+            const int excess = shares[i] - flex_minimum[i];
+            if (excess > largest_excess) {
+                largest_excess = excess;
+                largest = i;
+            }
+        }
+        if (largest < 0) break;
+        const int reduction = std::min(largest_excess, flex_total - available);
+        shares[largest] -= reduction;
+        flex_total -= reduction;
+    }
+
+    int x = 0;
+    for (size_t i = 0; i < children.size(); ++i) {
+        const int idx = role_index(column_role(children[i]));
+        if (idx >= 0) widths[i] = shares[idx];
+        const int child_width = std::max(0, widths[i]);
+        graphene_point_t position = {static_cast<float>(x), 0.0f};
+        gtk_widget_allocate(children[i], child_width, height, baseline,
+                            gsk_transform_translate(nullptr, &position));
+        x += child_width + kColumnSpacing;
+    }
+    (void)widget;
+}
+
+}  // namespace
+
+void set_track_column_role(GtkWidget* widget, TrackColumnRole role) {
+    if (!widget) return;
+    g_object_set_data(G_OBJECT(widget), kTrackColumnRoleKey,
+                      GINT_TO_POINTER(static_cast<int>(role)));
+}
+
+GtkLayoutManager* create_track_columns_layout() {
+    return gtk_custom_layout_new(track_columns_request_mode,
+                                 track_columns_measure,
+                                 track_columns_allocate);
+}
 
 TrackRow::TrackRow(MainWindow* main_window, const Track& track, int track_number)
     : main_window_(main_window), track_(track), track_number_(track_number) {
@@ -25,13 +190,16 @@ void TrackRow::setup_ui() {
     g_object_ref_sink(widget_.get());
     gtk_widget_add_css_class(widget_.get(), "track-row");
     gtk_widget_set_hexpand(widget_.get(), TRUE);
+    gtk_widget_set_size_request(widget_.get(), -1, 40);
+    gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(widget_.get()), TRUE);
     gtk_widget_set_visible(widget_.get(), TRUE);
 
     GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_set_layout_manager(box, create_track_columns_layout());
     gtk_widget_set_margin_start(box, 12);
     gtk_widget_set_margin_end(box, 12);
-    gtk_widget_set_margin_top(box, 6);
-    gtk_widget_set_margin_bottom(box, 6);
+    gtk_widget_set_margin_top(box, 4);
+    gtk_widget_set_margin_bottom(box, 4);
     gtk_widget_set_visible(box, TRUE);
 
     // Track number
@@ -51,7 +219,9 @@ void TrackRow::setup_ui() {
     gtk_label_set_xalign(GTK_LABEL(title_label_.get()), 0.0);
     gtk_label_set_ellipsize(GTK_LABEL(title_label_.get()),
                             PANGO_ELLIPSIZE_END);
-    gtk_widget_set_hexpand(title_label_.get(), TRUE);
+    gtk_widget_set_hexpand(title_label_.get(), FALSE);
+    gtk_widget_set_valign(title_label_.get(), GTK_ALIGN_CENTER);
+    set_track_column_role(title_label_.get(), TrackColumnRole::Title);
     gtk_widget_set_visible(title_label_.get(), TRUE);
     gtk_box_append(GTK_BOX(box), title_label_.get());
 
@@ -62,7 +232,9 @@ void TrackRow::setup_ui() {
     gtk_label_set_xalign(GTK_LABEL(artist_label_.get()), 0.0);
     gtk_label_set_ellipsize(GTK_LABEL(artist_label_.get()),
                             PANGO_ELLIPSIZE_END);
-    gtk_widget_set_hexpand(artist_label_.get(), TRUE);
+    gtk_widget_set_hexpand(artist_label_.get(), FALSE);
+    gtk_widget_set_valign(artist_label_.get(), GTK_ALIGN_CENTER);
+    set_track_column_role(artist_label_.get(), TrackColumnRole::Artist);
     gtk_widget_set_visible(artist_label_.get(), TRUE);
     gtk_box_append(GTK_BOX(box), artist_label_.get());
 
@@ -73,7 +245,9 @@ void TrackRow::setup_ui() {
     gtk_label_set_xalign(GTK_LABEL(album_label_.get()), 0.0);
     gtk_label_set_ellipsize(GTK_LABEL(album_label_.get()),
                             PANGO_ELLIPSIZE_END);
-    gtk_widget_set_hexpand(album_label_.get(), TRUE);
+    gtk_widget_set_hexpand(album_label_.get(), FALSE);
+    gtk_widget_set_valign(album_label_.get(), GTK_ALIGN_CENTER);
+    set_track_column_role(album_label_.get(), TrackColumnRole::Album);
     gtk_widget_set_visible(album_label_.get(), TRUE);
     gtk_box_append(GTK_BOX(box), album_label_.get());
 
@@ -101,10 +275,10 @@ void TrackRow::setup_ui() {
     gtk_button_set_child(GTK_BUTTON(like_button_.get()), like_icon);
     gtk_widget_set_halign(like_button_.get(), GTK_ALIGN_END);
     // Consistent spacing on all four sides.
-    gtk_widget_set_margin_start(like_button_.get(), 10);
-    gtk_widget_set_margin_end(like_button_.get(), 10);
-    gtk_widget_set_margin_top(like_button_.get(), 10);
-    gtk_widget_set_margin_bottom(like_button_.get(), 10);
+    gtk_widget_set_margin_start(like_button_.get(), 8);
+    gtk_widget_set_margin_end(like_button_.get(), 8);
+    gtk_widget_set_margin_top(like_button_.get(), 4);
+    gtk_widget_set_margin_bottom(like_button_.get(), 4);
     g_signal_connect(like_button_.get(), "clicked",
                      G_CALLBACK(on_like_clicked), this);
     gtk_widget_set_visible(like_button_.get(), TRUE);

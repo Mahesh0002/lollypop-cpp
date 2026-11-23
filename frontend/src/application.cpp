@@ -69,18 +69,29 @@ void Application::hide_pip() {
 }
 
 void Application::on_activate() {
-    // Initialize backend (owns storage, audio engine and MPRIS)
+    // Create the backend first (not yet initialized) so MainWindow's layout
+    // can obtain a valid service pointer when building the UI widgets.
     backend_ = std::make_unique<BackendController>();
 
-    if (!backend_->initialize()) {
-        std::cerr << "Failed to initialize backend" << std::endl;
-        return;
-    }
-
-    // Create and present the window before any library scan work so the
-    // first frame is not blocked by filesystem or metadata parsing.
+    // Create and present the window immediately so the user sees something
+    // before any slow backend work. Backend initialization is deferred to
+    // idle so the first frame paints without waiting for storage/audio/MPRIS.
     main_window_ = std::make_unique<MainWindow>(this);
     main_window_->present();
+
+    g_idle_add(
+        [](gpointer data) -> gboolean {
+            auto* self = static_cast<Application*>(data);
+            if (!self->backend_) return G_SOURCE_REMOVE;
+            if (!self->backend_->initialize()) {
+                std::cerr << "Failed to initialize backend" << std::endl;
+            }
+            if (self->main_window_) {
+                self->main_window_->setup_after_backend();
+            }
+            return G_SOURCE_REMOVE;
+        },
+        this);
 
     // Delay the initial scan until the window has had a chance to paint.
     g_timeout_add_full(
@@ -96,11 +107,9 @@ void Application::on_activate() {
 void Application::on_startup() {
     // Create and initialize theme manager
     theme_manager_ = std::make_unique<ThemeManager>();
-#ifdef LOLLYPOP_DATA_DIR
-    theme_manager_->load_stylesheet(std::string(LOLLYPOP_DATA_DIR) + "/style.css");
-#else
-    theme_manager_->load_stylesheet("resources/style.css");
-#endif
+    // Always load CSS from the compiled-in gresource. No relative paths -
+    // the app must look identical regardless of CWD or install location.
+    theme_manager_->load_stylesheet("/com/mahesh/lollypop/style.css");
 
     // Apply development default accent color
     auto accent_r = 0.65, accent_g = 0.45, accent_b = 1.0;

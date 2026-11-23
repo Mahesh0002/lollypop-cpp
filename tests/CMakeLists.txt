@@ -83,3 +83,37 @@ target_link_libraries(test_seek PRIVATE
 )
 
 add_test(NAME seek_tests COMMAND test_seek)
+
+# Authority routing tests
+add_executable(test_authority
+    test_authority.cpp
+)
+
+target_link_libraries(test_authority PRIVATE
+    lollypop-backend
+    lollypop-storage
+    ${SQLITE3_LIBRARIES}
+    ${GLIB_LIBRARIES}
+    ${GIO_LIBRARIES}
+    GTest::gtest
+    GTest::gtest_main
+)
+
+add_test(NAME authority_tests COMMAND test_authority)
+
+# Incremental scan tests
+add_executable(test_scan_incremental
+    test_scan_incremental.cpp
+)
+
+target_link_libraries(test_scan_incremental PRIVATE
+    lollypop-backend
+    lollypop-storage
+    ${SQLITE3_LIBRARIES}
+    ${GLIB_LIBRARIES}
+    ${GIO_LIBRARIES}
+    GTest::gtest
+    GTest::gtest_main
+)
+
+add_test(NAME scan_incremental_tests COMMAND test_scan_incremental)

@@ -24,12 +24,15 @@
 #include <chrono>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 #include <random>
 #include <sstream>
+#include <unordered_map>
 #include <sys/stat.h>
 
 namespace lollypop {
@@ -223,6 +226,16 @@ struct LibraryScanner::Impl {
     ErrorCallback error_cb;
     std::atomic<bool> cancelled{false};
 
+    // Incremental scan cache: file_path -> (mtime, size).
+    // Persisted to disk to survive restarts.
+    struct FileMeta {
+        std::time_t mtime = 0;
+        std::uintmax_t size = 0;
+    };
+    std::unordered_map<std::string, FileMeta> scan_cache_;
+    std::string cache_path_;
+    std::mutex cache_mutex_;
+
     using ProgressClock = std::chrono::steady_clock;
     static constexpr auto kProgressInterval = std::chrono::milliseconds(100);
     ProgressClock::time_point last_progress_emit_{};
@@ -237,6 +250,85 @@ struct LibraryScanner::Impl {
         if (!force && now - last_progress_emit_ < kProgressInterval) return;
         last_progress_emit_ = now;
         progress_cb(progress);
+    }
+
+    // Load incremental scan cache from disk.
+    void load_cache() {
+        if (cache_path_.empty()) return;
+        std::ifstream in(cache_path_);
+        if (!in) return;
+        std::string line;
+        while (std::getline(in, line)) {
+            if (line.empty()) continue;
+            // Format: path|mtime|size
+            size_t pos1 = line.find('|');
+            if (pos1 == std::string::npos) continue;
+            size_t pos2 = line.find('|', pos1 + 1);
+            if (pos2 == std::string::npos) continue;
+            std::string path = line.substr(0, pos1);
+            std::string mtime_str = line.substr(pos1 + 1, pos2 - pos1 - 1);
+            std::string size_str = line.substr(pos2 + 1);
+            try {
+                FileMeta meta;
+                meta.mtime = std::stoll(mtime_str);
+                meta.size = std::stoull(size_str);
+                std::lock_guard<std::mutex> lock(cache_mutex_);
+                scan_cache_[std::move(path)] = meta;
+            } catch (...) {
+                // Skip malformed lines
+            }
+        }
+    }
+
+    // Save incremental scan cache to disk.
+    void save_cache() {
+        if (cache_path_.empty()) return;
+        std::ofstream out(cache_path_ + ".tmp");
+        if (!out) return;
+        std::lock_guard<std::mutex> lock(cache_mutex_);
+        for (const auto& [path, meta] : scan_cache_) {
+            out << path << '|' << meta.mtime << '|' << meta.size << '\n';
+        }
+        out.close();
+        if (out) {
+            std::error_code ec;
+            std::filesystem::rename(cache_path_ + ".tmp", cache_path_, ec);
+        }
+    }
+
+    // Check if file is unchanged since last scan.
+    // Returns true if file should be skipped (unchanged).
+    bool is_file_unchanged(const std::string& file_path) {
+        if (cache_path_.empty()) return false;
+        std::error_code ec;
+        auto status = std::filesystem::status(file_path, ec);
+        if (ec) return false;
+        std::time_t mtime = std::chrono::system_clock::to_time_t(
+            std::chrono::clock_cast<std::chrono::system_clock>(
+                std::filesystem::last_write_time(file_path, ec)));
+        if (ec) return false;
+        std::uintmax_t size = std::filesystem::file_size(file_path, ec);
+        if (ec) return false;
+
+        std::lock_guard<std::mutex> lock(cache_mutex_);
+        auto it = scan_cache_.find(file_path);
+        if (it == scan_cache_.end()) return false;
+        return it->second.mtime == mtime && it->second.size == size;
+    }
+
+    // Update cache entry for a file after successful processing.
+    void update_cache(const std::string& file_path) {
+        if (cache_path_.empty()) return;
+        std::error_code ec;
+        std::time_t mtime = std::chrono::system_clock::to_time_t(
+            std::chrono::clock_cast<std::chrono::system_clock>(
+                std::filesystem::last_write_time(file_path, ec)));
+        if (ec) return;
+        std::uintmax_t size = std::filesystem::file_size(file_path, ec);
+        if (ec) return;
+
+        std::lock_guard<std::mutex> lock(cache_mutex_);
+        scan_cache_[file_path] = FileMeta{mtime, size};
     }
 
     void scan_recursive(const std::filesystem::path& path) {
@@ -271,6 +363,16 @@ struct LibraryScanner::Impl {
                 progress.files_found++;
                 progress.current_file = file_path.string();
                 emit_progress();
+
+                // Incremental scan: skip unchanged files.
+                if (is_file_unchanged(file_path.string())) {
+                    // File unchanged, but we still need to emit track_found
+                    // with the existing track data. Since we don't have it here,
+                    // we just count it as processed.
+                    progress.files_processed++;
+                    emit_progress();
+                    continue;
+                }
 
                 process_file_safe(file_path.string());
                 progress.files_processed++;
@@ -388,6 +490,9 @@ struct LibraryScanner::Impl {
         extract_artwork(file.file(), track, artwork_key);
 
         if (track_cb) track_cb(track);
+
+        // Update incremental scan cache on successful processing.
+        update_cache(file_path);
     }
 
     std::string generate_id(const std::string& identity_source) {
@@ -441,6 +546,8 @@ void LibraryScanner::scan_directory(const std::string& path, bool recursive) {
     impl_->progress = ScanProgress{};
     impl_->cancelled = false;
     impl_->reset_progress_state();
+    // Load incremental scan cache before scanning.
+    impl_->load_cache();
     if (recursive) {
         impl_->scan_recursive(path);
     } else {
@@ -462,18 +569,28 @@ void LibraryScanner::scan_directory(const std::string& path, bool recursive) {
             impl_->progress.files_found++;
             impl_->progress.current_file = it->path().string();
             impl_->emit_progress();
+            // Check incremental cache for non-recursive scan too.
+            if (impl_->is_file_unchanged(it->path().string())) {
+                impl_->progress.files_processed++;
+                impl_->emit_progress();
+                continue;
+            }
             impl_->process_file_safe(it->path().string());
             impl_->progress.files_processed++;
             impl_->emit_progress();
         }
         impl_->emit_progress(true);
     }
+    // Save cache after scan completes.
+    impl_->save_cache();
 }
 
 void LibraryScanner::scan_file(const std::string& path) {
     impl_->progress = ScanProgress{};
     impl_->cancelled = false;
     impl_->reset_progress_state();
+    // Load incremental scan cache before scanning.
+    impl_->load_cache();
     std::error_code ec;
     if (!std::filesystem::is_regular_file(path, ec)) {
         if (impl_->error_cb) impl_->error_cb(path, "Not a regular file");
@@ -487,9 +604,16 @@ void LibraryScanner::scan_file(const std::string& path) {
     impl_->progress.files_found++;
     impl_->progress.current_file = path;
     impl_->emit_progress();
-    impl_->process_file_safe(path);
-    impl_->progress.files_processed++;
-    impl_->emit_progress(true);
+    if (impl_->is_file_unchanged(path)) {
+        impl_->progress.files_processed++;
+        impl_->emit_progress(true);
+    } else {
+        impl_->process_file_safe(path);
+        impl_->progress.files_processed++;
+        impl_->emit_progress(true);
+    }
+    // Save cache after scan completes.
+    impl_->save_cache();
 }
 
 void LibraryScanner::cancel() {
@@ -514,6 +638,10 @@ void LibraryScanner::set_track_found_callback(TrackFoundCallback cb) {
 
 void LibraryScanner::set_error_callback(ErrorCallback cb) {
     impl_->error_cb = std::move(cb);
+}
+
+void LibraryScanner::set_incremental_cache_path(const std::string& cache_path) {
+    impl_->cache_path_ = cache_path;
 }
 
 bool LibraryScanner::is_audio_file(const std::string& path) {

@@ -87,6 +87,11 @@ bool BackendController::initialize() {
     audio_engine_->set_volume(volume_);
     setup_audio_callbacks();
 
+    // Expose a working internal source immediately. Deferred initialization
+    // replaces this router once MPRIS becomes available.
+    playback_source_manager_ = std::make_unique<PlaybackSourceManager>(
+        audio_engine_, nullptr);
+
     // --- Stage 2b: visualizer engine ---
     visualizer_engine_ = std::make_unique<VisualizerEngine>();
     visualizer_engine_->set_audio_engine(audio_engine_.get());
@@ -395,8 +400,12 @@ void BackendController::set_playing(bool playing) {
 void BackendController::setup_audio_callbacks() {
     // Position updates flow to UI and MPRIS server.
     audio_engine_->set_position_callback([this](double position, double duration) {
-        position_ = position;
         if (duration > 0.0) duration_ = duration;
+        if (!seek_pending_) {
+            position_ = position;
+        }
+        // While a scrub is being debounced, keep reporting the requested
+        // position instead of the stale pipeline position.
         emit_position_changed(position_, duration_);
         if (mpris_server_) {
             mpris_server_->update_position(position_);
@@ -955,6 +964,8 @@ std::vector<std::string> BackendController::get_sorted_track_ids(
     std::vector<std::string> ids;
     ids.reserve(tracks.size());
     for (const auto& t : tracks) ids.push_back(t.id);
+    // Storage returns ascending order only; reverse for descending sorts.
+    if (!ascending) std::reverse(ids.begin(), ids.end());
     return ids;
 }
 
@@ -1052,53 +1063,61 @@ void BackendController::toggle_play_pause() {
     if (changing_playback_state_) {
         return;
     }
-    if (playing_) {
-        pause();
-        return;
+
+    // Route through PlaybackSourceManager for source-aware behavior.
+    // For internal source with no current track, try to start queue.
+    if (!playing_ && current_track_.id.empty() && is_playback_source_internal()) {
+        if (!queue_manager_->queue().empty()) {
+            start_queue_index(queue_manager_->current_index());
+            return;
+        }
     }
 
-    if (current_track_.id.empty()) {
-        if (!queue_manager_->queue().empty()) start_queue_index(queue_manager_->current_index());
-        return;
-    }
-
-    const auto state = audio_engine_->get_state();
-    if (state == AudioEngine::PlaybackState::Stopped ||
-        state == AudioEngine::PlaybackState::Error) {
-        start_queue_index(queue_manager_->current_index());
-        return;
-    }
-
-    audio_engine_->play();
-    set_playing(true);
-    if (mpris_server_) mpris_server_->update_playback_status(true);
+    playback_source_manager_->play_pause();
+    // State change will be reflected via callbacks (audio engine or MPRIS).
     sync_mpris_capabilities();
 }
 
 void BackendController::pause() {
-    pausing_ = true;
+    // Route through PlaybackSourceManager for source-aware behavior.
+    // The pausing_ flag is still needed for internal audio engine state handling.
+    if (is_playback_source_internal()) {
+        pausing_ = true;
+    }
     set_playing(false);
-    audio_engine_->pause();
+    playback_source_manager_->pause();
     sync_mpris_capabilities();
 }
 
 void BackendController::stop() {
-    position_ = 0.0;
-    current_track_ = Track{};
-    audio_engine_->stop();
-    set_playing(false);
-    just_started_ = false;
-    pausing_ = false;
-    emit_track_changed(current_track_);
-    emit_position_changed(0, 0);
-    if (mpris_server_) {
-        mpris_server_->update_stopped();
-        mpris_server_->update_track(Track{});
+    // Route through PlaybackSourceManager for source-aware behavior.
+    playback_source_manager_->stop();
+
+    if (is_playback_source_internal()) {
+        position_ = 0.0;
+        current_track_ = Track{};
+        set_playing(false);
+        just_started_ = false;
+        pausing_ = false;
+        emit_track_changed(current_track_);
+        emit_position_changed(0, 0);
+        if (mpris_server_) {
+            mpris_server_->update_stopped();
+            mpris_server_->update_track(Track{});
+        }
     }
+    // For external source, MPRIS manager callbacks will handle state updates.
     sync_mpris_capabilities();
 }
 
 void BackendController::next_track() {
+    if (!is_playback_source_internal()) {
+        // External source: delegate to MPRIS player.
+        playback_source_manager_->next();
+        return;
+    }
+
+    // Internal source: use queue manager.
     auto next_idx = queue_manager_->next_index();
     if (!next_idx.has_value()) {
         // End of queue with repeat disabled.
@@ -1109,6 +1128,13 @@ void BackendController::next_track() {
 }
 
 void BackendController::previous_track() {
+    if (!is_playback_source_internal()) {
+        // External source: delegate to MPRIS player.
+        playback_source_manager_->previous();
+        return;
+    }
+
+    // Internal source: use queue manager with 3-second restart logic.
     if (position_ > 3.0) {
         // Restart current track if more than 3 seconds in.
         seek(0.0);
@@ -1141,8 +1167,12 @@ void BackendController::seek(double position_seconds) {
     // 200ms debounce window (within the 150-250ms requirement).
     pending_seek_position_ = std::clamp(position_seconds, 0.0, duration_);
 
+    // Mark a seek as in flight so periodic position callbacks do not
+    // overwrite the optimistic scrub position before the debounce commits.
+    seek_pending_ = true;
+
     // Increment generation so any in-flight seek responses are ignored.
-    uint64_t gen = ++seek_generation_;
+    ++seek_generation_;
 
     // Immediately emit the position update for responsive UI scrubbing.
     position_ = pending_seek_position_;
@@ -1157,7 +1187,6 @@ void BackendController::seek(double position_seconds) {
         g_source_remove(seek_debounce_timer_id_);
     }
     seek_debounce_timer_id_ = g_timeout_add(200, &BackendController::seek_debounce_timeout, this);
-    (void)gen; // gen is captured by the timer callback via seek_generation_
 }
 
 void BackendController::set_volume(double volume) {

@@ -10,6 +10,7 @@
 #include "panels/bottom_playback.hpp"
 #include "panels/pip_window.hpp"
 #include "panels/progress_wave.hpp"
+#include "panels/spectrum_router.hpp"
 #include "main_window.hpp"
 #include "application.hpp"
 #include "services/IPlayerService.hpp"
@@ -50,7 +51,9 @@ BottomPlayback::BottomPlayback(MainWindow* main_window)
     }
 }
 
-BottomPlayback::~BottomPlayback() = default;
+BottomPlayback::~BottomPlayback() {
+    SpectrumRouter::instance().unregister_wave(progress_wave_.get());
+}
 
 void BottomPlayback::setup_ui() {
     main_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
@@ -193,6 +196,7 @@ gboolean BottomPlayback::on_layout_tick(GtkWidget* widget, GdkFrameClock*,
 
 void BottomPlayback::create_progress(GtkWidget* parent) {
     progress_wave_ = std::make_unique<ProgressWave>();
+    SpectrumRouter::instance().register_wave(progress_wave_.get());
     progress_widget_ = progress_wave_->get_widget();
 
     gtk_widget_add_css_class(progress_widget_, "bottom-playback-progress");

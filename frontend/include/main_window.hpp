@@ -52,12 +52,17 @@ public:
     // Volume dial accessor
     VolumeDial* get_volume_dial() const;
 
+    // Called after BackendController::initialize() so the window can present
+    // immediately while the backend loads on a low-priority idle source.
+    void setup_after_backend();
+
 private:
     Application* app_;
     GtkWidget* window_;
     GtkWidget* toolbar_view_;
     GtkWidget* header_bar_;
     GtkWidget* main_box_;
+    GtkWidget* content_stack_;
     GtkWidget* content_grid_;
 
     // Four panels

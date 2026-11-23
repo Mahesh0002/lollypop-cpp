@@ -20,6 +20,19 @@ namespace lollypop {
 
 class MainWindow;
 
+// Direct children tagged with one of these roles are laid out by
+// create_track_columns_layout(). Title/Artist/Album receive 20/30/25 of the
+// available column space; every other role keeps its natural width.
+enum class TrackColumnRole : int {
+    Fixed = 0,
+    Title = 1,
+    Artist = 2,
+    Album = 3,
+};
+
+void set_track_column_role(GtkWidget* widget, TrackColumnRole role);
+GtkLayoutManager* create_track_columns_layout();
+
 class TrackRow {
 public:
     using PlayCallback = std::function<void(const Track&)>;

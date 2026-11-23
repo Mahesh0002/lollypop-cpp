@@ -31,12 +31,12 @@ MainWindow::MainWindow(Application* app)
       toolbar_view_(nullptr),
       header_bar_(nullptr),
       main_box_(nullptr),
+      content_stack_(nullptr),
       content_grid_(nullptr) {
-    setup_window();
-    setup_layout();
-    setup_css();
+    setup_window();   // Window shell only - header bar + empty content area.
     connect_signals();
-    connect_backend();
+    // setup_layout() and setup_css() are deferred to setup_after_backend()
+    // because they create pages that query the backend (storage must be ready).
 }
 
 MainWindow::~MainWindow() {
@@ -69,6 +69,10 @@ void MainWindow::disconnect_backend() {
 
 void MainWindow::setup_window() {
     window_ = adw_application_window_new(GTK_APPLICATION(app_->get_gtk_application()));
+    // This constructor returns a floating reference. Sink it here so the
+    // destructor owns one matching reference instead of double-unreffing a
+    // window already released by GTK during shutdown.
+    g_object_ref_sink(window_);
     // No window title - keep the header bar clean (no "lollypop-cpp" text).
     gtk_window_set_title(GTK_WINDOW(window_), "");
     gtk_window_set_default_size(GTK_WINDOW(window_), 1440, 900);
@@ -96,23 +100,115 @@ void MainWindow::setup_window() {
     gtk_widget_set_visible(main_box_, TRUE);
     adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view_), main_box_);
 
-    // Content grid
+    // Content stack: show a lightweight loading state until the backend is
+    // initialized and the real panels have been built. Without this the first
+    // frame is an empty window that looks like a crash to the user.
+    content_stack_ = gtk_stack_new();
+    gtk_widget_set_hexpand(content_stack_, TRUE);
+    gtk_widget_set_vexpand(content_stack_, TRUE);
+    gtk_widget_set_visible(content_stack_, TRUE);
+
+    GtkWidget* loading_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 14);
+    gtk_widget_set_halign(loading_box, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(loading_box, GTK_ALIGN_CENTER);
+    gtk_widget_set_visible(loading_box, TRUE);
+
+    GtkWidget* spinner = gtk_spinner_new();
+    gtk_widget_set_size_request(spinner, 36, 36);
+    gtk_widget_set_halign(spinner, GTK_ALIGN_CENTER);
+    gtk_spinner_start(GTK_SPINNER(spinner));
+    gtk_widget_set_visible(spinner, TRUE);
+
+    GtkWidget* loading_label = gtk_label_new("Loading library…");
+    gtk_widget_add_css_class(loading_label, "loading-label");
+    gtk_widget_set_visible(loading_label, TRUE);
+
+    gtk_box_append(GTK_BOX(loading_box), spinner);
+    gtk_box_append(GTK_BOX(loading_box), loading_label);
+    gtk_stack_add_named(GTK_STACK(content_stack_), loading_box, "loading");
+
+    // Content grid (starts empty; populated in setup_layout()).
     content_grid_ = gtk_grid_new();
     gtk_grid_set_row_homogeneous(GTK_GRID(content_grid_), FALSE);
     gtk_grid_set_column_homogeneous(GTK_GRID(content_grid_), FALSE);
     gtk_widget_set_hexpand(content_grid_, TRUE);
     gtk_widget_set_vexpand(content_grid_, TRUE);
     gtk_widget_set_visible(content_grid_, TRUE);
-    gtk_box_append(GTK_BOX(main_box_), content_grid_);
+    gtk_stack_add_named(GTK_STACK(content_stack_), content_grid_, "content");
+
+    gtk_stack_set_visible_child_name(GTK_STACK(content_stack_), "loading");
+    gtk_box_append(GTK_BOX(main_box_), content_stack_);
 
     // Set toolbar view as window content (AdwApplicationWindow specific)
     adw_application_window_set_content(ADW_APPLICATION_WINDOW(window_), toolbar_view_);
 }
 
 void MainWindow::setup_toolbar() {
-    // Window title is already set in setup_window()
-    // The header bar shows the window title by default
-    // Sidebar toggle is handled within the sidebar itself
+    // Sidebar only changes its labels when expanded. Window-level actions live
+    // here so no sidebar icon appears or disappears during the transition.
+    GtkWidget* menu = gtk_menu_button_new();
+    gtk_widget_add_css_class(menu, "main-header-menu");
+    GtkWidget* menu_icon = gtk_image_new_from_icon_name("open-menu-symbolic");
+    gtk_image_set_pixel_size(GTK_IMAGE(menu_icon), 18);
+    gtk_menu_button_set_child(GTK_MENU_BUTTON(menu), menu_icon);
+    gtk_widget_set_tooltip_text(menu, "More actions");
+
+    GtkWidget* popover = gtk_popover_new();
+    GtkWidget* popover_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_margin_start(popover_box, 6);
+    gtk_widget_set_margin_end(popover_box, 6);
+    gtk_widget_set_margin_top(popover_box, 6);
+    gtk_widget_set_margin_bottom(popover_box, 6);
+
+    GtkWidget* about = gtk_button_new_with_label("About");
+    gtk_button_set_has_frame(GTK_BUTTON(about), FALSE);
+    gtk_widget_set_halign(about, GTK_ALIGN_START);
+    g_signal_connect(about, "clicked",
+                     G_CALLBACK(+[](GtkButton*, gpointer user_data) {
+                         auto* self = static_cast<MainWindow*>(user_data);
+                         GtkWidget* dialog = gtk_about_dialog_new();
+                         gtk_about_dialog_set_program_name(
+                             GTK_ABOUT_DIALOG(dialog), "Lollypop C++");
+                         gtk_about_dialog_set_version(GTK_ABOUT_DIALOG(dialog),
+                                                      "1.0");
+                         gtk_about_dialog_set_comments(
+                             GTK_ABOUT_DIALOG(dialog),
+                             "A GTK4 music player built with C++20.");
+                         if (self->window_) {
+                             gtk_window_set_transient_for(
+                                 GTK_WINDOW(dialog), GTK_WINDOW(self->window_));
+                         }
+                         gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+                         g_signal_connect(dialog, "response",
+                                          G_CALLBACK(+[](GtkDialog* d, gint,
+                                                         gpointer) {
+                                              gtk_window_destroy(GTK_WINDOW(d));
+                                          }),
+                                          nullptr);
+                         gtk_window_present(GTK_WINDOW(dialog));
+                     }),
+                     this);
+
+    GtkWidget* fullscreen = gtk_button_new_with_label("Fullscreen");
+    gtk_button_set_has_frame(GTK_BUTTON(fullscreen), FALSE);
+    gtk_widget_set_halign(fullscreen, GTK_ALIGN_START);
+    g_signal_connect(fullscreen, "clicked",
+                     G_CALLBACK(+[](GtkButton*, gpointer user_data) {
+                         auto* self = static_cast<MainWindow*>(user_data);
+                         if (!self->window_) return;
+                         if (gtk_window_is_fullscreen(GTK_WINDOW(self->window_))) {
+                             gtk_window_unfullscreen(GTK_WINDOW(self->window_));
+                         } else {
+                             gtk_window_fullscreen(GTK_WINDOW(self->window_));
+                         }
+                     }),
+                     this);
+
+    gtk_box_append(GTK_BOX(popover_box), about);
+    gtk_box_append(GTK_BOX(popover_box), fullscreen);
+    gtk_popover_set_child(GTK_POPOVER(popover), popover_box);
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(menu), popover);
+    adw_header_bar_pack_end(ADW_HEADER_BAR(header_bar_), menu);
 }
 
 void MainWindow::setup_layout() {
@@ -276,6 +372,16 @@ ThemeManager* MainWindow::get_theme_manager() const {
 
 VolumeDial* MainWindow::get_volume_dial() const {
     return bottom_playback_ ? bottom_playback_->get_volume_dial() : nullptr;
+}
+
+void MainWindow::setup_after_backend() {
+    setup_layout();
+    setup_css();
+    connect_backend();
+    // Replace the loading state with the real UI once everything is ready.
+    if (content_stack_) {
+        gtk_stack_set_visible_child_name(GTK_STACK(content_stack_), "content");
+    }
 }
 
 } // namespace lollypop

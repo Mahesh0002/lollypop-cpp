@@ -16,6 +16,7 @@
 #include <gtk/gtk.h>
 
 #include <functional>
+#include <vector>
 
 namespace lollypop {
 
@@ -37,6 +38,10 @@ public:
     void set_can_seek(bool can_seek);
     void set_seek_callback(SeekCallback callback);
 
+    // Feed spectrum magnitudes from EventBus "spectrum" frames. Empty input
+    // restores the decorative sine wave.
+    void set_spectrum(const std::vector<float>& magnitudes);
+
 private:
     static constexpr guint kWaveFrameMs = 33;
     static constexpr guint kSeekCommitDelayMs = 120;
@@ -50,6 +55,7 @@ private:
     GtkGesture* gesture_ = nullptr;
 
     SeekCallback seek_callback_;
+    std::vector<float> spectrum_;
     double duration_ = 0.0;
     double progress_ = 0.0;
     double pending_fraction_ = -1.0;

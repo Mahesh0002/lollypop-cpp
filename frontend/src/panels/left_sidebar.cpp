@@ -23,6 +23,9 @@ namespace {
 constexpr int kThemePaddingH = 24;
 constexpr int kThemePaddingV = 10;
 constexpr int kContentHeight = LeftSidebar::kButtonHeight - kThemePaddingV; // 42
+// Keep the glyph centred on x=25 in both modes: the 26px slot starts at x=12,
+// so its 22px icon has its centre at 12 + 13 = 25.
+constexpr int kIconLeft = 12;
 
 int content_width(int outer_width) {
     return outer_width - kThemePaddingH;
@@ -62,15 +65,26 @@ LeftSidebar::ActionButton create_action_button(const char* icon_name,
     gtk_widget_set_halign(action.button, GTK_ALIGN_START);
     gtk_widget_set_valign(action.button, GTK_ALIGN_CENTER);
 
-    action.icon = gtk_image_new_from_icon_name(icon_name);
-    gtk_image_set_pixel_size(GTK_IMAGE(action.icon), LeftSidebar::kIconSize);
-    gtk_widget_set_size_request(action.icon,
+    // Match the navigation rows exactly: a 26px slot anchored at the start of
+    // the button, with the 22px glyph centred inside it. This keeps the
+    // collapse icon on the same vertical axis as every navigation icon.
+    GtkWidget* icon_slot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_size_request(icon_slot,
                                 content_width(LeftSidebar::kButtonWidth),
                                 kContentHeight);
+    gtk_widget_set_halign(icon_slot, GTK_ALIGN_START);
+    gtk_widget_set_margin_start(icon_slot, kIconLeft);
+    gtk_widget_set_valign(icon_slot, GTK_ALIGN_CENTER);
+    gtk_widget_set_visible(icon_slot, TRUE);
+    action.icon_slot = icon_slot;
+
+    action.icon = gtk_image_new_from_icon_name(icon_name);
+    gtk_image_set_pixel_size(GTK_IMAGE(action.icon), LeftSidebar::kIconSize);
     gtk_widget_set_halign(action.icon, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(action.icon, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(action.icon, TRUE);
-    safe_button_set_child(GTK_BUTTON(action.button), action.icon);
+    gtk_box_append(GTK_BOX(icon_slot), action.icon);
+    safe_button_set_child(GTK_BUTTON(action.button), icon_slot);
 
     g_signal_connect(action.button, "clicked", callback, user_data);
     gtk_widget_set_tooltip_text(action.button, accessible_label);
@@ -106,8 +120,8 @@ void LeftSidebar::setup_ui() {
                                    GTK_ACCESSIBLE_PROPERTY_LABEL,
                                    "Library navigation", -1);
 
-    // Header: three fixed-width cells. About/fullscreen are hidden in
-    // compact mode, so the collapse control stays in the same position.
+    // Header contains only the collapse control. About and fullscreen live in
+    // the window header menu so expanding the sidebar changes only the labels.
     header_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(header_box_, "sidebar-header");
     gtk_box_set_homogeneous(GTK_BOX(header_box_), FALSE);
@@ -118,17 +132,9 @@ void LeftSidebar::setup_ui() {
     collapse_ = create_action_button("pan-start-symbolic", "Collapse sidebar",
                                      G_CALLBACK(on_collapse_clicked), this,
                                      TRUE);
-    about_ = create_action_button("help-about-symbolic", "About",
-                                  G_CALLBACK(on_about_clicked), this,
-                                  FALSE);
-    fullscreen_ = create_action_button("view-fullscreen-symbolic", "Fullscreen",
-                                       G_CALLBACK(on_fullscreen_clicked), this,
-                                       FALSE);
     collapse_button_ = collapse_.button;
 
     safe_box_append(GTK_BOX(header_box_), collapse_.button);
-    safe_box_append(GTK_BOX(header_box_), about_.button);
-    safe_box_append(GTK_BOX(header_box_), fullscreen_.button);
 
     nav_list_box_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_add_css_class(nav_list_box_, "sidebar-nav");
@@ -180,13 +186,18 @@ void LeftSidebar::add_nav_row(const NavigationItem& item) {
                                 content_width(kCompactWidth), kContentHeight);
     gtk_widget_set_hexpand(row.content, FALSE);
     gtk_widget_set_halign(row.content, GTK_ALIGN_START);
+    gtk_widget_set_margin_start(row.content, kIconLeft);
     gtk_widget_set_valign(row.content, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(row.content, TRUE);
 
     GtkWidget* icon = gtk_image_new_from_icon_name(item.icon_name.c_str());
     gtk_image_set_pixel_size(GTK_IMAGE(icon), kIconSize);
     gtk_widget_add_css_class(icon, "sidebar-nav-icon");
-    gtk_widget_set_halign(icon, GTK_ALIGN_START);
+    // Same fixed 26px slot as the header icons, so every icon shares one
+    // vertical axis in both compact and expanded mode.
+    gtk_widget_set_size_request(icon, content_width(kCompactWidth),
+                                kContentHeight);
+    gtk_widget_set_halign(icon, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(icon, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(icon, TRUE);
 
@@ -203,7 +214,7 @@ void LeftSidebar::add_nav_row(const NavigationItem& item) {
     row.revealer = gtk_revealer_new();
     gtk_revealer_set_transition_type(GTK_REVEALER(row.revealer),
                                      GTK_REVEALER_TRANSITION_TYPE_SLIDE_RIGHT);
-    gtk_revealer_set_transition_duration(GTK_REVEALER(row.revealer), 180);
+    gtk_revealer_set_transition_duration(GTK_REVEALER(row.revealer), 280);
     gtk_revealer_set_child(GTK_REVEALER(row.revealer), label);
     gtk_widget_set_visible(row.revealer, TRUE);
 
@@ -249,9 +260,6 @@ void LeftSidebar::apply_expanded_state() {
     } else {
         gtk_widget_add_css_class(sidebar_box_, "compact");
     }
-    gtk_widget_set_visible(about_.button, expanded_);
-    gtk_widget_set_visible(fullscreen_.button, expanded_);
-
     update_sidebar_width();
     update_toggle_icon();
     update_label_visibility();
@@ -312,38 +320,6 @@ void LeftSidebar::save_sidebar_state() {
 
 void LeftSidebar::on_collapse_clicked(GtkButton*, gpointer user_data) {
     static_cast<LeftSidebar*>(user_data)->toggle_expanded();
-}
-
-void LeftSidebar::on_about_clicked(GtkButton*, gpointer user_data) {
-    auto* self = static_cast<LeftSidebar*>(user_data);
-    GtkWidget* dialog = gtk_about_dialog_new();
-    gtk_about_dialog_set_program_name(GTK_ABOUT_DIALOG(dialog), "Lollypop C++");
-    gtk_about_dialog_set_version(GTK_ABOUT_DIALOG(dialog), "1.0");
-    gtk_about_dialog_set_comments(GTK_ABOUT_DIALOG(dialog),
-                                  "A GTK4 music player built with C++20.");
-    if (self->main_window_) {
-        GtkWindow* parent = self->main_window_->get_window();
-        if (parent) gtk_window_set_transient_for(GTK_WINDOW(dialog), parent);
-    }
-    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
-    g_signal_connect(dialog, "response",
-                     G_CALLBACK(+[](GtkDialog* d, gint, gpointer) {
-                         gtk_window_destroy(GTK_WINDOW(d));
-                     }),
-                     nullptr);
-    gtk_window_present(GTK_WINDOW(dialog));
-}
-
-void LeftSidebar::on_fullscreen_clicked(GtkButton*, gpointer user_data) {
-    auto* self = static_cast<LeftSidebar*>(user_data);
-    if (!self->main_window_) return;
-    GtkWindow* window = self->main_window_->get_window();
-    if (!window) return;
-    if (gtk_window_is_fullscreen(window)) {
-        gtk_window_unfullscreen(window);
-    } else {
-        gtk_window_fullscreen(window);
-    }
 }
 
 void LeftSidebar::on_nav_item_clicked(GtkButton* button, gpointer user_data) {

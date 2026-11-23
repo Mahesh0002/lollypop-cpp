@@ -6,6 +6,7 @@
 
 #include "panels/pip_window.hpp"
 #include "panels/progress_wave.hpp"
+#include "panels/spectrum_router.hpp"
 #include "application.hpp"
 #include "ui/components/ArtworkView.hpp"
 
@@ -35,6 +36,7 @@ PiPWindow::PiPWindow(Application* app)
 PiPWindow::~PiPWindow() {
     // Invalidate queued backend callbacks before the widget tree is torn down.
     if (alive_) *alive_ = false;
+    SpectrumRouter::instance().unregister_wave(progress_wave_.get());
     backend_ = nullptr;
 }
 
@@ -156,6 +158,7 @@ void PiPWindow::setup_ui() {
     gtk_box_append(GTK_BOX(controls_box_.get()), prev_button_.get());
 
     progress_wave_ = std::make_unique<ProgressWave>();
+    SpectrumRouter::instance().register_wave(progress_wave_.get());
     GtkWidget* wave = progress_wave_->get_widget();
     gtk_widget_add_css_class(wave, "pip-progress");
     gtk_widget_set_size_request(wave, 180, 28);

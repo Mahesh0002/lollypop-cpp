@@ -4,6 +4,7 @@
 
 #include "panels/right_now_playing.hpp"
 #include "panels/progress_wave.hpp"
+#include "panels/spectrum_router.hpp"
 #include "main_window.hpp"
 #include "services/IPlayerService.hpp"
 #include "services/ILyricsService.hpp"
@@ -102,7 +103,9 @@ RightNowPlaying::RightNowPlaying(MainWindow* main_window,
     gtk_widget_add_tick_callback(main_box_, on_allocation_tick, this, nullptr);
 }
 
-RightNowPlaying::~RightNowPlaying() = default;
+RightNowPlaying::~RightNowPlaying() {
+    SpectrumRouter::instance().unregister_wave(progress_wave_.get());
+}
 
 void RightNowPlaying::setup_ui() {
     main_box_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -197,6 +200,7 @@ void RightNowPlaying::create_progress_section() {
     safe_box_append(GTK_BOX(progress_box_), prev_button_);
 
     progress_wave_ = std::make_unique<ProgressWave>();
+    SpectrumRouter::instance().register_wave(progress_wave_.get());
     GtkWidget* wave = progress_wave_->get_widget();
     gtk_widget_add_css_class(wave, "now-playing-progress");
     gtk_widget_set_hexpand(wave, TRUE);

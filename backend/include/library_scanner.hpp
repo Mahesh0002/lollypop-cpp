@@ -1,6 +1,7 @@
 /**
  * Lollypop C++ - Library Scanner
  * Recursively scans directories for audio files and extracts metadata via taglib.
+ * Supports incremental scanning: skips unchanged files using mtime + size.
  */
 
 #pragma once
@@ -46,6 +47,10 @@ public:
 
     static bool is_audio_file(const std::string& path);
     static std::vector<std::string> get_audio_extensions();
+
+    // Incremental scanning: set a cache path to persist mtime+size metadata.
+    // If empty, incremental scanning is disabled (full scan every time).
+    void set_incremental_cache_path(const std::string& cache_path);
 
 private:
     struct Impl;

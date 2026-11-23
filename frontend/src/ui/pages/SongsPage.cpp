@@ -7,6 +7,7 @@
 #include "ui/pages/SongsPage.hpp"
 #include "main_window.hpp"
 #include "services/IPlayerService.hpp"
+#include "ui/components/TrackRow.hpp"
 #include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
@@ -77,7 +78,7 @@ void SongsPage::setup_ui() {
 
 void SongsPage::create_header(GtkWidget* main_box) {
     (void)main_box;  // header_box_ is appended by setup_ui()
-    header_box_.reset(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12));
+    header_box_.reset(gtk_box_new(GTK_ORIENTATION_VERTICAL, 4));
     g_object_ref_sink(header_box_.get());
     gtk_widget_add_css_class(header_box_.get(), "songs-header");
     gtk_widget_set_margin_start(header_box_.get(), 12);
@@ -85,7 +86,12 @@ void SongsPage::create_header(GtkWidget* main_box) {
     gtk_widget_set_margin_top(header_box_.get(), 8);
     gtk_widget_set_margin_bottom(header_box_.get(), 8);
 
-    // Genre filter dropdown
+    // Filters live on their own row so the sort labels below line up with the
+    // track rows even when the genre dropdown is visible.
+    GtkWidget* filter_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_visible(filter_row, TRUE);
+    safe_box_append(GTK_BOX(header_box_.get()), filter_row);
+
     if (library_service_) {
         auto genres = library_service_->get_all_genres();
         if (!genres.empty()) {
@@ -98,52 +104,67 @@ void SongsPage::create_header(GtkWidget* main_box) {
             GtkWidget* genre_dropdown = gtk_drop_down_new(G_LIST_MODEL(string_list), nullptr);
             gtk_widget_add_css_class(genre_dropdown, "songs-genre-filter");
             gtk_widget_set_tooltip_text(genre_dropdown, "Filter by genre");
+            gtk_widget_set_halign(genre_dropdown, GTK_ALIGN_START);
             gtk_drop_down_set_selected(GTK_DROP_DOWN(genre_dropdown), 0);
             genre_dropdown_ = genre_dropdown;
             genre_handler_id_ = g_signal_connect(genre_dropdown, "notify::selected",
                                                  G_CALLBACK(on_genre_changed), this);
-            gtk_box_append(GTK_BOX(header_box_.get()), genre_dropdown);
+            gtk_box_append(GTK_BOX(filter_row), genre_dropdown);
         }
     }
+
+    GtkWidget* columns = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_set_layout_manager(columns, create_track_columns_layout());
+    gtk_widget_set_visible(columns, TRUE);
 
     const struct {
         const char* title;
         const char* field;
-    } columns[] = {
-        {"#", "number"},
-        {"Title", "title"},
-        {"Artist", "artist"},
-        {"Album", "album"},
-        {"Duration", "duration"},
+        TrackColumnRole role;
+    } columns_info[] = {
+        {"#",        "number",   TrackColumnRole::Fixed},
+        {"Title",    "title",    TrackColumnRole::Title},
+        {"Artist",   "artist",   TrackColumnRole::Artist},
+        {"Album",    "album",    TrackColumnRole::Album},
+        {"Duration", "duration", TrackColumnRole::Fixed},
     };
 
-    int col_widths[] = {24, -1, -1, -1, 40};
-
     for (int i = 0; i < 5; ++i) {
-        GtkWidget* col_label = gtk_label_new(columns[i].title);
+        GtkWidget* col_label = gtk_label_new(columns_info[i].title);
         gtk_widget_add_css_class(col_label, "songs-column-header");
-        gtk_label_set_xalign(GTK_LABEL(col_label),
-                             i == 4 ? 1.0 : 0.0);
-        gtk_widget_set_size_request(col_label, col_widths[i] >= 0 ? col_widths[i] : -1, -1);
+        gtk_label_set_xalign(GTK_LABEL(col_label), 0.0);
+        if (i == 0) {
+            gtk_widget_set_size_request(col_label, 24, -1);
+        } else if (i == 4) {
+            gtk_widget_set_size_request(col_label, 40, -1);
+        }
+
         if (i > 0) {
             GtkWidget* sort_btn = gtk_button_new();
             gtk_button_set_has_frame(GTK_BUTTON(sort_btn), FALSE);
-            gtk_widget_set_hexpand(sort_btn, TRUE);
+            gtk_widget_set_hexpand(sort_btn, FALSE);
             gtk_widget_set_halign(sort_btn, GTK_ALIGN_FILL);
-            gtk_widget_set_margin_start(sort_btn, 10);
-            gtk_widget_set_margin_end(sort_btn, 10);
-            gtk_widget_set_margin_top(sort_btn, 10);
-            gtk_widget_set_margin_bottom(sort_btn, 10);
+            gtk_widget_set_valign(sort_btn, GTK_ALIGN_CENTER);
             gtk_button_set_child(GTK_BUTTON(sort_btn), col_label);
+            set_track_column_role(sort_btn, columns_info[i].role);
             g_object_set_data_full(G_OBJECT(sort_btn), "sort-field",
-                                   g_strdup(columns[i].field), g_free);
+                                   g_strdup(columns_info[i].field), g_free);
             g_signal_connect(sort_btn, "clicked",
                              G_CALLBACK(on_sort_header_clicked), this);
-            gtk_box_append(GTK_BOX(header_box_.get()), sort_btn);
+            gtk_box_append(GTK_BOX(columns), sort_btn);
         } else {
-            gtk_box_append(GTK_BOX(header_box_.get()), col_label);
+            set_track_column_role(col_label, columns_info[i].role);
+            gtk_box_append(GTK_BOX(columns), col_label);
         }
     }
+
+    // Reserve the same trailing space the like button occupies in each row.
+    GtkWidget* like_spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_size_request(like_spacer, 38, 1);
+    gtk_widget_set_visible(like_spacer, TRUE);
+    gtk_box_append(GTK_BOX(columns), like_spacer);
+
+    safe_box_append(GTK_BOX(header_box_.get()), columns);
 }
 
 void SongsPage::on_sort_header_clicked(GtkButton* button, gpointer user_data) {

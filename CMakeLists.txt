@@ -141,37 +141,23 @@ endif()
 # GResource compilation
 find_program(GLIB_COMPILE_RESOURCES glib-compile-resources)
 if(GLIB_COMPILE_RESOURCES)
-    if(GSK_GLSL_COMPILER)
-        # Full resource bundle with shaders
-        add_custom_command(
-            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lollypop.gresource
-            COMMAND ${GLIB_COMPILE_RESOURCES}
-                --target ${CMAKE_CURRENT_BINARY_DIR}/lollypop.gresource
-                --sourcedir ${CMAKE_CURRENT_SOURCE_DIR}/resources
-                ${CMAKE_CURRENT_SOURCE_DIR}/resources/lollypop.gresource.xml
-            DEPENDS
-                ${CMAKE_CURRENT_SOURCE_DIR}/resources/lollypop.gresource.xml
-                ${CMAKE_CURRENT_BINARY_DIR}/shaders/glass.gskshader
-                ${CMAKE_CURRENT_BINARY_DIR}/shaders/glass_reflection.gskshader
-                ${CMAKE_CURRENT_BINARY_DIR}/shaders/glass_dial.gskshader
-                ${CMAKE_CURRENT_BINARY_DIR}/shaders/waveform.gskshader
-                ${CMAKE_CURRENT_BINARY_DIR}/shaders/morph.gskshader
-            COMMENT "Compiling GResource bundle with shaders"
-        )
-    else()
-        # Minimal resource bundle without shaders (for development without gsk-glsl-compiler)
-        add_custom_command(
-            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lollypop.gresource
-            COMMAND ${GLIB_COMPILE_RESOURCES}
-                --target ${CMAKE_CURRENT_BINARY_DIR}/lollypop.gresource
-                --sourcedir ${CMAKE_CURRENT_SOURCE_DIR}/resources
-                ${CMAKE_CURRENT_SOURCE_DIR}/resources/lollypop.gresource.xml
-            DEPENDS
-                ${CMAKE_CURRENT_SOURCE_DIR}/resources/lollypop.gresource.xml
-            COMMENT "Compiling GResource bundle (no shaders)"
-        )
-    endif()
-    add_custom_target(resources ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lollypop.gresource)
+    # Generate a C source file that embeds resource data and registers it
+    # with GLib at startup. Without this, g_resources_lookup_data() returns
+    # NULL and gtk_css_provider_load_from_resource() fails.
+    add_custom_command(
+        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lollypop_resources.c
+        COMMAND ${GLIB_COMPILE_RESOURCES}
+            --sourcedir ${CMAKE_CURRENT_SOURCE_DIR}/resources
+            --generate-source
+            --c-name=lollypop_resources
+            --target ${CMAKE_CURRENT_BINARY_DIR}/lollypop_resources.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/resources/lollypop.gresource.xml
+        DEPENDS
+            ${CMAKE_CURRENT_SOURCE_DIR}/resources/lollypop.gresource.xml
+            ${CMAKE_CURRENT_SOURCE_DIR}/resources/style.css
+        COMMENT "Generating GResource C registration source"
+    )
+    add_custom_target(resources ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lollypop_resources.c)
 else()
     message(WARNING "glib-compile-resources not found - resources will not be compiled")
 endif()
@@ -182,9 +168,21 @@ add_subdirectory(backend)
 add_subdirectory(storage)
 
 # Main executable
-add_executable(lollypop-cpp
-    src/main.cpp
-)
+if(GLIB_COMPILE_RESOURCES)
+    set(LollypopSources
+        src/main.cpp
+        ${CMAKE_CURRENT_BINARY_DIR}/lollypop_resources.c
+    )
+else()
+    set(LollypopSources
+        src/main.cpp
+    )
+endif()
+if(GLIB_COMPILE_RESOURCES)
+    set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/lollypop_resources.c
+        PROPERTIES LANGUAGE CXX)
+endif()
+add_executable(lollypop-cpp ${LollypopSources})
 
 # Depend on resources and shaders (if available)
 if(GLIB_COMPILE_RESOURCES)
@@ -200,11 +198,6 @@ target_link_libraries(lollypop-cpp PRIVATE
     lollypop-storage
     ${LIBRARIES}
 )
-
-# Embed GResource
-if(GLIB_COMPILE_RESOURCES)
-    target_sources(lollypop-cpp PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/lollypop.gresource)
-endif()
 
 # Copy resources to build directory
 add_custom_target(copy_resources ALL

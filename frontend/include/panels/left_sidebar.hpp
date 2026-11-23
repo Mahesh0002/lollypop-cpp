@@ -53,6 +53,7 @@ public:
     struct ActionButton {
         GtkWidget* button = nullptr;
         GtkWidget* icon = nullptr;
+        GtkWidget* icon_slot = nullptr;
     };
 
     struct NavRow {
@@ -68,8 +69,6 @@ private:
     GtkWidget* header_box_ = nullptr;
     GtkWidget* collapse_button_ = nullptr;
     ActionButton collapse_;
-    ActionButton about_;
-    ActionButton fullscreen_;
     GtkWidget* nav_list_box_ = nullptr;
 
     bool expanded_ = true;
@@ -88,8 +87,6 @@ private:
     void set_row_width(NavRow& row, int width);
 
     static void on_collapse_clicked(GtkButton* button, gpointer user_data);
-    static void on_about_clicked(GtkButton* button, gpointer user_data);
-    static void on_fullscreen_clicked(GtkButton* button, gpointer user_data);
     static void on_nav_item_clicked(GtkButton* button, gpointer user_data);
 };
 
