@@ -38,6 +38,7 @@ class Dispatcher;
 #include "library_scanner.hpp"
 #include "library_manager.hpp"
 #include "lyrics_manager.hpp"
+#include "artwork_manager.hpp"
 #include "file_watcher.hpp"
 #include "cava_visualizer.hpp"
 #include "visualizer_engine.hpp"
@@ -134,11 +135,41 @@ public:
 
     // Lyrics
     std::optional<Lyrics> get_lyrics(const std::string& track_id);
-    void set_lyrics(const std::string& track_id, const std::string& text,
+    bool set_lyrics(const std::string& track_id, const std::string& text,
                     bool synced = false, const std::string& source = {});
-    void request_lyrics(
-        const std::string& track_id,
-        ILyricsService::LyricsCallback callback) override;
+    // Legacy method for IPlayerService interface
+    void request_lyrics(const std::string& track_id,
+                        std::function<void(const std::string& track_id,
+                                           const std::optional<Lyrics>&)> callback);
+
+    // Synced Lyrics (LRC format) - ILyricsService interface
+    bool has_synced_lyrics(const std::string& track_id) override;
+    std::string get_synced_lyrics(const std::string& track_id) override;
+    std::string get_plain_lyrics(const std::string& track_id) override;
+    void request_synced_lyrics(const std::string& track_id,
+                               ILyricsService::SyncedLyricsReadyCallback cb) override;
+    void request_plain_lyrics(const std::string& track_id,
+                              ILyricsService::LyricsReadyCallback cb) override;
+    bool save_synced_lyrics(const std::string& track_id, const std::string& lrc_text) override;
+    bool save_plain_lyrics(const std::string& track_id, const std::string& lyrics) override;
+    std::string get_embedded_synced_lyrics(const std::string& track_id) override;
+    std::string get_embedded_plain_lyrics(const std::string& track_id) override;
+    std::vector<std::string> get_lyrics_providers() override;
+
+    // Artist artwork
+    void fetch_artist_artwork(const std::string& artist_id,
+                               std::function<void(bool success)> callback);
+    void fetch_missing_artist_artwork();
+
+    // One-time iTunes artwork refresh. Re-fetches album artwork at 600px and
+    // applies it to the album plus all of its tracks.
+    void refresh_album_artwork_from_itunes(bool force = false);
+
+    // Lyrics batch operations
+    void fetch_missing_lyrics(
+        std::function<void(int fetched, int total)> progress_callback = {});
+    void fetch_all_lyrics(
+        std::function<void(int fetched, int total)> progress_callback = {});
 
     // Library changed notification
     // (overrides both IPlayerService and ILibraryService, defined below)
@@ -201,6 +232,7 @@ public:
     CavaVisualizer* get_cava_visualizer() const { return cava_visualizer_.get(); }
     VisualizerEngine* get_visualizer_engine() const { return visualizer_engine_.get(); }
     CacheManager* get_cache_manager() const { return cache_manager_.get(); }
+    ArtworkManager* get_artwork_manager() const { return artwork_manager_.get(); }
     QueueManager* get_queue_manager() const { return queue_manager_.get(); }
     PlaybackSourceManager* get_playback_source_manager() const { return playback_source_manager_.get(); }
 
@@ -210,6 +242,9 @@ public:
     using PlaybackStateChangedCallback = std::function<void(bool playing)>;
     using QueueChangedCallback = std::function<void(const std::vector<std::string>&)>;
     using VisualizationCallback = std::function<void(const std::vector<float>&)>;
+    using ShuffleChangedCallback = std::function<void(bool enabled)>;
+    using RepeatChangedCallback = std::function<void(bool enabled)>;
+    using RepeatOneChangedCallback = std::function<void(bool enabled)>;
 
     void add_track_changed_callback(TrackChangedCallback cb) {
         track_changed_callbacks_.push_back(std::move(cb));
@@ -228,6 +263,15 @@ public:
     }
     void add_library_changed_callback(std::function<void()> cb) {
         library_changed_callbacks_.push_back(std::move(cb));
+    }
+    void add_shuffle_changed_callback(ShuffleChangedCallback cb) override {
+        shuffle_changed_callbacks_.push_back(std::move(cb));
+    }
+    void add_repeat_changed_callback(RepeatChangedCallback cb) override {
+        repeat_changed_callbacks_.push_back(std::move(cb));
+    }
+    void add_repeat_one_changed_callback(RepeatOneChangedCallback cb) override {
+        repeat_one_changed_callbacks_.push_back(std::move(cb));
     }
 
     // Legacy single-callback setters (for backward compatibility with IPlayerService)
@@ -255,6 +299,22 @@ public:
         library_changed_callbacks_.clear();
         if (cb) library_changed_callbacks_.push_back(std::move(cb));
     }
+    void set_shuffle_changed_callback(ShuffleChangedCallback cb) {
+        shuffle_changed_callbacks_.clear();
+        if (cb) shuffle_changed_callbacks_.push_back(std::move(cb));
+    }
+    void set_repeat_changed_callback(RepeatChangedCallback cb) {
+        repeat_changed_callbacks_.clear();
+        if (cb) repeat_changed_callbacks_.push_back(std::move(cb));
+    }
+    void set_repeat_one_changed_callback(RepeatOneChangedCallback cb) {
+        repeat_one_changed_callbacks_.clear();
+        if (cb) repeat_one_changed_callbacks_.push_back(std::move(cb));
+    }
+
+    // Legacy lyrics callback type (for IPlayerService interface)
+    using LegacyLyricsCallback = std::function<void(const std::string& track_id,
+                                                     const std::optional<Lyrics>&)>;
 
 private:
     std::unique_ptr<StorageManager> storage_;
@@ -268,6 +328,7 @@ private:
     std::unique_ptr<CacheManager> cache_manager_;
     std::unique_ptr<LibraryManager> library_manager_;
     std::unique_ptr<LyricsManager> lyrics_manager_;
+    std::unique_ptr<ArtworkManager> artwork_manager_;
 
     // EventBus subscription ID for spectrum events (unsubscribed on shutdown).
     uint64_t spectrum_subscription_id_ = 0;
@@ -291,7 +352,16 @@ private:
     std::vector<QueueChangedCallback> queue_changed_callbacks_;
     std::vector<VisualizationCallback> visualization_callbacks_;
     std::vector<std::function<void()>> library_changed_callbacks_;
-    ILyricsService::LyricsCallback lyrics_callback_;
+    std::vector<ShuffleChangedCallback> shuffle_changed_callbacks_;
+    std::vector<RepeatChangedCallback> repeat_changed_callbacks_;
+    std::vector<RepeatOneChangedCallback> repeat_one_changed_callbacks_;
+    LegacyLyricsCallback legacy_lyrics_callback_;
+
+    // Read-through album model. Invalidated by emit_library_changed() so page
+    // switches never re-run SQLite queries for an unchanged library.
+    std::mutex albums_cache_mutex_;
+    bool albums_cache_valid_ = false;
+    std::vector<Album> albums_cache_;
 
     // Lyrics result dispatcher (marshals async lyrics to GTK main thread).
     std::unique_ptr<Glib::Dispatcher> lyrics_dispatcher_;
@@ -387,6 +457,9 @@ private:
     void emit_queue_changed();
     void emit_visualization_changed(const std::vector<float>& points);
     void emit_library_changed();
+    void emit_shuffle_changed(bool enabled);
+    void emit_repeat_changed(bool enabled);
+    void emit_repeat_one_changed(bool enabled);
 };
 
 } // namespace lollypop

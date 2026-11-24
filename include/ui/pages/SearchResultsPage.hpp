@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "ui/components/LibraryPage.hpp"
+#include "ui/components/TrackListMetrics.hpp"
 #include "ui/components/TrackRow.hpp"
 #include "services/ILibraryService.hpp"
 
@@ -42,7 +43,13 @@ public:
 private:
     struct WidgetDeleter {
         void operator()(GtkWidget* w) const {
-            if (w) g_object_unref(w);
+            if (!w) return;
+            if (gtk_widget_get_parent(w) != nullptr) {
+                // GTK parents take ownership of the child's existing reference.
+                gtk_widget_unparent(w);
+            } else {
+                g_object_unref(w);
+            }
         }
     };
 
@@ -61,7 +68,7 @@ private:
     uint64_t current_generation_ = 0;
     size_t loaded_count_ = 0;
     size_t total_count_ = 0;
-    static constexpr size_t PAGE_SIZE = 50;
+    static constexpr size_t PAGE_SIZE = track_list_metrics::kPageSize;
     std::vector<Track> remaining_tracks_;
 
     // Plain C++ object: GWeakRef must not be used on `this`. Main-thread

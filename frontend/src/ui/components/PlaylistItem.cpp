@@ -6,6 +6,8 @@
 #include "main_window.hpp"
 
 #include <gtk/gtk.h>
+#include <gio/gio.h>
+#include <cstring>
 #include <iostream>
 
 namespace lollypop {
@@ -70,12 +72,80 @@ void PlaylistItem::setup_ui() {
 
     g_signal_connect(widget_.get(), "clicked", G_CALLBACK(on_clicked), this);
 
+    // Add right-click context menu
+    create_context_menu();
 }
 
 void PlaylistItem::on_clicked(GtkButton* button, gpointer user_data) {
     (void)button;
     PlaylistItem* self = static_cast<PlaylistItem*>(user_data);
     if (self->click_cb_) self->click_cb_(self->playlist_);
+}
+
+void PlaylistItem::set_playlist_action_callback(PlaylistActionCallback cb) {
+    playlist_action_cb_ = std::move(cb);
+    if (playlist_action_cb_) {
+        create_context_menu();
+    }
+}
+
+void PlaylistItem::create_context_menu() {
+    auto* right_click = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(right_click), GDK_BUTTON_SECONDARY);
+    g_signal_connect(right_click, "pressed", G_CALLBACK(on_context_menu), this);
+    gtk_widget_add_controller(widget_.get(), GTK_EVENT_CONTROLLER(right_click));
+
+    auto* action_group = g_simple_action_group_new();
+    g_action_map_add_action_entries(G_ACTION_MAP(action_group),
+        (GActionEntry[]){
+            { "play", [](GSimpleAction*, GVariant*, gpointer self) {
+                auto* item = static_cast<PlaylistItem*>(self);
+                if (item->playlist_action_cb_) item->playlist_action_cb_(item->playlist_, "play");
+            }, nullptr, nullptr, nullptr },
+            { "shuffle", [](GSimpleAction*, GVariant*, gpointer self) {
+                auto* item = static_cast<PlaylistItem*>(self);
+                if (item->playlist_action_cb_) item->playlist_action_cb_(item->playlist_, "shuffle");
+            }, nullptr, nullptr, nullptr },
+            { "add-to-queue", [](GSimpleAction*, GVariant*, gpointer self) {
+                auto* item = static_cast<PlaylistItem*>(self);
+                if (item->playlist_action_cb_) item->playlist_action_cb_(item->playlist_, "add_to_queue");
+            }, nullptr, nullptr, nullptr },
+            { "rename", [](GSimpleAction*, GVariant*, gpointer self) {
+                auto* item = static_cast<PlaylistItem*>(self);
+                if (item->playlist_action_cb_) item->playlist_action_cb_(item->playlist_, "rename");
+            }, nullptr, nullptr, nullptr },
+            { "delete", [](GSimpleAction*, GVariant*, gpointer self) {
+                auto* item = static_cast<PlaylistItem*>(self);
+                if (item->playlist_action_cb_) item->playlist_action_cb_(item->playlist_, "delete");
+            }, nullptr, nullptr, nullptr },
+        }, 5, this);
+    gtk_widget_insert_action_group(widget_.get(), "playlist-item", G_ACTION_GROUP(action_group));
+}
+
+void PlaylistItem::on_context_menu(GtkGestureClick* gesture, int n_press,
+                                   double x, double y, gpointer user_data) {
+    (void)gesture; (void)n_press; (void)x; (void)y;
+    PlaylistItem* self = static_cast<PlaylistItem*>(user_data);
+    if (!self->playlist_action_cb_) return;
+
+    GtkWidget* popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(
+        self->create_menu_model()));
+    gtk_widget_set_parent(popover, self->widget_.get());
+
+    GdkRectangle rect = {static_cast<int>(x), static_cast<int>(y), 1, 1};
+    gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
+    gtk_popover_set_position(GTK_POPOVER(popover), GTK_POS_BOTTOM);
+    gtk_widget_set_visible(popover, TRUE);
+}
+
+GMenu* PlaylistItem::create_menu_model() {
+    GMenu* menu = g_menu_new();
+    g_menu_append(menu, "Play", "playlist-item.play");
+    g_menu_append(menu, "Shuffle", "playlist-item.shuffle");
+    g_menu_append(menu, "Add to Queue", "playlist-item.add-to-queue");
+    g_menu_append(menu, "Rename...", "playlist-item.rename");
+    g_menu_append(menu, "Delete", "playlist-item.delete");
+    return menu;
 }
 
 } // namespace lollypop

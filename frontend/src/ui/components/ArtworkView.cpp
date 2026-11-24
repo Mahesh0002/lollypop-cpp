@@ -1,9 +1,12 @@
 /**
  * Lollypop C++ - ArtworkView Implementation
- * Async artwork loading with GTask, GCancellable support, and fallback.
+ * Async artwork loading with a shared, size-bucketed thumbnail cache.
  */
 
 #include "ui/components/ArtworkView.hpp"
+
+#include "data/ArtworkCache.hpp"
+#include "data/ThumbnailGenerator.hpp"
 
 #include <gtk/gtk.h>
 #include <glib.h>
@@ -17,8 +20,6 @@ struct DecodeData {
     ArtworkView* view;
     std::shared_ptr<bool> alive;
     std::string path;
-    int width;
-    int height;
 };
 
 void free_decode_data(gpointer data) {
@@ -26,44 +27,64 @@ void free_decode_data(gpointer data) {
 }
 } // namespace
 
+ArtworkCache* ArtworkView::cache_ = nullptr;
+ThumbnailGenerator* ArtworkView::generator_ = nullptr;
+
+void ArtworkView::configure_cache(ArtworkCache* cache,
+                                  ThumbnailGenerator* generator) {
+    cache_ = cache;
+    generator_ = generator;
+}
+
 ArtworkView::ArtworkView()
     : decode_task_(nullptr), cancellable_(nullptr), has_artwork_(false) {
-    widget_.reset(gtk_box_new(GTK_ORIENTATION_VERTICAL, 0));
+    widget_.reset(gtk_overlay_new());
     g_object_ref_sink(widget_.get());
     gtk_widget_set_hexpand(widget_.get(), FALSE);
     gtk_widget_set_vexpand(widget_.get(), FALSE);
     gtk_widget_add_css_class(widget_.get(), "artwork-view");
+    gtk_widget_set_overflow(widget_.get(), GTK_OVERFLOW_HIDDEN);
     gtk_widget_set_visible(widget_.get(), TRUE);
+    g_signal_connect(widget_.get(), "map", G_CALLBACK(on_map), this);
 
-    // Artwork image
+    // The main child is an invisible sizer. As an overlay child, the picture's
+    // natural size would otherwise inflate the tile.
+    GtkWidget* sizer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_visible(sizer, TRUE);
+    gtk_overlay_set_child(GTK_OVERLAY(widget_.get()), sizer);
+
     artwork_image_.reset(gtk_picture_new());
     g_object_ref_sink(artwork_image_.get());
     gtk_picture_set_content_fit(GTK_PICTURE(artwork_image_.get()),
                                 GTK_CONTENT_FIT_COVER);
+    gtk_picture_set_can_shrink(GTK_PICTURE(artwork_image_.get()), TRUE);
     gtk_widget_add_css_class(artwork_image_.get(), "artwork-view-image");
-    gtk_widget_set_halign(artwork_image_.get(), GTK_ALIGN_CENTER);
-    gtk_widget_set_valign(artwork_image_.get(), GTK_ALIGN_CENTER);
+    gtk_widget_set_halign(artwork_image_.get(), GTK_ALIGN_FILL);
+    gtk_widget_set_valign(artwork_image_.get(), GTK_ALIGN_FILL);
+    gtk_widget_set_hexpand(artwork_image_.get(), TRUE);
+    gtk_widget_set_vexpand(artwork_image_.get(), TRUE);
     gtk_widget_set_visible(artwork_image_.get(), FALSE);
 
-    // Fallback (music note symbol)
     fallback_image_.reset(gtk_image_new_from_icon_name("audio-x-generic-symbolic"));
     g_object_ref_sink(fallback_image_.get());
     gtk_widget_add_css_class(fallback_image_.get(), "artwork-view-fallback");
-    gtk_widget_set_halign(fallback_image_.get(), GTK_ALIGN_CENTER);
-    gtk_widget_set_valign(fallback_image_.get(), GTK_ALIGN_CENTER);
+    gtk_widget_set_halign(fallback_image_.get(), GTK_ALIGN_FILL);
+    gtk_widget_set_valign(fallback_image_.get(), GTK_ALIGN_FILL);
+    gtk_widget_set_hexpand(fallback_image_.get(), TRUE);
+    gtk_widget_set_vexpand(fallback_image_.get(), TRUE);
     gtk_image_set_pixel_size(GTK_IMAGE(fallback_image_.get()), 32);
     gtk_widget_set_visible(fallback_image_.get(), TRUE);
 
-    gtk_box_append(GTK_BOX(widget_.get()), artwork_image_.get());
-    gtk_box_append(GTK_BOX(widget_.get()), fallback_image_.get());
+    gtk_overlay_add_overlay(GTK_OVERLAY(widget_.get()), artwork_image_.get());
+    gtk_overlay_add_overlay(GTK_OVERLAY(widget_.get()), fallback_image_.get());
 
     update_visibility();
 }
 
 ArtworkView::~ArtworkView() {
-    // The completion callback runs on the main loop. The shared flag makes it
-    // a no-op before any widget or task ref is released.
+    // Invalidate queued callbacks before releasing widget/task references.
     if (alive_) *alive_ = false;
+    pending_path_.clear();
     if (cancellable_) {
         g_cancellable_cancel(cancellable_);
         g_object_unref(cancellable_);
@@ -76,7 +97,7 @@ ArtworkView::~ArtworkView() {
 }
 
 void ArtworkView::set_artwork_path(const std::string& path) {
-    // Cancel previous decode task if any
+    // Cancel previous decode task if any.
     if (cancellable_) {
         g_cancellable_cancel(cancellable_);
         g_object_unref(cancellable_);
@@ -88,34 +109,76 @@ void ArtworkView::set_artwork_path(const std::string& path) {
     }
 
     current_path_ = path;
+    ++load_generation_;
+    pending_path_.clear();
 
     if (!path.empty()) {
-        // Show loading state (fallback) immediately
         has_artwork_ = false;
         update_visibility();
-
-        // Create new cancellable for this load
-        cancellable_ = g_cancellable_new();
-
-        // The task data captures a shared liveness flag. A late callback is a
-        // no-op after destruction, without needing to touch a widget ref.
-        auto* data = new DecodeData{this,
-                                    alive_,
-                                    path,
-                                    preferred_width_,
-                                    preferred_height_};
-        decode_task_ = g_task_new(nullptr, cancellable_, on_decode_done, nullptr);
-        g_task_set_task_data(decode_task_, data, free_decode_data);
-        g_task_run_in_thread(decode_task_, decode_thread_func);
+        pending_path_ = path;
+        cache_bucket_ = ArtworkCache::select_bucket(
+            std::max(preferred_width_, preferred_height_),
+            gtk_widget_get_scale_factor(widget_.get()));
+        // Off-screen tiles are not mapped; their load starts on the "map"
+        // signal so a page only decodes artwork it actually displays.
+        if (gtk_widget_get_mapped(widget_.get())) start_pending_load();
     } else {
-        // No path - show fallback immediately
-        gtk_picture_set_file(GTK_PICTURE(artwork_image_.get()), nullptr);
+        gtk_picture_set_paintable(GTK_PICTURE(artwork_image_.get()), nullptr);
         has_artwork_ = false;
         update_visibility();
     }
 }
 
-void ArtworkView::decode_thread_func(GTask* task, gpointer /*source_object*/, gpointer /*task_data*/, GCancellable* cancellable) {
+void ArtworkView::start_pending_load() {
+    if (pending_path_.empty() || !*alive_) return;
+
+    const std::string path = pending_path_;
+    const uint64_t generation = load_generation_;
+    pending_path_.clear();
+
+    if (cache_ && generator_) {
+        const std::string key = path;
+        if (auto hit = cache_->lookup(key, cache_bucket_)) {
+            if (generation == load_generation_ && current_path_ == path && hit->texture) {
+                gtk_picture_set_paintable(GTK_PICTURE(artwork_image_.get()),
+                                          GDK_PAINTABLE(hit->texture));
+                has_artwork_ = true;
+                update_visibility();
+            }
+            return;
+        }
+
+        auto alive = alive_;
+        generator_->queue_job(
+            key, path, cache_bucket_,
+            [this, alive, generation, path](GdkTexture* texture, const std::string&) {
+                if (!*alive || generation != load_generation_ || current_path_ != path) return;
+                if (texture) {
+                    gtk_picture_set_paintable(GTK_PICTURE(artwork_image_.get()),
+                                              GDK_PAINTABLE(texture));
+                    has_artwork_ = true;
+                    update_visibility();
+                } else {
+                    show_fallback();
+                }
+            });
+        return;
+    }
+
+    // Legacy path: no shared cache configured (used by standalone tests).
+    cancellable_ = g_cancellable_new();
+    auto* data = new DecodeData{this, alive_, path};
+    decode_task_ = g_task_new(nullptr, cancellable_, on_decode_done, nullptr);
+    g_task_set_task_data(decode_task_, data, free_decode_data);
+    g_task_run_in_thread(decode_task_, decode_thread_func);
+}
+
+void ArtworkView::on_map(GtkWidget*, gpointer user_data) {
+    static_cast<ArtworkView*>(user_data)->start_pending_load();
+}
+
+void ArtworkView::decode_thread_func(GTask* task, gpointer /*source_object*/,
+                                     gpointer /*task_data*/, GCancellable* cancellable) {
     auto* data = static_cast<DecodeData*>(g_task_get_task_data(task));
     if (!data) return;
 
@@ -125,14 +188,10 @@ void ArtworkView::decode_thread_func(GTask* task, gpointer /*source_object*/, gp
         return;
     }
 
-    // Decode to an exact-size texture. GtkPicture advertises a texture's
-    // natural size, so loading a full-resolution image made every container
-    // that displayed it grow. Crop to a square and scale before handing it
-    // over to the UI thread.
     GdkPixbuf* source = gdk_pixbuf_new_from_file(data->path.c_str(), &error);
     if (error || !source) {
         if (error) {
-            g_task_return_error(task, error);  // takes ownership
+            g_task_return_error(task, error);
         } else {
             g_task_return_error(task, g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
                                                   "Could not decode artwork: %s",
@@ -153,16 +212,11 @@ void ArtworkView::decode_thread_func(GTask* task, gpointer /*source_object*/, gp
     }
 
     GdkPixbuf* square = gdk_pixbuf_new_subpixbuf(source,
-                                                 (width - side) / 2,
-                                                 (height - side) / 2,
-                                                 side, side);
-    GdkPixbuf* scaled = gdk_pixbuf_scale_simple(square,
-                                                std::max(1, data->width),
-                                                std::max(1, data->height),
-                                                GDK_INTERP_BILINEAR);
-    GdkTexture* texture = gdk_texture_new_for_pixbuf(scaled);
+                                                  (width - side) / 2,
+                                                  (height - side) / 2,
+                                                  side, side);
+    GdkTexture* texture = gdk_texture_new_for_pixbuf(square);
 
-    g_object_unref(scaled);
     g_object_unref(square);
     g_object_unref(source);
 
@@ -195,7 +249,6 @@ void ArtworkView::on_decode_done(GObject* /*source*/, GAsyncResult* res, gpointe
             self->show_fallback();
         }
 
-        // Release references held for this load only if it is still current.
         if (self->decode_task_) {
             g_object_unref(self->decode_task_);
             self->decode_task_ = nullptr;
@@ -210,29 +263,37 @@ void ArtworkView::on_decode_done(GObject* /*source*/, GAsyncResult* res, gpointe
 }
 
 void ArtworkView::show_fallback() {
-    gtk_picture_set_file(GTK_PICTURE(artwork_image_.get()), nullptr);
+    gtk_picture_set_paintable(GTK_PICTURE(artwork_image_.get()), nullptr);
     has_artwork_ = false;
     update_visibility();
 }
 
 void ArtworkView::set_corner_radius(double radius) {
     corner_radius_ = radius;
-    // Corner radius is applied via the artwork-view CSS class in styles.css.
-    // Size is set exclusively by set_preferred_size(); do not request a size
-    // here, or the artwork gets forced to radius*2 (e.g. 24x24).
 }
 
 void ArtworkView::set_preferred_size(int width, int height) {
     preferred_width_ = width;
     preferred_height_ = height;
 
-    // Constrain the wrapper too: GtkPicture advertises the texture's natural
-    // size, which otherwise grows its parent container.
+    GtkWidget* sizer = gtk_overlay_get_child(GTK_OVERLAY(widget_.get()));
+    if (sizer) {
+        gtk_widget_set_size_request(sizer, width, height);
+    }
     gtk_widget_set_size_request(widget_.get(), width, height);
     gtk_widget_set_size_request(artwork_image_.get(), width, height);
-    gtk_widget_set_size_request(fallback_image_.get(),
-                                std::max(16, width / 3),
-                                std::max(16, height / 3));
+    gtk_widget_set_size_request(fallback_image_.get(), width, height);
+
+    gtk_widget_set_halign(widget_.get(), GTK_ALIGN_FILL);
+    gtk_widget_set_valign(widget_.get(), GTK_ALIGN_FILL);
+    gtk_widget_set_halign(artwork_image_.get(), GTK_ALIGN_FILL);
+    gtk_widget_set_valign(artwork_image_.get(), GTK_ALIGN_FILL);
+    gtk_widget_set_halign(fallback_image_.get(), GTK_ALIGN_FILL);
+    gtk_widget_set_valign(fallback_image_.get(), GTK_ALIGN_FILL);
+    gtk_picture_set_content_fit(GTK_PICTURE(artwork_image_.get()),
+                                GTK_CONTENT_FIT_COVER);
+    gtk_image_set_pixel_size(GTK_IMAGE(fallback_image_.get()),
+                             std::min(48, std::max(16, std::min(width, height))));
 }
 
 void ArtworkView::update_visibility() {

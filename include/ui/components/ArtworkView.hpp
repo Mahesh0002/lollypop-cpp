@@ -7,16 +7,20 @@
  * - Preserve aspect ratio.
  * - Support rounded corners.
  * - Show fallback artwork when missing.
- * - Load asynchronously via GdkTexture from file with GCancellable support.
+ * - Load asynchronously via a shared, size-bucketed thumbnail cache.
  */
 
 #pragma once
 
 #include <gtk/gtk.h>
+#include <cstdint>
 #include <memory>
 #include <string>
 
 namespace lollypop {
+
+class ArtworkCache;
+class ThumbnailGenerator;
 
 class ArtworkView {
 public:
@@ -25,6 +29,11 @@ public:
 
     ArtworkView(const ArtworkView&) = delete;
     ArtworkView& operator=(const ArtworkView&) = delete;
+
+    /// Install the shared thumbnail cache and generator used by all views.
+    /// Call before constructing views; nullptr restores the legacy loader.
+    static void configure_cache(ArtworkCache* cache,
+                                ThumbnailGenerator* generator);
 
     GtkWidget* get_widget() const { return widget_.get(); }
 
@@ -44,7 +53,13 @@ public:
 private:
     struct WidgetDeleter {
         void operator()(GtkWidget* w) const {
-            if (w) g_object_unref(w);
+            if (!w) return;
+            if (gtk_widget_get_parent(w) != nullptr) {
+                // GTK parents take ownership of the child's existing reference.
+                gtk_widget_unparent(w);
+            } else {
+                g_object_unref(w);
+            }
         }
     };
     std::unique_ptr<GtkWidget, WidgetDeleter> widget_;
@@ -56,15 +71,24 @@ private:
     // late callback can never touch a destroyed ArtworkView.
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
     std::string current_path_;
+    std::string pending_path_;
+    uint64_t load_generation_ = 0;
+    int cache_bucket_ = 0;
     int preferred_width_ = 56;
     int preferred_height_ = 56;
     bool has_artwork_ = false;
     double corner_radius_ = 12.0;
 
-    static void on_decode_done(GObject* source, GAsyncResult* res, gpointer user_data);
-    static void decode_thread_func(GTask* task, gpointer source_object, gpointer task_data, GCancellable* cancellable);
+    static ArtworkCache* cache_;
+    static ThumbnailGenerator* generator_;
+
+    void start_pending_load();
     void show_fallback();
     void update_visibility();
+
+    static void on_decode_done(GObject* source, GAsyncResult* res, gpointer user_data);
+    static void decode_thread_func(GTask* task, gpointer source_object, gpointer task_data, GCancellable* cancellable);
+    static void on_map(GtkWidget* widget, gpointer user_data);
 };
 
 } // namespace lollypop

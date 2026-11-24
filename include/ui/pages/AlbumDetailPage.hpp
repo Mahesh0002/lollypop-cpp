@@ -1,8 +1,15 @@
 /**
  * Lollypop C++ - Album Detail Page
  *
- * Album artwork, title, artist, year, track count, Play album, Shuffle,
- * and track list using shared TrackRow component (plan Section 5.10).
+ * Referenced files (kept as comments so other models can follow the wiring):
+ *   frontend/src/ui/pages/AlbumDetailPage.cpp
+ *   frontend/src/panels/middle_library.cpp
+ *   include/types.hpp
+ *   include/services/ILibraryService.hpp
+ *   resources/style.css
+ *
+ * Album artwork, title, artist, genre/year metadata, Play album, Shuffle,
+ * and track list using shared TrackRow component.
  */
 
 #pragma once
@@ -19,6 +26,7 @@
 
 namespace lollypop {
 
+class ArtworkView;
 class MainWindow;
 
 class AlbumDetailPage : public LibraryPage {
@@ -40,13 +48,18 @@ public:
 private:
     struct WidgetDeleter {
         void operator()(GtkWidget* w) const {
-            if (w) g_object_unref(w);
+            if (!w) return;
+            if (gtk_widget_get_parent(w) != nullptr) {
+                // GTK parents take ownership of the child's existing reference.
+                gtk_widget_unparent(w);
+            } else {
+                g_object_unref(w);
+            }
         }
     };
     std::unique_ptr<GtkWidget, WidgetDeleter> widget_;
-    std::unique_ptr<GtkWidget, WidgetDeleter> scrolled_window_;
     std::unique_ptr<GtkWidget, WidgetDeleter> content_box_;
-    std::unique_ptr<GtkWidget, WidgetDeleter> artwork_image_;
+    std::unique_ptr<ArtworkView> artwork_view_;
     std::unique_ptr<GtkWidget, WidgetDeleter> title_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> artist_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> meta_label_;

@@ -155,6 +155,7 @@ if(GLIB_COMPILE_RESOURCES)
         DEPENDS
             ${CMAKE_CURRENT_SOURCE_DIR}/resources/lollypop.gresource.xml
             ${CMAKE_CURRENT_SOURCE_DIR}/resources/style.css
+            ${CMAKE_CURRENT_SOURCE_DIR}/resources/apple_ui.css
         COMMENT "Generating GResource C registration source"
     )
     add_custom_target(resources ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lollypop_resources.c)
@@ -166,6 +167,7 @@ endif()
 add_subdirectory(frontend)
 add_subdirectory(backend)
 add_subdirectory(storage)
+add_subdirectory(tools)
 
 # Main executable
 if(GLIB_COMPILE_RESOURCES)

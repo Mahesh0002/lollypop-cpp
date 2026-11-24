@@ -20,6 +20,8 @@ class BackendController;
 class IPlayerService;
 class ThemeManager;
 class PiPWindow;
+class ArtworkCache;
+class ThumbnailGenerator;
 
 class Application {
 public:
@@ -52,10 +54,16 @@ protected:
 private:
     std::string application_id_;
     std::unique_ptr<AdwApplication, void(*)(AdwApplication*)> app_;
+    // Declared before MainWindow so widgets are destroyed before the shared
+    // thumbnail cache and its worker thread.
+    std::unique_ptr<ArtworkCache> artwork_cache_;
+    std::unique_ptr<ThumbnailGenerator> thumbnail_generator_;
     std::unique_ptr<MainWindow> main_window_;
     std::unique_ptr<BackendController> backend_;
     std::unique_ptr<ThemeManager> theme_manager_;
     std::unique_ptr<PiPWindow> pip_window_;
+
+    void init_artwork_cache();
 
     // Static callbacks for GTK
     static void on_activate_static(AdwApplication* app, gpointer user_data);

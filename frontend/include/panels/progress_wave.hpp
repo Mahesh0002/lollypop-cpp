@@ -40,6 +40,10 @@ public:
     void set_can_seek(bool can_seek);
     void set_seek_callback(SeekCallback callback);
 
+    // Decorative sine-wave density. The right panel/PiP use the default; the
+    // wide bottom strip uses a higher count.
+    void set_wave_frequency(double frequency);
+
     // Feed spectrum magnitudes from EventBus "spectrum" frames. Empty input
     // restores the decorative sine wave.
     void set_spectrum(const std::vector<float>& magnitudes);
@@ -64,6 +68,7 @@ private:
 
     SeekCallback seek_callback_;
     std::vector<float> spectrum_;
+    double wave_frequency_ = kWaveFrequency;
     double duration_ = 0.0;
     double progress_ = 0.0;
     double pending_fraction_ = -1.0;

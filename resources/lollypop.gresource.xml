@@ -2,6 +2,7 @@
 <gresources>
   <gresource prefix="/com/mahesh/lollypop">
     <file>style.css</file>
+    <file>apple_ui.css</file>
     <file>fonts/Inter/Inter-VariableFont_slnt,wght.ttf</file>
   </gresource>
 </gresources>

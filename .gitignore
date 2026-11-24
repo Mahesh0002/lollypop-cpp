@@ -41,4 +41,12 @@ Thumbs.db
 
 # Package managers
 conan.lock
-vcpkg/build-asan/
+vcpkg/
+
+# Build outputs
+build/
+build-*/
+cmake-build-*/
+
+# Backups
+*.backup

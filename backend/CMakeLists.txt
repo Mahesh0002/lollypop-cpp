@@ -28,12 +28,18 @@ pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET
 )
 pkg_check_modules(GIOMM REQUIRED IMPORTED_TARGET giomm-2.68)
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET taglib)
+pkg_check_modules(LIBCURL REQUIRED IMPORTED_TARGET libcurl)
 find_package(Threads REQUIRED)
+# nlohmann_json is header-only, include from third_party
+target_include_directories(lollypop-backend PUBLIC
+    ${CMAKE_SOURCE_DIR}/third_party
+)
 
 target_link_libraries(lollypop-backend PUBLIC
     PkgConfig::GSTREAMER
     PkgConfig::GIOMM
     PkgConfig::TAGLIB
+    PkgConfig::LIBCURL
     Threads::Threads
     lollypop-storage
 )

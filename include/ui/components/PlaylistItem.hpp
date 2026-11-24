@@ -22,6 +22,7 @@ class PlaylistItem {
 public:
     using ClickCallback = std::function<void(const Playlist&)>;
     using PlayCallback = std::function<void(const Playlist&)>;
+    using PlaylistActionCallback = std::function<void(const Playlist&, const char* action)>;
 
     PlaylistItem(MainWindow* main_window, const Playlist& playlist);
     ~PlaylistItem();
@@ -33,11 +34,18 @@ public:
 
     void set_click_callback(ClickCallback cb) { click_cb_ = std::move(cb); }
     void set_play_callback(PlayCallback cb) { play_cb_ = std::move(cb); }
+    void set_playlist_action_callback(PlaylistActionCallback cb);
 
 private:
     struct WidgetDeleter {
         void operator()(GtkWidget* w) const {
-            if (w) g_object_unref(w);
+            if (!w) return;
+            if (gtk_widget_get_parent(w) != nullptr) {
+                // GTK parents take ownership of the child's existing reference.
+                gtk_widget_unparent(w);
+            } else {
+                g_object_unref(w);
+            }
         }
     };
     std::unique_ptr<GtkWidget, WidgetDeleter> widget_;
@@ -49,9 +57,14 @@ private:
     Playlist playlist_;
     ClickCallback click_cb_;
     PlayCallback play_cb_;
+    PlaylistActionCallback playlist_action_cb_;
 
     void setup_ui();
+    void create_context_menu();
+    GMenu* create_menu_model();
     static void on_clicked(GtkButton* button, gpointer user_data);
+    static void on_context_menu(GtkGestureClick* gesture, int n_press,
+                                double x, double y, gpointer user_data);
 };
 
 } // namespace lollypop

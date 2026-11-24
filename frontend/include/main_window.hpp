@@ -10,7 +10,7 @@
 #include <memory>
 #include <string>
 
-#include "panels/left_sidebar.hpp"
+#include "panels/apple_sidebar.hpp"
 #include "panels/middle_library.hpp"
 #include "panels/right_now_playing.hpp"
 #include "panels/bottom_playback.hpp"
@@ -24,7 +24,6 @@ class IPlayerService;
 class ThemeManager;
 class ILibraryService;
 class ILyricsService;
-class VolumeDial;
 
 class MainWindow {
 public:
@@ -35,7 +34,7 @@ public:
     GtkWindow* get_window() const { return GTK_WINDOW(window_); }
 
     // Panel accessors
-    LeftSidebar* get_left_sidebar() const { return left_sidebar_.get(); }
+    AppleSidebar* get_left_sidebar() const { return left_sidebar_.get(); }
     MiddleLibrary* get_middle_library() const { return middle_library_.get(); }
     RightNowPlaying* get_right_now_playing() const { return right_now_playing_.get(); }
     BottomPlayback* get_bottom_playback() const { return bottom_playback_.get(); }
@@ -49,8 +48,8 @@ public:
     // Application accessor
     Application* get_application() const { return app_; }
 
-    // Volume dial accessor
-    VolumeDial* get_volume_dial() const;
+    // Debounced library-change refresh source (0 when idle).
+    guint library_refresh_source_ = 0;
 
     // Called after BackendController::initialize() so the window can present
     // immediately while the backend loads on a low-priority idle source.
@@ -66,7 +65,7 @@ private:
     GtkWidget* content_grid_;
 
     // Four panels
-    std::unique_ptr<LeftSidebar> left_sidebar_;
+    std::unique_ptr<AppleSidebar> left_sidebar_;
     std::unique_ptr<MiddleLibrary> middle_library_;
     std::unique_ptr<RightNowPlaying> right_now_playing_;
     std::unique_ptr<BottomPlayback> bottom_playback_;
@@ -84,6 +83,7 @@ private:
     void connect_signals();
     void connect_backend();
     void disconnect_backend();
+    void schedule_library_refresh();
 
     // Callbacks
     static gboolean on_window_close(GtkWindow* window, gpointer user_data);

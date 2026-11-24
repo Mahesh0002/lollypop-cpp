@@ -70,6 +70,9 @@ public:
     using QueueChangedCallback = std::function<void(const std::vector<std::string>&)>;
     using VisualizationCallback = std::function<void(const std::vector<float>&)>;
     using LibraryChangedCallback = std::function<void()>;
+    using ShuffleChangedCallback = std::function<void(bool enabled)>;
+    using RepeatChangedCallback = std::function<void(bool enabled)>;
+    using RepeatOneChangedCallback = std::function<void(bool enabled)>;
 
     virtual void set_track_changed_callback(TrackChangedCallback cb) = 0;
     virtual void set_position_changed_callback(PositionChangedCallback cb) = 0;
@@ -86,6 +89,9 @@ public:
     virtual void add_queue_changed_callback(QueueChangedCallback cb) = 0;
     virtual void add_visualization_changed_callback(VisualizationCallback cb) = 0;
     virtual void add_library_changed_callback(LibraryChangedCallback cb) = 0;
+    virtual void add_shuffle_changed_callback(ShuffleChangedCallback cb) = 0;
+    virtual void add_repeat_changed_callback(RepeatChangedCallback cb) = 0;
+    virtual void add_repeat_one_changed_callback(RepeatOneChangedCallback cb) = 0;
 };
 
 } // namespace lollypop

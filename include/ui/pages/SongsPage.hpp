@@ -15,6 +15,7 @@
 #include <mutex>
 
 #include "ui/components/LibraryPage.hpp"
+#include "ui/components/TrackListMetrics.hpp"
 #include "ui/components/TrackRow.hpp"
 #include "services/ILibraryService.hpp"
 
@@ -41,7 +42,13 @@ public:
 private:
     struct WidgetDeleter {
         void operator()(GtkWidget* w) const {
-            if (w) g_object_unref(w);
+            if (!w) return;
+            if (gtk_widget_get_parent(w) != nullptr) {
+                // GTK parents take ownership of the child's existing reference.
+                gtk_widget_unparent(w);
+            } else {
+                g_object_unref(w);
+            }
         }
     };
     std::unique_ptr<GtkWidget, WidgetDeleter> widget_;  // Box (content: header + ListBox)
@@ -62,8 +69,7 @@ private:
     bool loading_ = false;
     size_t loaded_count_ = 0;
     size_t total_count_ = 0;
-    static constexpr size_t PAGE_SIZE = 100;
-    static constexpr size_t PREFETCH_THRESHOLD = 50;
+    static constexpr size_t PAGE_SIZE = track_list_metrics::kPageSize;
 
     // reload() calls load_page(); both take this lock, so it must be recursive.
     std::recursive_mutex load_mutex_;

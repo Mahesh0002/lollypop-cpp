@@ -1,0 +1,308 @@
+/*
+ * Apple-style UI layer.
+ * Loaded by AppleSidebar as a higher-priority provider, so it overrides the
+ * legacy stylesheet without editing resources/style.css.
+ *
+ * Referenced files: resources/style.css,
+ *                   frontend/src/ui/components/AppleAlbumTile.cpp,
+ *                   frontend/src/ui/pages/AlbumsPage.cpp
+ */
+
+:root {
+    --apple-font: "Inter", "Noto Sans", sans-serif;
+
+    --apple-size-display: 34px;
+    --apple-size-title: 28px;
+    --apple-size-section: 20px;
+    --apple-size-row: 15px;
+    --apple-size-body: 13px;
+    --apple-size-caption: 11px;
+
+    --apple-weight-regular: 400;
+    --apple-weight-semibold: 600;
+
+    --apple-row-hover: rgba(255, 255, 255, 0.07);
+    --apple-row-active: rgba(255, 255, 255, 0.12);
+}
+
+/* No press ripple or animated button state changes. */
+button {
+    transition: none;
+    animation: none;
+}
+
+/* Typography rhythm. */
+.apple-display-title {
+    font-family: var(--apple-font);
+    font-size: var(--apple-size-display);
+    font-weight: var(--apple-weight-semibold);
+    letter-spacing: -0.5px;
+}
+
+.apple-page-title {
+    font-family: var(--apple-font);
+    font-size: var(--apple-size-title);
+    font-weight: var(--apple-weight-semibold);
+    letter-spacing: -0.3px;
+}
+
+.apple-section-title {
+    font-family: var(--apple-font);
+    font-size: var(--apple-size-section);
+    font-weight: var(--apple-weight-semibold);
+}
+
+.apple-row-title {
+    font-family: var(--apple-font);
+    font-size: var(--apple-size-row);
+    font-weight: var(--apple-weight-regular);
+}
+
+.apple-body-text {
+    font-family: var(--apple-font);
+    font-size: var(--apple-size-body);
+    font-weight: var(--apple-weight-regular);
+}
+
+.apple-caption {
+    font-family: var(--apple-font);
+    font-size: var(--apple-size-caption);
+    font-weight: var(--apple-weight-regular);
+}
+
+/* Sidebar shell: fills the complete main-row height. */
+.apple-sidebar {
+    min-width: 220px;
+    background-color: var(--bg-secondary);
+    border-right: 1px solid var(--border-subtle);
+}
+
+.apple-sidebar-grid {
+    margin: 0;
+    padding: 0;
+}
+
+/* 1x1 back grid. */
+.apple-back-grid {
+    margin: 0;
+    padding: 0;
+}
+
+.apple-back-button,
+.apple-nav-row {
+    min-width: 0;
+    min-height: 38px;
+    margin: 0 6px;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    background-color: transparent;
+    box-shadow: none;
+    outline: none;
+    color: var(--text-secondary);
+}
+
+/* 10px grid spacing + 10px extra here = 20px between Back and Home. */
+.apple-back-button {
+    margin-bottom: 10px;
+}
+
+.apple-back-button:hover,
+.apple-nav-row:hover {
+    background-color: var(--apple-row-hover);
+}
+
+.apple-back-button:active,
+.apple-nav-row:active {
+    background-color: var(--apple-row-active);
+}
+
+.apple-nav-row.active {
+    background-color: var(--apple-row-active);
+}
+
+.apple-back-button:focus-visible,
+.apple-nav-row:focus-visible {
+    outline: 1px solid rgba(255, 255, 255, 0.45);
+    outline-offset: 1px;
+}
+
+/* 5px on both sides of every outline icon. */
+.apple-icon-slot {
+    min-width: 0;
+    min-height: 0;
+    background-color: transparent;
+}
+
+.apple-nav-icon {
+    color: var(--text-secondary);
+    min-width: 0;
+    min-height: 0;
+}
+
+.apple-nav-row.active .apple-nav-icon,
+.apple-back-button:hover .apple-nav-icon,
+.apple-nav-row:hover .apple-nav-icon {
+    color: var(--text-primary);
+}
+
+.apple-nav-label {
+    font-family: var(--apple-font);
+    font-size: var(--apple-size-row);
+    font-weight: var(--apple-weight-regular);
+    color: var(--text-secondary);
+    min-width: 0;
+}
+
+.apple-nav-row:hover .apple-nav-label {
+    color: var(--text-primary);
+}
+
+.apple-nav-row.active .apple-nav-label {
+    color: var(--text-primary);
+    font-weight: var(--apple-weight-semibold);
+}
+
+/* Home page: album-first sections. */
+.home-page .section-title {
+    font-family: var(--apple-font);
+    font-size: var(--apple-size-section);
+    font-weight: var(--apple-weight-semibold);
+    letter-spacing: -0.1px;
+    margin-bottom: 12px;
+}
+
+.apple-album-tile {
+    background-color: transparent;
+    border: none;
+    border-radius: 12px;
+    margin: 0;
+    padding: 0;
+}
+
+.home-album-grid flowboxchild,
+.albums-grid flowboxchild {
+    background-color: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+}
+
+/* The homogeneous grid owns the width; tiles only constrain their height. */
+.home-page .apple-album-tile,
+.home-page .apple-album-tile-inner {
+    min-width: 0;
+}
+
+.apple-album-tile .artwork-view,
+.apple-album-artwork {
+    border-radius: 12px;
+}
+
+/* The generic artwork shadow would read as a translucent frame around a tile. */
+.apple-album-tile .artwork-view-image,
+.apple-album-tile .artwork-view-fallback,
+.apple-album-artwork {
+    box-shadow: none;
+    margin: 0;
+    padding: 0;
+}
+
+.apple-album-tile-inner {
+    background-color: transparent;
+    border: none;
+    margin: 0;
+    padding: 0;
+}
+
+.albums-page .apple-album-tile,
+.albums-page .apple-album-tile-inner {
+    min-width: 0;
+}
+
+.albums-page .apple-album-tile {
+    background-color: transparent;
+    border: none;
+    box-shadow: none;
+    margin: 0;
+    padding: 0;
+}
+
+.apple-album-scrim {
+    background-color: rgba(0, 0, 0, 0.34);
+    background-image: linear-gradient(
+        to top,
+        rgba(0, 0, 0, 0.88) 0%,
+        rgba(0, 0, 0, 0.62) 58%,
+        rgba(0, 0, 0, 0) 100%
+    );
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
+    transition: background-color 160ms ease-out;
+}
+
+.apple-album-tile.hover .apple-album-scrim {
+    background-color: rgba(0, 0, 0, 0.48);
+}
+
+.apple-album-meta {
+    background-color: transparent;
+    border-top: 1px solid rgba(255, 255, 255, 0.18);
+    padding-top: 5px;
+}
+
+.apple-album-name {
+    font-family: var(--apple-font);
+    font-size: 13px;
+    font-weight: var(--apple-weight-semibold);
+    line-height: 16px;
+    letter-spacing: -0.2px;
+    color: #ffffff;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+
+.apple-album-artist {
+    font-family: var(--apple-font);
+    font-size: 11px;
+    font-weight: var(--apple-weight-regular);
+    line-height: 14px;
+    letter-spacing: 0.7px;
+    color: rgba(255, 255, 255, 0.76);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.albums-page .apple-album-name {
+    font-size: 12px;
+    line-height: 15px;
+}
+
+.albums-page .apple-album-artist {
+    font-size: 10px;
+    line-height: 13px;
+    letter-spacing: 0.6px;
+}
+
+.apple-album-favorite {
+    min-width: 26px;
+    min-height: 26px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-control, 8px);
+    background-color: rgba(0, 0, 0, 0.55);
+    color: #ffffff;
+    opacity: 0;
+    transition: opacity 120ms ease-out, background-color 120ms ease-out;
+}
+
+.apple-album-tile.hover .apple-album-favorite,
+.apple-album-tile.favorited .apple-album-favorite {
+    opacity: 1;
+}
+
+.apple-album-tile.favorited .apple-album-favorite {
+    color: var(--accent-color, #fa243c);
+}
+

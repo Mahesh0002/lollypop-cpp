@@ -4,10 +4,14 @@
 
 #include "ui/pages/ArtistsPage.hpp"
 #include "main_window.hpp"
+#include "services/IPlayerService.hpp"
 #include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
+#include <cstring>
 #include <iostream>
+#include <random>
+#include <algorithm>
 
 namespace lollypop {
 
@@ -55,6 +59,55 @@ void ArtistsPage::populate(const std::vector<Artist>& artists) {
         auto item = std::make_unique<ArtistItem>(main_window_, artist);
         item->set_click_callback(
             [this](const Artist& a) { on_artist_clicked(a); });
+        item->set_artist_action_callback([this](const Artist& a, const char* action) {
+            if (!main_window_) return;
+            IPlayerService* backend = main_window_->get_backend();
+            if (!backend) return;
+
+            if (std::strcmp(action, "play") == 0) {
+                // Get artist tracks and play
+                if (library_service_) {
+                    auto tracks = library_service_->get_tracks_by_artist(a.id);
+                    std::vector<std::string> track_ids;
+                    for (const auto& track : tracks) {
+                        track_ids.push_back(track.id);
+                    }
+                    if (!track_ids.empty()) {
+                        backend->play_tracks(track_ids, 0);
+                    }
+                }
+            } else if (std::strcmp(action, "shuffle") == 0) {
+                if (library_service_) {
+                    auto tracks = library_service_->get_tracks_by_artist(a.id);
+                    std::vector<std::string> track_ids;
+                    for (const auto& track : tracks) {
+                        track_ids.push_back(track.id);
+                    }
+                    std::random_device rd;
+                    std::mt19937 g(rd());
+                    std::shuffle(track_ids.begin(), track_ids.end(), g);
+                    if (!track_ids.empty()) {
+                        backend->play_tracks(track_ids, 0);
+                    }
+                }
+            } else if (std::strcmp(action, "add_to_queue") == 0) {
+                if (library_service_) {
+                    auto tracks = library_service_->get_tracks_by_artist(a.id);
+                    for (const auto& track : tracks) {
+                        backend->enqueue_track(track.id, false);
+                    }
+                }
+            } else if (std::strcmp(action, "add_to_playlist") == 0) {
+                // TODO: Show playlist selection dialog
+                // For now, add to queue as fallback
+                if (library_service_) {
+                    auto tracks = library_service_->get_tracks_by_artist(a.id);
+                    for (const auto& track : tracks) {
+                        backend->enqueue_track(track.id, false);
+                    }
+                }
+            }
+        });
 
         GtkWidget* w = item->get_widget();
         safe_flow_box_append(GTK_FLOW_BOX(grid_.get()), w);

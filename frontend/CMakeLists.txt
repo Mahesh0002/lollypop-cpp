@@ -1,13 +1,107 @@
 # Frontend - GTK4 Presentation Layer
 
-file(GLOB_RECURSE FRONTEND_SOURCES CONFIGURE_DEPENDS
-    src/*.cpp
-    src/**/*.cpp
+set(FRONTEND_SOURCES
+    ${CMAKE_SOURCE_DIR}/src/main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/application.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/data/ArtworkCache.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/data/ThumbnailGenerator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/main_window.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/panels/apple_sidebar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/panels/bottom_playback.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/panels/left_sidebar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/panels/middle_library.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/panels/pip_window.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/panels/progress_wave.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/panels/right_now_playing.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/panels/spectrum_router.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/panels/waveform_view.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/panels/waveform_widget.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/services/MockLibraryService.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/services/MockLyricsService.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/AlbumCard.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/AppleAlbumTile.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/ArtistItem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/ArtworkView.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/EmptyState.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/EqualizerIndicator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/ErrorState.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/HomePage.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/LoadingState.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/PlaylistItem.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/TrackRow.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/VolumeDial.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/components/LyricRow.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/components/SyncedLyricsLabel.cpp
+    ${CMAKE_SOURCE_DIR}/src/ui/components/SyncedLyricsView.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/pages/AlbumDetailPage.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/pages/AlbumsPage.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/pages/ArtistDetailPage.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/pages/ArtistsPage.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/pages/FavouriteAlbumsPage.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/pages/GenresPage.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/pages/LikedMusicPage.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/pages/PlaylistsPage.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/pages/SearchResultsPage.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/pages/SongsPage.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/theme/AccentColorManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/theme/ThemeManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/util/safe_gtk.cpp
+    ${CMAKE_SOURCE_DIR}/src/lyrics/LrcParser.cpp
 )
 
-file(GLOB_RECURSE FRONTEND_HEADERS CONFIGURE_DEPENDS
-    include/*.hpp
-    include/**/*.hpp
+set(FRONTEND_HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/main_window.hpp
+    ${CMAKE_SOURCE_DIR}/include/application.hpp
+    ${CMAKE_SOURCE_DIR}/include/config/i18n.hpp
+    ${CMAKE_SOURCE_DIR}/include/data/ArtworkCache.hpp
+    ${CMAKE_SOURCE_DIR}/include/data/ThumbnailGenerator.hpp
+    ${CMAKE_SOURCE_DIR}/include/lyrics/LyricTypes.hpp
+    ${CMAKE_SOURCE_DIR}/include/services/ILibraryService.hpp
+    ${CMAKE_SOURCE_DIR}/include/services/ILyricsService.hpp
+    ${CMAKE_SOURCE_DIR}/include/services/IPlayerService.hpp
+    ${CMAKE_SOURCE_DIR}/include/types.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/components/AlbumCard.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/ui/components/AppleAlbumTile.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/components/ArtistItem.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/components/ArtworkView.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/components/EmptyState.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/components/EqualizerIndicator.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/components/ErrorState.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/components/HomePage.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/components/LibraryPage.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/components/LoadingState.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/components/LyricRow.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/components/PlaylistItem.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/components/SyncedLyricsLabel.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/components/SyncedLyricsView.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/components/TrackListMetrics.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/components/TrackRow.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/components/VolumeDial.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/pages/AlbumDetailPage.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/pages/AlbumsPage.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/pages/ArtistDetailPage.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/pages/ArtistsPage.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/pages/FavouriteAlbumsPage.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/pages/GenresPage.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/pages/LikedMusicPage.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/pages/PlaylistsPage.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/pages/SearchResultsPage.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/pages/SongsPage.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/theme/AccentColorManager.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/theme/ThemeManager.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/panels/apple_sidebar.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/panels/bottom_playback.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/panels/left_sidebar.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/panels/middle_library.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/panels/pip_window.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/panels/progress_wave.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/panels/right_now_playing.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/panels/spectrum_router.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/panels/waveform_view.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/panels/waveform_widget.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/services/MockLibraryService.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/services/MockLyricsService.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/util/safe_gtk.hpp
 )
 
 add_library(lollypop-frontend STATIC ${FRONTEND_SOURCES} ${FRONTEND_HEADERS})

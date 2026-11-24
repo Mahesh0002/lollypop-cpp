@@ -13,6 +13,32 @@
 #include "manager.hpp"
 #include "config/i18n.hpp"
 
+// GTK, Pango and fontconfig keep process-lifetime caches (font maps, font
+// config substitutes, Pango layout engines). LeakSanitizer reports them as
+// leaks on exit even though they are intentional singletons. Suppress only the
+// third-party UI stack so genuine application leaks are still reported.
+#if defined(__SANITIZE_ADDRESS__)
+#define LOLLYPOP_ASAN_ENABLED 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define LOLLYPOP_ASAN_ENABLED 1
+#endif
+#endif
+
+#if defined(LOLLYPOP_ASAN_ENABLED)
+extern "C" const char* __lsan_default_suppressions(void);
+extern "C" const char* __lsan_default_suppressions(void) {
+    return "leak:libfontconfig\n"
+           "leak:libpango-1.0\n"
+           "leak:libpangoft2-1.0\n"
+           "leak:libpangocairo-1.0\n"
+           "leak:libgdk_pixbuf-2.0\n"
+           "leak:libgtk-4\n"
+           "leak:libgdk-4\n"
+           "leak:libadwaita-1\n";
+}
+#endif
+
 // Custom log handler to filter out benign GTK critical errors (only when explicitly enabled)
 static guint old_log_handler_id = 0;
 

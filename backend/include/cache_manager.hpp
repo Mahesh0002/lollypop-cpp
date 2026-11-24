@@ -28,7 +28,7 @@
 
 namespace lollypop {
 
-struct CacheEntry {
+struct CacheManagerEntry {
     std::string key;
     std::string file_path;      // where the cached data lives on disk
     std::size_t byte_size = 0;  // in-memory / on-disk size for budgeting
@@ -56,7 +56,7 @@ public:
 
     // Look up an entry by key. Returns true if found and not expired.
     // Updates the access time (LRU ordering).
-    bool get(const std::string& key, CacheEntry& out);
+    bool get(const std::string& key, CacheManagerEntry& out);
 
     // Insert or update an entry. Evicts LRU entries while over budget.
     // Returns false if the entry itself exceeds the byte budget.
@@ -91,7 +91,7 @@ public:
 private:
     struct Node {
         std::string key;
-        CacheEntry entry;
+        CacheManagerEntry entry;
         Node* prev = nullptr;
         Node* next = nullptr;
     };

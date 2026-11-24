@@ -31,6 +31,7 @@ public:
     using PlayPauseCallback = std::function<void()>;
     using StopCallback = std::function<void()>;
     using OpenUriCallback = std::function<void(const std::string& uri)>;
+    using RaiseCallback = std::function<void()>;
 
     MprisServer();
     ~MprisServer();
@@ -53,7 +54,8 @@ public:
     void update_loop_state(int loop_state);   // 0=None, 1=Playlist, 2=Track
     void update_shuffle(bool shuffle);
     void update_capabilities(bool can_go_next, bool can_go_previous,
-                             bool can_play, bool can_pause, bool can_seek);
+                             bool can_play, bool can_pause, bool can_seek,
+                             bool can_control = true);
 
     // Emit Seeked after an actual seek (not on every position tick).
     void notify_seeked(double position_seconds);
@@ -71,6 +73,7 @@ public:
     void set_play_pause_callback(PlayPauseCallback cb);
     void set_stop_callback(StopCallback cb);
     void set_open_uri_callback(OpenUriCallback cb);
+    void set_raise_callback(RaiseCallback cb);
 
 private:
     struct Impl;

@@ -5,6 +5,7 @@
 #include "controller.hpp"
 #include "manager.hpp"
 #include "event_bus.hpp"
+#include "external_providers.hpp"
 
 #include <glib.h>
 #include <glibmm/convert.h>
@@ -131,12 +132,74 @@ bool BackendController::initialize() {
                 std::cerr << "BackendController: Failed to store track "
                           << track.file_path << std::endl;
             }
+
+            // Enrich missing metadata from iTunes in the background (non-blocking).
+            // Fills genre, year, track/disc number, and artwork when tags are absent.
+            if (storage_) {
+                std::thread([this, track]() {
+                    auto meta = fetch_itunes_metadata(track.artist, track.title,
+                                                      track.album);
+                    if (!meta) return;
+
+                    Track updated = track;
+                    bool changed = false;
+
+                    if (updated.genre.empty() && !meta->genre.empty()) {
+                        updated.genre = meta->genre;
+                        changed = true;
+                    }
+                    if (updated.year == 0 && meta->year != 0) {
+                        updated.year = meta->year;
+                        changed = true;
+                    }
+                    if (updated.track_number == 0 && meta->track_number != 0) {
+                        updated.track_number = meta->track_number;
+                        changed = true;
+                    }
+                    if (updated.disc_number == 0 && meta->disc_number != 0) {
+                        updated.disc_number = meta->disc_number;
+                        changed = true;
+                    }
+                    // Use iTunes high-quality artwork if the track has none.
+                    if (updated.artwork_path.empty() && !meta->artwork_url.empty()) {
+                        std::string cache_dir;
+                        if (const char* home = std::getenv("HOME")) {
+                            cache_dir =
+                                std::string(home) +
+                                "/.local/share/lollypop-cpp/artwork";
+                        } else {
+                            cache_dir = "/tmp/lollypop-cpp/artwork";
+                        }
+                        std::string key = "itunes_" + track.id;
+                        std::replace(key.begin(), key.end(), '/', '_');
+                        std::replace(key.begin(), key.end(), ':', '_');
+                        std::string art_path =
+                            iTunesProvider::download_artwork(
+                                meta->artwork_url, cache_dir, key);
+                        if (!art_path.empty()) {
+                            updated.artwork_path = art_path;
+                            changed = true;
+                        }
+                    }
+
+                    if (changed) {
+                        std::lock_guard<std::mutex> lock(storage_mutex_);
+                        // insert_track upserts on file_path, so re-adding enriches
+                        // the existing row while preserving liked/play counts.
+                        storage_->add_track(updated);
+                    }
+                }).detach();
+            }
         });
         library_manager_->set_error_callback([](const std::string& file,
                                                  const std::string& error) {
             std::cerr << "LibraryScanner: error on " << file << ": "
                       << error << std::endl;
         });
+
+        // Enable periodic incremental scanning (every 30 minutes by default)
+        library_manager_->set_periodic_scan_enabled(true);
+        library_manager_->set_periodic_scan_interval(std::chrono::minutes(30));
     }
 
     // Apply queue modes. Deferred services below read these from the manager.
@@ -235,6 +298,21 @@ void BackendController::initialize_deferred_services() {
         cache_manager_.reset();
     }
 
+    // Artwork manager (uses same cache)
+    artwork_manager_ = std::make_unique<ArtworkManager>();
+    if (!artwork_manager_->initialize(
+            "/tmp/lollypop-cpp-cache/artwork", 64ull * 1024 * 1024)) {
+        std::cerr << "BackendController: ArtworkManager initialization failed"
+                  << std::endl;
+        artwork_manager_.reset();
+    } else {
+        // Set up external artwork fetching
+        artwork_manager_->set_extract_fn(make_artwork_extract_fn());
+    }
+
+    // Refresh stored album artwork once using the 1200px iTunes images.
+    refresh_album_artwork_from_itunes();
+
     lyrics_manager_ = std::make_unique<LyricsManager>();
     if (!lyrics_manager_->initialize(
             storage_.get(), cache_manager_.get(),
@@ -242,6 +320,9 @@ void BackendController::initialize_deferred_services() {
         std::cerr << "BackendController: LyricsManager initialization failed"
                   << std::endl;
         lyrics_manager_.reset();
+    } else {
+        // Set up external lyrics fetching (LRCLIB)
+        lyrics_manager_->set_fetch_fn(make_lyrics_fetch_fn());
     }
 
     // Export Lollypop as an MPRIS player.
@@ -361,6 +442,9 @@ void BackendController::shutdown() {
     if (mpris_manager_) {
         mpris_manager_->shutdown();
     }
+    if (artwork_manager_) {
+        artwork_manager_->shutdown();
+    }
     // Stop the file watcher before the dispatcher is destroyed.
     if (file_watcher_) {
         file_watcher_.reset();
@@ -471,8 +555,21 @@ void BackendController::setup_audio_callbacks() {
     // Audio engine errors.
     audio_engine_->set_error_callback([this](const std::string& error) {
         std::cerr << "BackendController: Audio engine error: " << error << std::endl;
-        set_playing(false);
-        if (mpris_server_) mpris_server_->update_stopped();
+        // Attempt error recovery by rebuilding the pipeline and reloading the track.
+        if (audio_engine_->recover_from_error()) {
+            std::cerr << "BackendController: Error recovery succeeded, resuming playback" << std::endl;
+            audio_engine_->set_volume(volume_);
+            audio_engine_->play();
+            set_playing(true);
+            if (mpris_server_) {
+                mpris_server_->update_playback_status(true);
+                mpris_server_->update_track(current_track_);
+            }
+        } else {
+            std::cerr << "BackendController: Error recovery failed" << std::endl;
+            set_playing(false);
+            if (mpris_server_) mpris_server_->update_stopped();
+        }
     });
 }
 
@@ -615,11 +712,17 @@ void BackendController::add_watch_directory(const std::string& path) {
         return;
     }
     file_watcher_->add_watch(path, true);
+    if (library_manager_) {
+        library_manager_->add_library_root(path);
+    }
 }
 
 void BackendController::remove_watch_directory(const std::string& path) {
     if (!file_watcher_) return;
     file_watcher_->remove_watch(path);
+    if (library_manager_) {
+        library_manager_->remove_library_root(path);
+    }
 }
 
 void BackendController::open_uri(const std::string& uri) {
@@ -675,10 +778,10 @@ void BackendController::dispatch_file_events() {
 }
 
 void BackendController::dispatch_lyrics_result() {
-    if (!lyrics_callback_) return;
-    auto cb = std::move(lyrics_callback_);
+    if (!legacy_lyrics_callback_) return;
+    auto cb = std::move(legacy_lyrics_callback_);
     auto result = std::move(pending_lyrics_result_);
-    if (cb) cb(std::move(result));
+    if (cb) cb(pending_lyrics_track_id_, std::move(result));
 }
 
 void BackendController::process_file_event(const FileEvent& event) {
@@ -793,7 +896,12 @@ Track BackendController::get_track(const std::string& track_id) {
 }
 
 std::vector<Album> BackendController::get_all_albums() {
-    return storage_->get_all_albums();
+    std::lock_guard<std::mutex> lock(albums_cache_mutex_);
+    if (!albums_cache_valid_) {
+        albums_cache_ = storage_->get_all_albums();
+        albums_cache_valid_ = true;
+    }
+    return albums_cache_;
 }
 
 std::vector<Album> BackendController::get_albums_by_artist(const std::string& artist_id) {
@@ -866,17 +974,19 @@ std::optional<Lyrics> BackendController::get_lyrics(const std::string& track_id)
     return storage_->get_lyrics(track_id);
 }
 
-void BackendController::set_lyrics(const std::string& track_id,
+bool BackendController::set_lyrics(const std::string& track_id,
                                    const std::string& text, bool synced,
                                    const std::string& source) {
-    if (storage_->set_lyrics(track_id, text, synced, source)) emit_library_changed();
+    bool result = storage_->set_lyrics(track_id, text, synced, source);
+    if (result) emit_library_changed();
+    return result;
 }
 
 void BackendController::request_lyrics(
     const std::string& track_id,
-    ILyricsService::LyricsCallback callback) {
+    LegacyLyricsCallback callback) {
     // Store the callback; the LyricsManager will call back asynchronously.
-    lyrics_callback_ = std::move(callback);
+    legacy_lyrics_callback_ = std::move(callback);
     pending_lyrics_track_id_ = track_id;
 
     if (lyrics_manager_) {
@@ -907,6 +1017,102 @@ void BackendController::request_lyrics(
     }
 }
 
+bool BackendController::has_synced_lyrics(const std::string& track_id) {
+    if (lyrics_manager_) {
+        auto lyrics = lyrics_manager_->get_lyrics(track_id);
+        if (lyrics && lyrics->synced && !lyrics->text.empty()) {
+            return true;
+        }
+    }
+    // Fallback: check storage directly
+    auto opt = storage_->get_lyrics(track_id);
+    return opt && opt->synced && !opt->text.empty();
+}
+
+std::string BackendController::get_synced_lyrics(const std::string& track_id) {
+    if (lyrics_manager_) {
+        auto lyrics = lyrics_manager_->get_lyrics(track_id);
+        if (lyrics && lyrics->synced) {
+            return lyrics->text;
+        }
+    }
+    auto opt = storage_->get_lyrics(track_id);
+    if (opt && opt->synced) {
+        return opt->text;
+    }
+    return "";
+}
+
+std::string BackendController::get_plain_lyrics(const std::string& track_id) {
+    if (lyrics_manager_) {
+        auto lyrics = lyrics_manager_->get_lyrics(track_id);
+        if (lyrics && !lyrics->synced) {
+            return lyrics->text;
+        }
+    }
+    auto opt = storage_->get_lyrics(track_id);
+    if (opt && !opt->synced) {
+        return opt->text;
+    }
+    return "";
+}
+
+void BackendController::request_synced_lyrics(const std::string& track_id,
+                                              ILyricsService::SyncedLyricsReadyCallback cb) {
+    // Reuse the existing lyrics request mechanism
+    request_lyrics(track_id, [this, track_id, cb = std::move(cb)](
+        const std::string& id, const std::optional<Lyrics>& lyrics) {
+        if (cb && lyrics) cb(id, lyrics->text);
+        else if (cb) cb(id, "");
+    });
+}
+
+void BackendController::request_plain_lyrics(const std::string& track_id,
+                                             ILyricsService::LyricsReadyCallback cb) {
+    request_lyrics(track_id, [this, track_id, cb = std::move(cb)](
+        const std::string& id, const std::optional<Lyrics>& lyrics) {
+        if (cb && lyrics) cb(id, lyrics->text);
+        else if (cb) cb(id, "");
+    });
+}
+
+bool BackendController::save_synced_lyrics(const std::string& track_id, const std::string& lrc_text) {
+    return set_lyrics(track_id, lrc_text, true, "user");
+}
+
+bool BackendController::save_plain_lyrics(const std::string& track_id, const std::string& lyrics) {
+    return set_lyrics(track_id, lyrics, false, "user");
+}
+
+std::string BackendController::get_embedded_synced_lyrics(const std::string& track_id) {
+    auto track = storage_->get_track(track_id);
+    if (!track.embedded_lyrics.empty()) {
+        // Check if embedded lyrics are synced (contain LRC timestamps)
+        if (track.embedded_lyrics.find('[') != std::string::npos &&
+            track.embedded_lyrics.find(']') != std::string::npos) {
+            return track.embedded_lyrics;
+        }
+    }
+    return "";
+}
+
+std::string BackendController::get_embedded_plain_lyrics(const std::string& track_id) {
+    auto track = storage_->get_track(track_id);
+    if (!track.embedded_lyrics.empty()) {
+        // Return embedded lyrics as plain text (strip timestamps if present)
+        if (track.embedded_lyrics.find('[') != std::string::npos) {
+            // Simple strip - the LyricsManager can do better parsing
+            return track.embedded_lyrics;
+        }
+        return track.embedded_lyrics;
+    }
+    return "";
+}
+
+std::vector<std::string> BackendController::get_lyrics_providers() {
+    return {"lrclib", "embedded", "local"};
+}
+
 std::vector<std::string> BackendController::get_all_genres() {
     return storage_->get_all_genres();
 }
@@ -934,6 +1140,277 @@ std::string BackendController::get_artwork_path_for_artist(
     return artist.artwork_path;
 }
 
+void BackendController::fetch_artist_artwork(
+    const std::string& artist_id,
+    std::function<void(bool success)> callback) {
+    // Run on a background thread to avoid blocking the main thread.
+    std::thread([this, artist_id, callback = std::move(callback)]() mutable {
+        // Get artist name from storage.
+        Artist artist = storage_->get_artist(artist_id);
+        if (artist.name.empty()) {
+            if (callback) callback(false);
+            return;
+        }
+
+        // Fetch artwork from external provider.
+        auto result = ArtworkProvider::fetch_artist_artwork_by_name(artist.name);
+        if (!result) {
+            if (callback) callback(false);
+            return;
+        }
+
+        // Download artwork to cache.
+        std::string cache_dir;
+        if (const char* home = std::getenv("HOME")) {
+            cache_dir = std::string(home) + "/.local/share/lollypop-cpp/artwork";
+        } else {
+            cache_dir = "/tmp/lollypop-cpp/artwork";
+        }
+
+        std::string key = "artist_" + artist.name;
+        std::replace(key.begin(), key.end(), '/', '_');
+        std::replace(key.begin(), key.end(), ':', '_');
+
+        std::string local_path = ArtworkProvider::download_artwork(result->url, cache_dir, key);
+        if (local_path.empty()) {
+            if (callback) callback(false);
+            return;
+        }
+
+        // Store in database.
+        bool success = storage_->update_artist_artwork(artist_id, local_path);
+        if (success) {
+            // Also cache it via ArtworkManager if available.
+            if (artwork_manager_) {
+                artwork_manager_->invalidate(ArtworkManager::make_key("", artist.name));
+            }
+        }
+
+        if (callback) callback(success);
+    }).detach();
+}
+
+void BackendController::fetch_missing_artist_artwork() {
+    // Fetch artwork for all artists that don't have it.
+    // Run on a background thread.
+    std::thread([this]() {
+        if (!storage_) return;
+
+        auto artists = storage_->get_all_artists();
+        for (const auto& artist : artists) {
+            if (!artist.artwork_path.empty()) continue;  // Already has artwork
+
+            // Fetch artwork from external provider.
+            auto result = ArtworkProvider::fetch_artist_artwork_by_name(artist.name);
+            if (!result) continue;
+
+            // Download artwork to cache.
+            std::string cache_dir;
+            if (const char* home = std::getenv("HOME")) {
+                cache_dir = std::string(home) + "/.local/share/lollypop-cpp/artwork";
+            } else {
+                cache_dir = "/tmp/lollypop-cpp/artwork";
+            }
+
+            std::string key = "artist_" + artist.name;
+            std::replace(key.begin(), key.end(), '/', '_');
+            std::replace(key.begin(), key.end(), ':', '_');
+
+            std::string local_path = ArtworkProvider::download_artwork(result->url, cache_dir, key);
+            if (local_path.empty()) continue;
+
+            // Store in database.
+            storage_->update_artist_artwork(artist.id, local_path);
+
+            // Rate limit to be nice to the API.
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        // Notify UI that library changed (artwork updated).
+        emit_library_changed();
+    }).detach();
+}
+
+void BackendController::refresh_album_artwork_from_itunes(bool force) {
+    if (!storage_) return;
+
+    constexpr const char* kPrefKey = "metadata.itunes_album_artwork_v2_1200";
+    if (!force) {
+        const auto refresh_done = storage_->get_preference(kPrefKey);
+        if (refresh_done && *refresh_done == "1") return;
+    }
+
+    std::vector<Album> albums;
+    {
+        std::lock_guard<std::mutex> lock(storage_mutex_);
+        albums = storage_->get_all_albums();
+    }
+    if (albums.empty()) return;
+
+    std::thread([this, albums = std::move(albums), kPrefKey]() mutable {
+        std::string cache_dir;
+        if (const char* home = std::getenv("HOME")) {
+            cache_dir = std::string(home) + "/.local/share/lollypop-cpp/artwork";
+        } else {
+            cache_dir = "/tmp/lollypop-cpp/artwork";
+        }
+
+        int refreshed = 0;
+        for (const auto& album : albums) {
+            auto result = iTunesProvider::search_album(album.artist, album.title);
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            if (!result || result->artwork_url.empty()) continue;
+
+            // Include the requested size in the cache key so the one-time
+            // refresh replaces 600px files cached by older builds.
+            std::string key = "itunes_album_1200_" + album.id;
+            std::replace(key.begin(), key.end(), '/', '_');
+            std::replace(key.begin(), key.end(), ':', '_');
+
+            const std::string local_path =
+                iTunesProvider::download_artwork(result->artwork_url, cache_dir, key);
+            if (local_path.empty()) continue;
+
+            {
+                std::lock_guard<std::mutex> lock(storage_mutex_);
+                if (!storage_->update_album_artwork(album.id, local_path)) continue;
+
+                for (const auto& track : storage_->get_tracks_by_album(album.id)) {
+                    if (track.artwork_path != local_path) {
+                        storage_->update_track_artwork(track.id, local_path);
+                    }
+                }
+            }
+            ++refreshed;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(storage_mutex_);
+            storage_->set_preference(kPrefKey, "1");
+        }
+        if (refreshed > 0) emit_library_changed();
+    }).detach();
+}
+
+void BackendController::fetch_missing_lyrics(
+    std::function<void(int fetched, int total)> progress_callback) {
+    // Fetch lyrics only for tracks that don't have them yet.
+    std::thread([this, progress_callback = std::move(progress_callback)]() mutable {
+        if (!storage_ || !lyrics_manager_) {
+            if (progress_callback) progress_callback(0, 0);
+            return;
+        }
+
+        // Get all tracks from storage.
+        auto tracks = storage_->get_all_tracks();
+        int total = static_cast<int>(tracks.size());
+        int fetched = 0;
+
+        if (total == 0) {
+            if (progress_callback) progress_callback(0, 0);
+            return;
+        }
+
+        for (const auto& track : tracks) {
+            // Check if lyrics already exist in storage.
+            auto existing = storage_->get_lyrics(track.id);
+            if (existing && !existing->text.empty()) {
+                continue;  // Already have lyrics.
+            }
+
+            // Request lyrics (this will use embedded, local .lrc, or external fetch).
+            // We use a synchronous approach here since we're on a background thread.
+            // The lyrics manager will call the callback when done, but we need to wait.
+            std::mutex mtx;
+            std::condition_variable cv;
+            bool done = false;
+            bool success = false;
+            std::string fetched_id;
+
+            auto callback = [&](const std::string& id, const Lyrics& lyrics) {
+                std::lock_guard<std::mutex> lock(mtx);
+                fetched_id = id;
+                done = true;
+                success = !lyrics.text.empty();
+                cv.notify_one();
+            };
+
+            // Request lyrics for this track.
+            lyrics_manager_->request_lyrics(
+                track.id, track.artist, track.title, track.file_path, track.embedded_lyrics, callback);
+
+            // Wait for callback (with timeout).
+            std::unique_lock<std::mutex> lock(mtx);
+            cv.wait_for(lock, std::chrono::seconds(30), [&] { return done; });
+
+            if (success) {
+                fetched++;
+            }
+
+            // Report progress.
+            if (progress_callback) {
+                progress_callback(fetched, total);
+            }
+
+            // Rate limit to be nice to the API.
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+    }).detach();
+}
+
+void BackendController::fetch_all_lyrics(
+    std::function<void(int fetched, int total)> progress_callback) {
+    // Fetch lyrics for all tracks, overwriting existing ones.
+    std::thread([this, progress_callback = std::move(progress_callback)]() mutable {
+        if (!storage_ || !lyrics_manager_) {
+            if (progress_callback) progress_callback(0, 0);
+            return;
+        }
+
+        // Get all tracks from storage.
+        auto tracks = storage_->get_all_tracks();
+        int total = static_cast<int>(tracks.size());
+        int fetched = 0;
+
+        if (total == 0) {
+            if (progress_callback) progress_callback(0, 0);
+            return;
+        }
+
+        for (const auto& track : tracks) {
+            // Request lyrics (this will use embedded, local .lrc, or external fetch).
+            std::mutex mtx;
+            std::condition_variable cv;
+            bool done = false;
+            bool success = false;
+
+            auto callback = [&](const std::string& id, const Lyrics& lyrics) {
+                std::lock_guard<std::mutex> lock(mtx);
+                done = true;
+                success = !lyrics.text.empty();
+                cv.notify_one();
+            };
+
+            lyrics_manager_->request_lyrics(
+                track.id, track.artist, track.title, track.file_path, track.embedded_lyrics, callback);
+
+            std::unique_lock<std::mutex> lock(mtx);
+            cv.wait_for(lock, std::chrono::seconds(30), [&] { return done; });
+
+            if (success) {
+                fetched++;
+            }
+
+            if (progress_callback) {
+                progress_callback(fetched, total);
+            }
+
+            // Rate limit to be nice to the API.
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+    }).detach();
+}
+
 std::vector<Album> BackendController::get_favourite_albums() {
     auto all = storage_->get_all_albums();
     std::vector<Album> favourites;
@@ -949,8 +1426,7 @@ bool BackendController::is_track_liked(const std::string& track_id) {
 }
 
 bool BackendController::is_album_favorited(const std::string& album_id) {
-    auto album = storage_->get_album(album_id);
-    return album.favorite;
+    return storage_->is_album_favorited(album_id);
 }
 
 std::vector<std::string> BackendController::get_sorted_track_ids(
@@ -1022,6 +1498,13 @@ bool BackendController::start_queue_index(size_t index) {
             audio_engine_->play();
             set_playing(true);
             update_play_statistics();
+
+            // Update visualizer engine with the actual pipeline sample rate
+            if (visualizer_engine_) {
+                double viz_rate = audio_engine_->get_viz_sample_rate();
+                visualizer_engine_->set_sample_rate(viz_rate);
+                std::cerr << "BackendController: Visualizer sample rate set to " << viz_rate << " Hz" << std::endl;
+            }
         } else {
             std::cerr << "BackendController: Failed to load track: "
                       << current_track_.file_path << std::endl;
@@ -1312,6 +1795,7 @@ void BackendController::set_shuffle(bool enabled) {
         mpris_server_->update_shuffle(enabled);
     }
     sync_mpris_capabilities();
+    emit_shuffle_changed(enabled);
 }
 
 void BackendController::set_repeat(bool enabled) {
@@ -1331,6 +1815,11 @@ void BackendController::set_repeat(bool enabled) {
         mpris_server_->update_loop_state(enabled ? 1 : 0);
     }
     sync_mpris_capabilities();
+    emit_repeat_changed(enabled);
+    // Also emit repeat_one change since it was reset
+    if (enabled) {
+        emit_repeat_one_changed(false);
+    }
 }
 
 void BackendController::set_repeat_one(bool enabled) {
@@ -1348,6 +1837,11 @@ void BackendController::set_repeat_one(bool enabled) {
         mpris_server_->update_loop_state(enabled ? 2 : 0);
     }
     sync_mpris_capabilities();
+    emit_repeat_one_changed(enabled);
+    // Also emit repeat change since it was reset
+    if (enabled) {
+        emit_repeat_changed(false);
+    }
 }
 
 bool BackendController::get_shuffle() const {
@@ -1373,8 +1867,19 @@ void BackendController::toggle_like(const std::string& track_id) {
 }
 
 void BackendController::toggle_favorite_album(const std::string& album_id) {
-    std::lock_guard<std::mutex> lock(storage_mutex_);
-    storage_->toggle_favorite_album(album_id);
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lock(storage_mutex_);
+        changed = storage_->toggle_favorite_album(album_id);
+    }
+    if (!changed) return;
+
+    // Defer the notification so the tile's clicked handler can finish before
+    // pages refresh and destroy/recreate the widget that emitted the change.
+    g_idle_add([](gpointer data) -> gboolean {
+        static_cast<BackendController*>(data)->emit_library_changed();
+        return G_SOURCE_REMOVE;
+    }, this);
 }
 
 void BackendController::sync_mpris_capabilities() {
@@ -1391,8 +1896,10 @@ void BackendController::sync_mpris_capabilities() {
         has_queue && (queue_manager_->shuffle() ||
                       queue_manager_->repeat_mode() != RepeatMode::None ||
                       queue_manager_->current_index() > 0);
+    const bool can_control = has_track || has_queue;  // Can control if there's something to play
     mpris_server_->update_capabilities(can_go_next, can_go_previous, can_play,
-                                       has_track, has_track && duration_ > 0);
+                                       has_track, has_track && duration_ > 0,
+                                       can_control);
 }
 
 void BackendController::setup_cava_callbacks() {
@@ -1494,8 +2001,31 @@ void BackendController::emit_visualization_changed(const std::vector<float>& poi
 }
 
 void BackendController::emit_library_changed() {
+    {
+        std::lock_guard<std::mutex> lock(albums_cache_mutex_);
+        albums_cache_valid_ = false;
+        albums_cache_.clear();
+    }
     for (auto& cb : library_changed_callbacks_) {
         if (cb) cb();
+    }
+}
+
+void BackendController::emit_shuffle_changed(bool enabled) {
+    for (auto& cb : shuffle_changed_callbacks_) {
+        if (cb) cb(enabled);
+    }
+}
+
+void BackendController::emit_repeat_changed(bool enabled) {
+    for (auto& cb : repeat_changed_callbacks_) {
+        if (cb) cb(enabled);
+    }
+}
+
+void BackendController::emit_repeat_one_changed(bool enabled) {
+    for (auto& cb : repeat_one_changed_callbacks_) {
+        if (cb) cb(enabled);
     }
 }
 

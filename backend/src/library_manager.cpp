@@ -11,7 +11,9 @@
 
 namespace lollypop {
 
-LibraryManager::LibraryManager() = default;
+LibraryManager::LibraryManager() {
+    periodic_ = std::make_unique<PeriodicScanState>();
+}
 
 LibraryManager::~LibraryManager() {
     shutdown();
@@ -39,6 +41,11 @@ bool LibraryManager::initialize(StorageManager* storage,
 
     running_ = true;
     worker_thread_ = std::thread(&LibraryManager::worker_loop, this);
+
+    // Start periodic scan timer if enabled
+    if (periodic_->enabled.load()) {
+        start_periodic_scan_timer();
+    }
     return true;
 }
 
@@ -46,6 +53,8 @@ void LibraryManager::shutdown() {
     if (!running_) return;
     running_ = false;
     cancel_requested_ = true;
+    // Stop periodic scan timer
+    stop_periodic_scan_timer();
     // Scanner cancellation is handled by the owner (BackendController)
     // to avoid raw-pointer lifetime issues.
     queue_cv_.notify_all();
@@ -211,6 +220,83 @@ void LibraryManager::process_job(const ScanJob& job) {
 
     if (finished_cb_) {
         finished_cb_(!cancelled, cancelled);
+    }
+}
+
+void LibraryManager::set_periodic_scan_enabled(bool enabled) {
+    bool was_enabled = periodic_->enabled.exchange(enabled);
+    if (enabled && !was_enabled) {
+        if (running_) start_periodic_scan_timer();
+    } else if (!enabled && was_enabled) {
+        stop_periodic_scan_timer();
+    }
+}
+
+bool LibraryManager::is_periodic_scan_enabled() const {
+    return periodic_->enabled.load();
+}
+
+void LibraryManager::set_periodic_scan_interval(std::chrono::minutes interval) {
+    if (interval.count() < 1) interval = std::chrono::minutes(1);
+    if (interval.count() > 1440) interval = std::chrono::minutes(1440);  // Max 24 hours
+    periodic_->interval = interval;
+    // Restart timer with new interval if running
+    if (periodic_->enabled.load() && running_) {
+        stop_periodic_scan_timer();
+        start_periodic_scan_timer();
+    }
+}
+
+std::chrono::minutes LibraryManager::get_periodic_scan_interval() const {
+    return periodic_->interval;
+}
+
+void LibraryManager::add_library_root(const std::string& path) {
+    if (path.empty()) return;
+    std::lock_guard<std::mutex> lock(periodic_->roots_mutex);
+    periodic_->roots.insert(path);
+}
+
+void LibraryManager::remove_library_root(const std::string& path) {
+    if (path.empty()) return;
+    std::lock_guard<std::mutex> lock(periodic_->roots_mutex);
+    periodic_->roots.erase(path);
+}
+
+std::vector<std::string> LibraryManager::get_library_roots() const {
+    std::lock_guard<std::mutex> lock(periodic_->roots_mutex);
+    return std::vector<std::string>(periodic_->roots.begin(), periodic_->roots.end());
+}
+
+void LibraryManager::start_periodic_scan_timer() {
+    if (periodic_->timer_running.exchange(true)) return;
+
+    periodic_->timer_thread = std::thread([this] {
+        std::unique_lock<std::mutex> lock(periodic_->timer_mutex);
+        while (periodic_->timer_running.load()) {
+            // Wait for the interval or until notified to stop
+            periodic_->timer_cv.wait_for(lock, periodic_->interval, [this] {
+                return !periodic_->timer_running.load();
+            });
+
+            if (!periodic_->timer_running.load()) break;
+            if (!running_) break;
+
+            // Get library roots and schedule scans
+            std::vector<std::string> roots = get_library_roots();
+            for (const auto& root : roots) {
+                if (!running_ || !periodic_->timer_running.load()) break;
+                scan_directory(root, true);  // Incremental scan (uses mtime cache)
+            }
+        }
+    });
+}
+
+void LibraryManager::stop_periodic_scan_timer() {
+    if (!periodic_->timer_running.exchange(false)) return;
+    periodic_->timer_cv.notify_all();
+    if (periodic_->timer_thread.joinable()) {
+        periodic_->timer_thread.join();
     }
 }
 

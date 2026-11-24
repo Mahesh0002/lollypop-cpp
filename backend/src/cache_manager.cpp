@@ -90,7 +90,7 @@ std::string CacheManager::cache_path_for_key(const std::string& key) const {
     return cache_dir_ + "/" + safe + ".cache";
 }
 
-bool CacheManager::get(const std::string& key, CacheEntry& out) {
+bool CacheManager::get(const std::string& key, CacheManagerEntry& out) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     auto it = map_.find(key);

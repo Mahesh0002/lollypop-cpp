@@ -3,6 +3,10 @@
  */
 
 #include "application.hpp"
+
+#include "data/ArtworkCache.hpp"
+#include "data/ThumbnailGenerator.hpp"
+#include "ui/components/ArtworkView.hpp"
 #include "main_window.hpp"
 #include "panels/pip_window.hpp"
 #include "controller.hpp"
@@ -41,6 +45,9 @@ Application::~Application() {
     // PiP needs the complete type here for its own destruction.
     main_window_.reset();
     pip_window_.reset();
+    thumbnail_generator_.reset();
+    artwork_cache_.reset();
+    ArtworkView::configure_cache(nullptr, nullptr);
     backend_.reset();
     theme_manager_.reset();
 }
@@ -51,6 +58,32 @@ int Application::run(int argc, char** argv) {
 
 IPlayerService* Application::get_backend() const {
     return backend_.get();
+}
+
+void Application::init_artwork_cache() {
+    if (artwork_cache_) return;
+
+    const char* base = g_get_user_cache_dir();
+    const std::string cache_dir = base ? std::string(base) + "/lollypop-cpp/thumbnails"
+                                       : "/tmp/lollypop-cpp/thumbnails";
+
+    auto cache = std::make_unique<ArtworkCache>();
+    if (!cache->initialize(cache_dir)) {
+        std::cerr << "Application: artwork cache unavailable at " << cache_dir << std::endl;
+        ArtworkView::configure_cache(nullptr, nullptr);
+        return;
+    }
+
+    auto generator = std::make_unique<ThumbnailGenerator>();
+    if (!generator->initialize(cache_dir, cache.get())) {
+        std::cerr << "Application: thumbnail generator failed to start" << std::endl;
+        ArtworkView::configure_cache(nullptr, nullptr);
+        return;
+    }
+
+    artwork_cache_ = std::move(cache);
+    thumbnail_generator_ = std::move(generator);
+    ArtworkView::configure_cache(artwork_cache_.get(), thumbnail_generator_.get());
 }
 
 void Application::show_pip() {
@@ -69,9 +102,20 @@ void Application::hide_pip() {
 }
 
 void Application::on_activate() {
+    // GApplication can emit activate more than once (for example when a second
+    // launch is handed to the same instance). Re-presenting the existing
+    // window avoids tearing down widgets that still have pending frame clocks.
+    if (main_window_) {
+        main_window_->present();
+        return;
+    }
+
     // Create the backend first (not yet initialized) so MainWindow's layout
     // can obtain a valid service pointer when building the UI widgets.
     backend_ = std::make_unique<BackendController>();
+
+    // Configure the shared thumbnail cache before any ArtworkView is built.
+    init_artwork_cache();
 
     // Create and present the window immediately so the user sees something
     // before any slow backend work. Backend initialization is deferred to
@@ -119,6 +163,10 @@ void Application::on_startup() {
 void Application::on_shutdown() {
     // Cleanup - destructor handles remaining cleanup
     main_window_.reset();
+    pip_window_.reset();
+    thumbnail_generator_.reset();
+    artwork_cache_.reset();
+    ArtworkView::configure_cache(nullptr, nullptr);
     backend_.reset();
     theme_manager_.reset();
 }

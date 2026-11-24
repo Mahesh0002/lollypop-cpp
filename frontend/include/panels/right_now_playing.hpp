@@ -14,6 +14,7 @@
 #pragma once
 
 #include <gtk/gtk.h>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -24,6 +25,7 @@ class MainWindow;
 class ArtworkView;
 class ProgressWave;
 class TrackRow;
+class SyncedLyricsView;
 class ILibraryService;
 class ILyricsService;
 
@@ -59,6 +61,12 @@ public:
     // Lyrics service integration (public for MainWindow callback).
     void request_lyrics_for_track(const std::string& track_id);
 
+    // Forward the same lyrics payload to other panels (compact bottom label).
+    using LyricsChangedCallback = std::function<void(const std::string&)>;
+    void set_lyrics_changed_callback(LyricsChangedCallback cb) {
+        lyrics_changed_callback_ = std::move(cb);
+    }
+
 private:
     MainWindow* main_window_;
     ILyricsService* lyrics_service_;
@@ -89,7 +97,7 @@ private:
     GtkWidget* lyrics_tab_;
     GtkWidget* queue_tab_;
     GtkWidget* tab_content_stack_;
-    GtkWidget* lyrics_view_;
+    std::unique_ptr<SyncedLyricsView> synced_lyrics_view_;
     GtkWidget* queue_view_;
     GtkWidget* lyrics_empty_state_;
 
@@ -104,6 +112,7 @@ private:
 
     std::string current_artwork_path_;
     std::string current_track_id_;
+    LyricsChangedCallback lyrics_changed_callback_;
 
     // Retain TrackRow wrappers while their widgets are parented in the queue.
     std::vector<std::unique_ptr<TrackRow>> queue_rows_;

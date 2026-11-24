@@ -155,7 +155,7 @@ struct VisualizerEngine::Impl {
     std::atomic<bool> enabled{false};
     std::atomic<uint64_t> frame_count{0};
 
-    double sample_rate = 44100.0;
+    std::atomic<double> sample_rate{44100.0};
 
     void fft_worker() {
         frame.resize(kFrameSize, 0.0f);
@@ -216,7 +216,7 @@ struct VisualizerEngine::Impl {
 
             // Map to bands.
             std::vector<float> spectrum =
-                band_map(magnitudes, kFrameSize, bands, sample_rate);
+                band_map(magnitudes, kFrameSize, bands, sample_rate.load());
 
             // EMA smoothing using the previous spectrum (guarded by data_mutex).
             // Alpha = 0.6 provides smooth visualization with good responsiveness.
@@ -339,6 +339,14 @@ void VisualizerEngine::set_enabled(bool enabled) {
 
 bool VisualizerEngine::is_enabled() const {
     return impl_->enabled.load();
+}
+
+void VisualizerEngine::set_sample_rate(double sample_rate) {
+    impl_->sample_rate.store(sample_rate);
+}
+
+double VisualizerEngine::get_sample_rate() const {
+    return impl_->sample_rate.load();
 }
 
 }  // namespace lollypop

@@ -12,11 +12,15 @@
 #include "types.hpp"
 #include "ui/components/ArtworkView.hpp"
 #include "ui/components/TrackRow.hpp"
+#include "ui/components/SyncedLyricsView.hpp"
+#include "ui/theme/ThemeManager.hpp"
+#include "lyrics/LyricTypes.hpp"
 #include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
 
 #include <algorithm>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <optional>
@@ -96,7 +100,6 @@ RightNowPlaying::RightNowPlaying(MainWindow* main_window,
       lyrics_tab_(nullptr),
       queue_tab_(nullptr),
       tab_content_stack_(nullptr),
-      lyrics_view_(nullptr),
       queue_view_(nullptr),
       lyrics_empty_state_(nullptr) {
     setup_ui();
@@ -351,20 +354,30 @@ void RightNowPlaying::create_tabs() {
     gtk_stack_set_transition_duration(GTK_STACK(tab_content_stack_), 160);
     gtk_widget_set_visible(tab_content_stack_, TRUE);
 
-    lyrics_view_ = gtk_text_view_new();
-    gtk_text_view_set_editable(GTK_TEXT_VIEW(lyrics_view_), FALSE);
-    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(lyrics_view_),
-                                GTK_WRAP_WORD_CHAR);
-    gtk_text_view_set_left_margin(GTK_TEXT_VIEW(lyrics_view_), 10);
-    gtk_text_view_set_right_margin(GTK_TEXT_VIEW(lyrics_view_), 10);
-    gtk_text_view_set_top_margin(GTK_TEXT_VIEW(lyrics_view_), 8);
-    gtk_text_view_set_bottom_margin(GTK_TEXT_VIEW(lyrics_view_), 8);
-    gtk_widget_add_css_class(lyrics_view_, "now-playing-lyrics");
-    gtk_widget_set_hexpand(lyrics_view_, TRUE);
-    gtk_widget_set_vexpand(lyrics_view_, TRUE);
-    gtk_widget_set_visible(lyrics_view_, TRUE);
+    // Create synced lyrics view with Apple Music-style progressive fill
+    synced_lyrics_view_ = std::make_unique<SyncedLyricsView>(
+        [this](int position_ms) {
+            if (!main_window_) return;
+            if (IPlayerService* backend = main_window_->get_backend()) {
+                backend->seek(position_ms / 1000.0);
+            }
+        },
+        false  // not fullscreen
+    );
+
+    if (main_window_) {
+        if (ThemeManager* theme = main_window_->get_theme_manager()) {
+            double r = 0.0, g = 0.0, b = 0.0, a = 1.0;
+            theme->get_accent_color(r, g, b, a);
+            synced_lyrics_view_->set_accent(GdkRGBA{
+                static_cast<float>(r), static_cast<float>(g),
+                static_cast<float>(b), static_cast<float>(a)});
+        }
+    }
+
+    GtkWidget* lyrics_widget = synced_lyrics_view_->get_widget();
     safe_stack_add_named(GTK_STACK(tab_content_stack_),
-                         create_page_scroller(lyrics_view_), "lyrics");
+                         lyrics_widget, "lyrics");
 
     create_lyrics_empty_state();
     safe_stack_add_named(GTK_STACK(tab_content_stack_),
@@ -410,7 +423,9 @@ void RightNowPlaying::adapt_to_allocation(int width, int height) {
     panel_width_ = width;
     panel_height_ = height;
 
-    const int available_width = std::max(120, width - 24);
+    // Content margins (12+12), the panel border, and a 1px safety margin must
+    // be reserved or the artwork request makes the panel overflow by a pixel.
+    const int available_width = std::max(120, width - 26);
     const int usable_height = std::max(180, height - 48);
 
     int side = available_width;
@@ -454,6 +469,12 @@ void RightNowPlaying::update_playback_position(double position,
         progress_wave_->set_duration(duration);
         progress_wave_->set_progress(duration > 0.0 ? position / duration : 0.0);
     }
+
+    // Update synced lyrics view position
+    if (synced_lyrics_view_ && synced_lyrics_view_->has_lyrics()) {
+        synced_lyrics_view_->set_position(static_cast<int>(position * 1000),
+                                          static_cast<int>(duration * 1000));
+    }
 }
 
 void RightNowPlaying::set_playing(bool playing) {
@@ -470,8 +491,27 @@ void RightNowPlaying::set_queue(
 void RightNowPlaying::set_lyrics(const std::string& lyrics) {
     has_lyrics_ = !lyrics.empty();
 
-    GtkTextBuffer* buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(lyrics_view_));
-    gtk_text_buffer_set_text(buffer, lyrics.c_str(), -1);
+    if (synced_lyrics_view_) {
+        if (has_lyrics_) {
+            // Check if it's synced lyrics (contains LRC timestamps)
+            if (lyrics.find('[') != std::string::npos && lyrics.find(']') != std::string::npos) {
+                // Parse and set synced lyrics
+                SyncedLyrics parsed = LrcParser::parse(lyrics);
+                if (parsed.valid()) {
+                    synced_lyrics_view_->set_lyrics(parsed);
+                } else {
+                    // Fallback to plain text
+                    synced_lyrics_view_->set_message(lyrics);
+                }
+            } else {
+                // Plain lyrics
+                synced_lyrics_view_->set_message(lyrics);
+            }
+        } else {
+            synced_lyrics_view_->set_message("No lyrics available.");
+        }
+    }
+    if (lyrics_changed_callback_) lyrics_changed_callback_(lyrics);
     show_active_tab();
 }
 
@@ -510,11 +550,13 @@ void RightNowPlaying::request_lyrics_for_track(const std::string& track_id) {
 
     if (!lyrics_service_) return;
 
-    lyrics_service_->request_lyrics(
+    // Request synced lyrics (LRC format)
+    lyrics_service_->request_synced_lyrics(
         track_id,
-        [this](std::optional<Lyrics> result) {
-            set_lyrics(result && !result->text.empty() ? result->text
-                                                       : std::string());
+        [this](const std::string& id, const std::string& lrc_text) {
+            if (id == current_track_id_) {
+                set_lyrics(lrc_text);
+            }
         });
 }
 
@@ -566,7 +608,8 @@ void RightNowPlaying::populate_queue(
             track.id.empty() ? requested_id : track.id;
 
         auto row = std::make_unique<TrackRow>(
-            main_window_, track, static_cast<int>(i + 1));
+            main_window_, track, static_cast<int>(i + 1),
+            TrackRowOptions{.show_track_number = true, .enable_queue_actions = true});
 
         row->set_play_callback([this, track_id](const Track&) {
             if (!main_window_) return;
@@ -586,6 +629,36 @@ void RightNowPlaying::populate_queue(
             (void)liked;
             if (library_service_) {
                 library_service_->toggle_like(item.id);
+            }
+        });
+
+        row->set_queue_action_callback([this](const Track& item, const char* action) {
+            if (!main_window_) return;
+            IPlayerService* backend = main_window_->get_backend();
+            if (!backend) return;
+
+            if (std::strcmp(action, "play_next") == 0) {
+                // Move track to position after current playing track
+                backend->enqueue_track(item.id, true);
+            } else if (std::strcmp(action, "add_to_queue") == 0) {
+                // Add track to end of queue
+                backend->enqueue_track(item.id, false);
+            } else if (std::strcmp(action, "remove_from_queue") == 0) {
+                // Remove track from queue
+                const auto queue = backend->get_queue();
+                for (size_t j = 0; j < queue.size(); ++j) {
+                    if (queue[j] == item.id) {
+                        backend->remove_from_queue(j);
+                        return;
+                    }
+                }
+            } else if (std::strcmp(action, "play_last") == 0) {
+                // Add track to end of queue
+                backend->enqueue_track(item.id, false);
+            } else if (std::strcmp(action, "add_to_playlist") == 0) {
+                // TODO: Show playlist selection dialog
+                // For now, just add to queue as fallback
+                backend->enqueue_track(item.id, false);
             }
         });
 

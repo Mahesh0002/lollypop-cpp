@@ -16,9 +16,10 @@
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <queue>
+#include <deque>
 #include <string>
 #include <thread>
+#include <vector>
 #include <atomic>
 #include <condition_variable>
 
@@ -32,7 +33,8 @@ struct ThumbnailJob {
     std::string key;           ///< Cache key (track/album/artist id)
     std::string source_path;   ///< Source artwork file path
     int bucket;                ///< Target bucket size
-    std::function<void(GdkTexture*, std::string)> callback;  ///< Delivered on main thread
+    std::vector<std::function<void(GdkTexture*, std::string)>>
+        callbacks;             ///< Delivered on main thread
 };
 
 class ThumbnailGenerator {
@@ -60,10 +62,11 @@ private:
     std::atomic<bool> running_{false};
     std::mutex queue_mutex_;
     std::condition_variable queue_cv_;
-    std::queue<ThumbnailJob> job_queue_;
+    std::deque<ThumbnailJob> job_queue_;
 
     ArtworkCache* cache_ = nullptr;
     std::string cache_dir_;
+    static constexpr size_t kMaxQueuedJobs = 32;
 
     void worker_loop();
     GdkTexture* generate_thumbnail(const std::string& source_path, int bucket) const;

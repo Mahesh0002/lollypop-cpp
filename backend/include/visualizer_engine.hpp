@@ -107,6 +107,10 @@ public:
     // Connect to an AudioEngine so its appsink samples feed the visualizer.
     void set_audio_engine(AudioEngine* engine);
 
+    // Set the sample rate for accurate FFT band mapping.
+    void set_sample_rate(double sample_rate);
+    double get_sample_rate() const;
+
     void start();
     void stop();
     bool is_running() const;

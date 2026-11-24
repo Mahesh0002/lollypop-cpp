@@ -62,10 +62,13 @@ private:
 
     // Font scale for dynamic type (1.0 = default)
     double font_scale_ = 1.0;
+    double base_font_size_ = 0.0;
     guint font_scale_signal_id_ = 0;
 
     void update_css_accent();
     void update_css_font_scale();
+    void update_css_overrides();
+    static double font_size_from_settings(GtkSettings* settings);
     static void on_gtk_font_scale_changed(GtkSettings* settings, GParamSpec* pspec, gpointer user_data);
 };
 

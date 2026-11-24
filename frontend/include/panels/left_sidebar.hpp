@@ -1,11 +1,19 @@
 /**
  * Lollypop C++ - Left Sidebar Panel
  *
- * Compact mode: 50px wide, icon-only navigation.
- * Expanded mode: 156px wide, icon + label navigation.
+ * Geometry is derived at layout time from the panel's allocated height:
+ *   - every row is 4.5% of that height,
+ *   - each icon sits in a square tile with a 5px gap on all four sides,
+ *   - compact width = tile width + the two 5px side gaps,
+ *   - expanded width = 3 * compact width.
  *
- * All rows are 50x52px. The icon column is anchored at the left edge and
- * never moves between modes; only the label revealer changes.
+ * Label text is scaled from the row height with a 5px boost. Only semibold
+ * and normal font weights are used. Labels are hidden outright in compact
+ * mode instead of being left inside a revealer, where they still contribute
+ * a minimum width and fight the fixed compact width.
+ *
+ * Active and hover states change text/icon color only; there is no tile
+ * background and no accent color in the sidebar.
  */
 
 #pragma once
@@ -27,11 +35,16 @@ struct NavigationItem {
 
 class LeftSidebar {
 public:
-    static constexpr int kIconSize = 22;
-    static constexpr int kButtonWidth = 50;
-    static constexpr int kButtonHeight = 52;
-    static constexpr int kCompactWidth = kButtonWidth;
-    static constexpr int kExpandedWidth = 3 * kButtonHeight; // 156px
+    static constexpr double kRowHeightFraction = 0.045; // 4.5% of panel height
+    static constexpr int kIconGap = 5;                  // all four sides
+    // Used only before the first allocation. It matches the row height derived
+    // from the window's default size (4.5% of ~760px, clamped to the minimum),
+    // so children and the fixed width request start from the same geometry.
+    static constexpr int kFallbackRowHeight = 40;
+    static constexpr int kMinRowHeight = 40;
+    static constexpr int kMinIconSize = 16;
+    static constexpr int kMinLabelFont = 11;
+    static constexpr int kLabelFontBoost = 5;
 
     explicit LeftSidebar(MainWindow* main_window);
     ~LeftSidebar();
@@ -39,9 +52,9 @@ public:
     GtkWidget* get_widget() const { return sidebar_box_; }
     GtkWidget* get_collapse_button() const { return collapse_button_; }
 
-    // User-initiated navigation (triggers MiddleLibrary)
+    // User-initiated navigation (triggers MiddleLibrary).
     void set_active_item(const std::string& item_id);
-    // External sync (e.g., from MiddleLibrary back/forward) - updates visual only
+    // External sync (e.g. from MiddleLibrary back/forward) - visual only.
     void set_active_item_visual(const std::string& item_id);
     void toggle_expanded();
     bool is_expanded() const { return expanded_; }
@@ -49,7 +62,6 @@ public:
     void load_sidebar_state();
     void save_sidebar_state();
 
-public:
     struct ActionButton {
         GtkWidget* button = nullptr;
         GtkWidget* icon = nullptr;
@@ -60,7 +72,7 @@ public:
         std::string id;
         GtkWidget* button = nullptr;
         GtkWidget* content = nullptr;
-        GtkWidget* revealer = nullptr;
+        GtkWidget* label = nullptr;
     };
 
 private:
@@ -84,10 +96,9 @@ private:
     void update_toggle_icon();
     void update_label_visibility();
     void update_active_state();
-    void set_row_width(NavRow& row, int width);
 
-    static void on_collapse_clicked(GtkButton* button, gpointer user_data);
-    static void on_nav_item_clicked(GtkButton* button, gpointer user_data);
+    static void on_collapse_clicked(GtkWidget* widget, gpointer user_data);
+    static void on_nav_item_clicked(GtkWidget* widget, gpointer user_data);
 };
 
 } // namespace lollypop

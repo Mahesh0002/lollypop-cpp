@@ -115,6 +115,12 @@ void SongsPage::create_header(GtkWidget* main_box) {
     GtkWidget* columns = gtk_box_new(GTK_ORIENTATION_HORIZONTAL,
                                      track_list_metrics::kColumnGap);
     gtk_widget_set_layout_manager(columns, create_track_columns_layout());
+    gtk_widget_add_css_class(columns, "songs-columns");
+    gtk_widget_set_size_request(columns, -1,
+                                track_list_metrics::kColumnHeaderHeight);
+    gtk_widget_set_hexpand(columns, TRUE);
+    gtk_widget_set_vexpand(columns, FALSE);
+    gtk_widget_set_valign(columns, GTK_ALIGN_START);
     gtk_widget_set_visible(columns, TRUE);
 
     const struct {

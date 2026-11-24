@@ -14,8 +14,8 @@ namespace lollypop {
 
 namespace {
 constexpr double kTwoPi = 6.283185307179586;
-constexpr double kBarWidth = 2.0;
-constexpr double kBarSpacing = 3.2;
+constexpr double kBarWidth = 2.4;
+constexpr double kBarSpacing = 3.9;
 }  // namespace
 
 EqualizerIndicator::EqualizerIndicator() {
@@ -113,7 +113,7 @@ void EqualizerIndicator::on_draw(GtkDrawingArea* area, cairo_t* cr, int width,
         const double x = cx + (i - 1) * kBarSpacing;
         const double wave =
             0.5 + 0.5 * std::sin(self->phase_ + static_cast<double>(i) * 0.9);
-        const double bar_height = 3.0 + wave * (max_height - 3.0);
+        const double bar_height = 3.6 + wave * (max_height - 3.6);
         cairo_move_to(cr, x, cy - bar_height / 2.0);
         cairo_line_to(cr, x, cy + bar_height / 2.0);
         cairo_stroke(cr);

@@ -55,22 +55,13 @@ private:
     GtkWidget* scrolled_window_;   // Single vertical scroller
     GtkWidget* content_box_;       // Content box inside scroller
     GtkWidget* stack_;             // Page stack
-    GtkWidget* glass_toolbar_;     // Floating glass toolbar (overlay)
     GtkWidget* sticky_header_;     // Pinned column header for SongsPage
-    GtkWidget* search_entry_;
-    GtkWidget* menu_button_;
-    GtkWidget* back_button_;
-    GtkWidget* forward_button_;
-    GtkWidget* title_label_;
 
     std::unordered_map<std::string, std::unique_ptr<LibraryPage>> pages_;
     std::string active_page_id_;
 
-    // Search
-    guint search_timeout_id_ = 0;
+    // Search history replay still uses a generation token.
     uint64_t search_generation_ = 0;
-    std::string search_return_page_;
-    gulong search_changed_handler_id_ = 0;
     // Lifetime token for timeout callbacks. Plain C++ objects are not
     // GObjects, so GWeakRef must never be used on `this`.
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
@@ -88,27 +79,19 @@ private:
     PageChangeCallback page_change_cb_;
 
     void setup_ui();
-    void create_glass_toolbar();
     void create_content_area();
     void create_placeholder_pages();
     void ensure_page(const std::string& page_id);
     void ensure_search_page();
-    void update_toolbar_state();
     void update_sticky_header();
     void navigate_to_page(const std::string& page_id, bool add_to_history,
                           const std::string& param = std::string());
     void apply_history_entry(const HistoryEntry& entry, bool restore_scroll);
-    void sync_search_entry(const std::string& page_id);
     void schedule_scroll(double offset);
     double current_scroll() const;
 
     static gboolean on_scroll_restore_idle(gpointer data);
-    static gboolean on_search_timeout(gpointer data);
     static void on_scroll_changed(GtkAdjustment* adjustment, gpointer user_data);
-    static void on_search_changed(GtkEditable* editable, gpointer user_data);
-    static void on_back_clicked(GtkButton*, gpointer user_data);
-    static void on_forward_clicked(GtkButton*, gpointer user_data);
-    void perform_search(const std::string& query, uint64_t generation);
 };
 
 } // namespace lollypop

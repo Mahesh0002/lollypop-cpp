@@ -32,6 +32,22 @@
 
 namespace lollypop {
 
+// Periodic scan state for automatic incremental library scanning.
+struct PeriodicScanState {
+    std::atomic<bool> enabled{false};
+    std::chrono::minutes interval{30};
+    std::mutex roots_mutex;
+    std::unordered_set<std::string> roots;
+    std::thread timer_thread;
+    std::atomic<bool> timer_running{false};
+    std::condition_variable timer_cv;
+    std::mutex timer_mutex;
+};
+
+}  // namespace lollypop
+
+namespace lollypop {
+
 class StorageManager;
 
 // A single pending scan job.
@@ -86,9 +102,24 @@ public:
     void set_track_found_callback(TrackFoundCallback cb);
     void set_error_callback(ErrorCallback cb);
 
+    // Periodic incremental scanning
+    void set_periodic_scan_enabled(bool enabled);
+    bool is_periodic_scan_enabled() const;
+    void set_periodic_scan_interval(std::chrono::minutes interval);
+    std::chrono::minutes get_periodic_scan_interval() const;
+
+    // Called when a library root is added/removed (for periodic scanning)
+    void add_library_root(const std::string& path);
+    void remove_library_root(const std::string& path);
+    std::vector<std::string> get_library_roots() const;
+
 private:
     void worker_loop();
     void process_job(const ScanJob& job);
+
+    // Periodic scan timer helpers
+    void start_periodic_scan_timer();
+    void stop_periodic_scan_timer();
 
     StorageManager* storage_ = nullptr;
     LibraryScanner* scanner_ = nullptr;
@@ -110,6 +141,8 @@ private:
     ScanFinishedCallback finished_cb_;
     TrackFoundCallback track_cb_;
     ErrorCallback error_cb_;
+
+    std::unique_ptr<PeriodicScanState> periodic_;
 };
 
 }  // namespace lollypop

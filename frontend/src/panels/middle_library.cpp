@@ -1,7 +1,13 @@
 /**
  * Lollypop C++ - Middle Library Implementation
  * Apple Music-inspired library browsing with multiple pages.
- * Single scroller with floating glass toolbar overlay.
+ * Single scroller owned by this panel; page widgets must not add another one.
+ *
+ * Referenced files (kept as comments so other models can follow the wiring):
+ *   frontend/include/panels/middle_library.hpp
+ *   frontend/src/ui/pages/AlbumsPage.cpp
+ *   frontend/src/ui/pages/AlbumDetailPage.cpp
+ *   include/services/ILibraryService.hpp
  */
 
 #include "panels/middle_library.hpp"
@@ -22,7 +28,6 @@
 
 #include <adwaita.h>
 #include <gtk/gtk.h>
-#include <gtk/gtkentry.h>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -36,14 +41,6 @@ struct ScrollPayload {
     double offset;
 };
 
-struct SearchTimeoutPayload {
-    MiddleLibrary* self;
-    std::shared_ptr<bool> alive;
-};
-
-void free_search_timeout(gpointer data) {
-    delete static_cast<SearchTimeoutPayload*>(data);
-}
 } // namespace
 
 // Placeholder page implementation (for pages not yet implemented)
@@ -94,13 +91,7 @@ MiddleLibrary::MiddleLibrary(MainWindow* main_window,
       scrolled_window_(nullptr),
       content_box_(nullptr),
       stack_(nullptr),
-      glass_toolbar_(nullptr),
-      sticky_header_(nullptr),
-      search_entry_(nullptr),
-      menu_button_(nullptr),
-      back_button_(nullptr),
-      forward_button_(nullptr),
-      title_label_(nullptr) {
+      sticky_header_(nullptr) {
     setup_ui();
     create_placeholder_pages();
 }
@@ -108,10 +99,6 @@ MiddleLibrary::MiddleLibrary(MainWindow* main_window,
 MiddleLibrary::~MiddleLibrary() {
     // Invalidate any pending callbacks before tearing down widgets.
     if (alive_) *alive_ = false;
-    if (search_timeout_id_) {
-        g_source_remove(search_timeout_id_);
-        search_timeout_id_ = 0;
-    }
 }
 
 void MiddleLibrary::setup_ui() {
@@ -125,14 +112,8 @@ void MiddleLibrary::setup_ui() {
     // Create the content area (scroller + content box + stack)
     create_content_area();
 
-    // Create the floating glass toolbar (added as overlay)
-    create_glass_toolbar();
-
     // Add scroller as main child of overlay
     gtk_overlay_set_child(GTK_OVERLAY(overlay_), scrolled_window_);
-
-    // Add glass toolbar as overlay (floating on top)
-    gtk_overlay_add_overlay(GTK_OVERLAY(overlay_), glass_toolbar_);
 
     // Pinned column header, shared by the Songs page. It lives above the
     // scroller so the sort labels stay visible while rows scroll underneath.
@@ -152,6 +133,10 @@ void MiddleLibrary::create_content_area() {
     gtk_widget_add_css_class(scrolled_window_, "middle-viewport");
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled_window_),
                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    // Apple-like overlay scrollbars: keep the full viewport for page content
+    // instead of reserving space for a classic scrollbar.
+    gtk_scrolled_window_set_overlay_scrolling(
+        GTK_SCROLLED_WINDOW(scrolled_window_), TRUE);
     gtk_widget_set_vexpand(scrolled_window_, TRUE);
     gtk_widget_set_hexpand(scrolled_window_, TRUE);
     gtk_widget_set_visible(scrolled_window_, TRUE);
@@ -177,15 +162,14 @@ void MiddleLibrary::create_content_area() {
     // Set content box as child of scrolled window
     safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window_), content_box_);
 
-    // Content box must expand to fill scroller so pages can scroll
-    gtk_widget_set_vexpand(content_box_, TRUE);
-    gtk_widget_set_valign(content_box_, GTK_ALIGN_FILL);
+    // Keep the scrolled-window child at its natural height. Forcing it to fill
+    // the viewport stretches page roots (and the album tiles inside them)
+    // whenever a different page was previously visible.
 
-    // Add top padding to content to account for floating toolbar
-    // Toolbar height ~52px + gap ~12px = 64px
-    gtk_widget_set_margin_top(content_box_, 64);
-    // Bottom padding to clear bottom playback bar
-    gtk_widget_set_margin_bottom(content_box_, 104);
+    // No floating toolbar: content starts at the top of the middle panel.
+    gtk_widget_set_margin_top(content_box_, 0);
+    // HIG 8pt grid: keep only the 24px breathing space below the list.
+    gtk_widget_set_margin_bottom(content_box_, 24);
 
     // Connect scroll handling for pages that need it (SongsPage)
     connect_scroll_handling();
@@ -220,68 +204,6 @@ void MiddleLibrary::on_scroll_changed(GtkAdjustment* adjustment,
     }
 }
 
-void MiddleLibrary::create_glass_toolbar() {
-    // Glass toolbar - floating overlay at top
-    glass_toolbar_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-    gtk_widget_add_css_class(glass_toolbar_, "middle-glass-toolbar");
-    gtk_widget_set_halign(glass_toolbar_, GTK_ALIGN_CENTER);
-    gtk_widget_set_valign(glass_toolbar_, GTK_ALIGN_START);
-    gtk_widget_set_margin_top(glass_toolbar_, 12);
-    gtk_widget_set_margin_start(glass_toolbar_, 18);
-    gtk_widget_set_margin_end(glass_toolbar_, 18);
-    gtk_widget_set_visible(glass_toolbar_, TRUE);
-
-    // Back button
-    back_button_ = gtk_button_new();
-    gtk_button_set_has_frame(GTK_BUTTON(back_button_), FALSE);
-    gtk_widget_add_css_class(back_button_, "middle-toolbar-button");
-    GtkWidget* back_icon = gtk_image_new_from_icon_name("go-previous-symbolic");
-    gtk_image_set_pixel_size(GTK_IMAGE(back_icon), 20);
-    gtk_button_set_child(GTK_BUTTON(back_button_), back_icon);
-    gtk_widget_set_sensitive(back_button_, FALSE);
-    gtk_widget_set_tooltip_text(back_button_, "Back");
-    g_signal_connect(back_button_, "clicked", G_CALLBACK(on_back_clicked), this);
-    gtk_widget_set_visible(back_button_, TRUE);
-    gtk_box_append(GTK_BOX(glass_toolbar_), back_button_);
-
-    // Forward button
-    forward_button_ = gtk_button_new();
-    gtk_button_set_has_frame(GTK_BUTTON(forward_button_), FALSE);
-    gtk_widget_add_css_class(forward_button_, "middle-toolbar-button");
-    GtkWidget* forward_icon = gtk_image_new_from_icon_name("go-next-symbolic");
-    gtk_image_set_pixel_size(GTK_IMAGE(forward_icon), 20);
-    gtk_button_set_child(GTK_BUTTON(forward_button_), forward_icon);
-    gtk_widget_set_sensitive(forward_button_, FALSE);
-    gtk_widget_set_tooltip_text(forward_button_, "Forward");
-    g_signal_connect(forward_button_, "clicked", G_CALLBACK(on_forward_clicked), this);
-    gtk_widget_set_visible(forward_button_, TRUE);
-    gtk_box_append(GTK_BOX(glass_toolbar_), forward_button_);
-
-    // Title/Breadcrumb
-    title_label_ = gtk_label_new("Library");
-    gtk_widget_add_css_class(title_label_, "middle-toolbar-title");
-    gtk_label_set_xalign(GTK_LABEL(title_label_), 0.0);
-    gtk_widget_set_hexpand(title_label_, TRUE);
-    gtk_widget_set_visible(title_label_, TRUE);
-    gtk_box_append(GTK_BOX(glass_toolbar_), title_label_);
-
-    // Search entry
-    search_entry_ = gtk_entry_new();
-    gtk_widget_add_css_class(search_entry_, "middle-toolbar-search");
-    gtk_widget_set_hexpand(search_entry_, TRUE);
-    gtk_widget_set_size_request(search_entry_, 300, -1);
-    gtk_entry_set_placeholder_text(GTK_ENTRY(search_entry_), "Search your library");
-    gtk_entry_set_icon_from_icon_name(GTK_ENTRY(search_entry_), GTK_ENTRY_ICON_PRIMARY, "system-search-symbolic");
-    gtk_widget_set_visible(search_entry_, TRUE);
-    search_changed_handler_id_ =
-        g_signal_connect(search_entry_, "changed", G_CALLBACK(on_search_changed), this);
-    gtk_box_append(GTK_BOX(glass_toolbar_), search_entry_);
-
-    // The previous "View Options / Sort By / Group By / Settings" popover had
-    // no handlers attached; dead controls were removed rather than left to
-    // mislead the user.
-}
-
 void MiddleLibrary::create_placeholder_pages() {
     // Only the Home page is built eagerly. Every other page is constructed on
     // first navigation, which keeps the first frame cheap even for large
@@ -299,7 +221,9 @@ void MiddleLibrary::create_placeholder_pages() {
         }
     }
 
-    navigate_to_page("home", false);
+    // Optional startup page override is useful for diagnostics and deep links.
+    const char* start_page = g_getenv("LOLLYPOP_START_PAGE");
+    navigate_to_page(start_page && *start_page ? start_page : "home", false);
 }
 
 void MiddleLibrary::ensure_page(const std::string& page_id) {
@@ -386,28 +310,12 @@ void MiddleLibrary::navigate_to_page(const std::string& page_id,
     active_page_id_ = page_id;
     update_sticky_header();
     gtk_stack_set_visible_child_name(GTK_STACK(stack_), page_id.c_str());
-    sync_search_entry(page_id);
-    update_toolbar_state();
 
     if (page_change_cb_) page_change_cb_(page_id);
 
     // Top-level navigation starts at the top; history restores its own
     // offset through apply_history_entry().
     schedule_scroll(0.0);
-}
-
-void MiddleLibrary::sync_search_entry(const std::string& page_id) {
-    if (!search_entry_ || !search_changed_handler_id_) return;
-
-    std::string desired;
-    if (page_id == "search" && history_index_ < history_.size()) {
-        desired = history_[history_index_].param;
-    }
-    if (desired == gtk_editable_get_text(GTK_EDITABLE(search_entry_))) return;
-
-    g_signal_handler_block(search_entry_, search_changed_handler_id_);
-    gtk_editable_set_text(GTK_EDITABLE(search_entry_), desired.c_str());
-    g_signal_handler_unblock(search_entry_, search_changed_handler_id_);
 }
 
 double MiddleLibrary::current_scroll() const {
@@ -465,8 +373,6 @@ void MiddleLibrary::apply_history_entry(const HistoryEntry& entry,
 
     active_page_id_ = entry.page_id;
     gtk_stack_set_visible_child_name(GTK_STACK(stack_), entry.page_id.c_str());
-    sync_search_entry(entry.page_id);
-    update_toolbar_state();
 
     if (page_change_cb_) page_change_cb_(entry.page_id);
 
@@ -492,6 +398,15 @@ void MiddleLibrary::update_sticky_header() {
     if (want_header) {
         GtkWidget* header = songs->get_header_widget();
         if (gtk_widget_get_parent(header) != sticky_header_) {
+            // The header can still belong to the songs page when switching
+            // back to it. GTK requires an unparented child before append.
+            if (GtkWidget* previous = gtk_widget_get_parent(header)) {
+                if (GTK_IS_BOX(previous)) {
+                    gtk_box_remove(GTK_BOX(previous), header);
+                } else {
+                    gtk_widget_unparent(header);
+                }
+            }
             if (child) gtk_box_remove(GTK_BOX(sticky_header_), child);
             gtk_box_append(GTK_BOX(sticky_header_), header);
         }
@@ -509,51 +424,6 @@ void MiddleLibrary::update_sticky_header() {
     gtk_widget_set_visible(sticky_header_, FALSE);
     gtk_widget_set_margin_top(content_box_,
                               track_list_metrics::kStickyHeaderOffset);
-}
-
-void MiddleLibrary::update_toolbar_state() {
-    // Update back/forward button sensitivity
-    gtk_widget_set_sensitive(back_button_, history_index_ > 0);
-    gtk_widget_set_sensitive(forward_button_, history_index_ + 1 < history_.size());
-
-    // Update title/breadcrumb based on active page
-    std::string title;
-    if (active_page_id_ == "home") {
-        title = "Library";
-    } else if (active_page_id_ == "albums") {
-        title = "Albums";
-    } else if (active_page_id_ == "artists") {
-        title = "Artists";
-    } else if (active_page_id_ == "playlists") {
-        title = "Playlists";
-    } else if (active_page_id_ == "genres") {
-        title = "Genres";
-    } else if (active_page_id_ == "songs") {
-        title = "Songs";
-    } else if (active_page_id_ == "favorites") {
-        title = "Favourite Albums";
-    } else if (active_page_id_ == "liked") {
-        title = "Liked Music";
-    } else if (active_page_id_ == "album_detail") {
-        if (auto it = pages_.find("album_detail"); it != pages_.end()) {
-            if (auto* detail = dynamic_cast<AlbumDetailPage*>(it->second.get())) {
-                title = detail->get_current_album_title();
-                if (title.empty()) title = "Album";
-            }
-        }
-    } else if (active_page_id_ == "artist_detail") {
-        if (auto it = pages_.find("artist_detail"); it != pages_.end()) {
-            if (auto* detail = dynamic_cast<ArtistDetailPage*>(it->second.get())) {
-                title = detail->get_current_artist_name();
-                if (title.empty()) title = "Artist";
-            }
-        }
-    } else if (active_page_id_ == "search") {
-        title = "Search Results";
-    } else {
-        title = "Library";
-    }
-    gtk_label_set_text(GTK_LABEL(title_label_), title.c_str());
 }
 
 void MiddleLibrary::refresh_active_page() {
@@ -590,81 +460,6 @@ void MiddleLibrary::show_genre(const std::string& genre) {
         }
     }
     navigate_to_page("songs", true, genre);
-}
-
-void MiddleLibrary::on_back_clicked(GtkButton*, gpointer user_data) {
-    auto* self = static_cast<MiddleLibrary*>(user_data);
-    if (self->history_index_ == 0 || self->history_.empty()) return;
-
-    // Remember where the user was on the page being left.
-    self->history_[self->history_index_].scroll_offset = self->current_scroll();
-    self->history_index_--;
-    self->apply_history_entry(self->history_[self->history_index_], true);
-}
-
-void MiddleLibrary::on_forward_clicked(GtkButton*, gpointer user_data) {
-    auto* self = static_cast<MiddleLibrary*>(user_data);
-    if (self->history_index_ + 1 >= self->history_.size()) return;
-
-    self->history_[self->history_index_].scroll_offset = self->current_scroll();
-    self->history_index_++;
-    self->apply_history_entry(self->history_[self->history_index_], true);
-}
-
-gboolean MiddleLibrary::on_search_timeout(gpointer data) {
-    auto* payload = static_cast<SearchTimeoutPayload*>(data);
-    if (!payload->alive || !*payload->alive || !payload->self) {
-        return G_SOURCE_REMOVE;
-    }
-    MiddleLibrary* self = payload->self;
-    self->search_timeout_id_ = 0;
-    uint64_t generation = ++self->search_generation_;
-    std::string query;
-    if (self->search_entry_) {
-        query = gtk_editable_get_text(GTK_EDITABLE(self->search_entry_));
-    }
-    self->perform_search(query, generation);
-    return G_SOURCE_REMOVE;
-}
-
-void MiddleLibrary::on_search_changed(GtkEditable* /*editable*/, gpointer user_data) {
-    auto* self = static_cast<MiddleLibrary*>(user_data);
-    if (!self || !*self->alive_) return;
-
-    if (self->search_timeout_id_) {
-        g_source_remove(self->search_timeout_id_);
-        self->search_timeout_id_ = 0;
-    }
-
-    auto* payload = new SearchTimeoutPayload{self, self->alive_};
-    self->search_timeout_id_ = g_timeout_add_full(
-        G_PRIORITY_DEFAULT, 250, on_search_timeout, payload, free_search_timeout);
-}
-
-void MiddleLibrary::perform_search(const std::string& query, uint64_t generation) {
-    if (generation != search_generation_) return;  // Stale request
-
-    if (query.empty()) {
-        // Clearing the field returns to the page the search started from.
-        if (active_page_id_ == "search") {
-            if (history_index_ > 0 && !history_.empty()) {
-                history_index_--;
-                apply_history_entry(history_[history_index_], true);
-            } else {
-                navigate_to_page("home", false);
-            }
-        }
-        return;
-    }
-
-    ensure_search_page();
-    auto it = pages_.find("search");
-    if (it == pages_.end()) return;
-    if (auto* search_page = dynamic_cast<SearchResultsPage*>(it->second.get())) {
-        search_page->search(query, generation);
-    }
-
-    navigate_to_page("search", true, query);
 }
 
 } // namespace lollypop

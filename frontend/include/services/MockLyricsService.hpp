@@ -21,18 +21,17 @@ public:
     MockLyricsService();
     ~MockLyricsService() override;
 
-    std::optional<Lyrics> get_lyrics(const std::string& track_id) override;
-    void request_lyrics(
-        const std::string& track_id,
-        LyricsCallback callback) override;
-    void set_lyrics(
-        const std::string& track_id,
-        const std::string& text,
-        bool synced = false,
-        const std::string& source = {}) override;
-
-private:
-    LyricsCallback lyrics_callback_;
+    // ILyricsService interface
+    bool has_synced_lyrics(const std::string& track_id) override;
+    std::string get_synced_lyrics(const std::string& track_id) override;
+    std::string get_plain_lyrics(const std::string& track_id) override;
+    void request_synced_lyrics(const std::string& track_id, SyncedLyricsReadyCallback cb) override;
+    void request_plain_lyrics(const std::string& track_id, LyricsReadyCallback cb) override;
+    bool save_synced_lyrics(const std::string& track_id, const std::string& lrc_text) override;
+    bool save_plain_lyrics(const std::string& track_id, const std::string& lyrics) override;
+    std::string get_embedded_synced_lyrics(const std::string& track_id) override;
+    std::string get_embedded_plain_lyrics(const std::string& track_id) override;
+    std::vector<std::string> get_lyrics_providers() override;
 };
 
 } // namespace lollypop

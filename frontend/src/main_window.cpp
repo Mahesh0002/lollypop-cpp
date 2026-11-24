@@ -5,7 +5,7 @@
  */
 
 #include "main_window.hpp"
-#include "panels/left_sidebar.hpp"
+#include "panels/apple_sidebar.hpp"
 #include "panels/middle_library.hpp"
 #include "panels/right_now_playing.hpp"
 #include "panels/bottom_playback.hpp"
@@ -51,6 +51,10 @@ MainWindow::~MainWindow() {
 }
 
 void MainWindow::disconnect_backend() {
+    if (library_refresh_source_ != 0) {
+        g_source_remove(library_refresh_source_);
+        library_refresh_source_ = 0;
+    }
     IPlayerService* backend = app_->get_backend();
     if (!backend) return;
 
@@ -76,7 +80,32 @@ void MainWindow::setup_window() {
     g_object_ref_sink(window_);
     // No window title - keep the header bar clean (no "lollypop-cpp" text).
     gtk_window_set_title(GTK_WINDOW(window_), "");
-    gtk_window_set_default_size(GTK_WINDOW(window_), 1440, 900);
+
+    // Clamp the initial size to the monitor so the right panel is never
+    // pushed off-screen on smaller displays.
+    int initial_width = 1440;
+    int initial_height = 900;
+    GdkDisplay* display = gtk_widget_get_display(window_);
+    GListModel* monitors = display ? gdk_display_get_monitors(display) : nullptr;
+    GdkMonitor* monitor = nullptr;
+    if (monitors && g_list_model_get_n_items(monitors) > 0) {
+        monitor = GDK_MONITOR(g_list_model_get_item(monitors, 0));
+    }
+    if (monitor) {
+        GdkRectangle geometry{};
+        gdk_monitor_get_geometry(monitor, &geometry);
+        if (geometry.width > 964 && initial_width > geometry.width - 64) {
+            initial_width = geometry.width - 64;
+        }
+        if (geometry.height > 664 && initial_height > geometry.height - 64) {
+            initial_height = geometry.height - 64;
+        }
+        g_object_unref(monitor);
+    }
+    if (initial_width < 900) initial_width = 900;
+    if (initial_height < 600) initial_height = 600;
+    gtk_window_set_default_size(GTK_WINDOW(window_), initial_width,
+                                initial_height);
     gtk_window_set_decorated(GTK_WINDOW(window_), TRUE);
     gtk_widget_set_visible(window_, TRUE);
 
@@ -219,11 +248,11 @@ void MainWindow::setup_layout() {
     auto* library_service = dynamic_cast<ILibraryService*>(backend);
     auto* lyrics_service = dynamic_cast<ILyricsService*>(backend);
 
-    // Create panels - MiddleLibrary must be created before LeftSidebar
-    // because LeftSidebar::create_navigation_items() calls set_active_page()
-    // which requires MiddleLibrary pages to exist.
+    // Create panels - MiddleLibrary must be created before AppleSidebar
+    // because sidebar navigation calls set_active_page(), which requires
+    // MiddleLibrary pages to exist.
     middle_library_ = std::make_unique<MiddleLibrary>(this, library_service);
-    left_sidebar_ = std::make_unique<LeftSidebar>(this);
+    left_sidebar_ = std::make_unique<AppleSidebar>(this);
     right_now_playing_ = std::make_unique<RightNowPlaying>(this, lyrics_service, library_service);
     bottom_playback_ = std::make_unique<BottomPlayback>(this);
 
@@ -254,7 +283,7 @@ void MainWindow::setup_layout() {
     // Set column expansion: middle gets most space
     gtk_grid_set_column_homogeneous(GTK_GRID(content_grid_), FALSE);
 
-    // Left sidebar: fixed width controlled by LeftSidebar (compact 42px, expanded 220px)
+    // Left sidebar: mode-dependent width derived from the row height in LeftSidebar
     gtk_widget_set_hexpand(left_widget, FALSE);
 
     // Middle library: expands to fill remaining space
@@ -330,7 +359,20 @@ void MainWindow::connect_backend() {
         right_now_playing_->set_queue(queue_ids);
     });
 
-    // Seed panels with current backend state
+    // Seed panels with current backend state. initialize() emits the initial
+    // track-changed signal before these callbacks exist, so explicitly seed
+    // track info and request lyrics for a restored/current track.
+    const Track current_track = backend->get_current_track();
+    if (!current_track.id.empty()) {
+        bottom_playback_->update_track_info(current_track.title,
+                                            current_track.artist,
+                                            current_track.artwork_path);
+        right_now_playing_->update_track_info(current_track.title,
+                                              current_track.artist,
+                                              current_track.artwork_path);
+        right_now_playing_->request_lyrics_for_track(current_track.id);
+    }
+
     bottom_playback_->set_playing(backend->is_playing());
     right_now_playing_->set_playing(backend->is_playing());
     TrackRow::update_playing_state(backend->get_current_track().id,
@@ -340,11 +382,14 @@ void MainWindow::connect_backend() {
     right_now_playing_->set_repeat(backend->get_repeat());
     right_now_playing_->set_loop(backend->get_repeat_one());
 
+    bottom_playback_->set_shuffle(backend->get_shuffle());
+    bottom_playback_->set_loop(backend->get_repeat_one());
+
     // Library changed (scan finished, file watcher event, like/favourite
     // change) → refresh the page the user is currently looking at.
     if (auto* library_service = dynamic_cast<ILibraryService*>(backend)) {
         library_service->add_library_changed_callback([this]() {
-            if (middle_library_) middle_library_->refresh_active_page();
+            schedule_library_refresh();
         });
     }
 
@@ -356,6 +401,22 @@ void MainWindow::connect_backend() {
     right_now_playing_->set_transport_controls_sensitive(true);
 
     std::cout << "MainWindow: Backend callbacks connected" << std::endl;
+}
+
+void MainWindow::schedule_library_refresh() {
+    if (library_refresh_source_ != 0) return;
+
+    // Coalesce bursts (scan progress, favourite toggles, file events) into a
+    // single page refresh instead of rebuilding the current page per event.
+    library_refresh_source_ = g_timeout_add(
+        100,
+        [](gpointer data) -> gboolean {
+            auto* self = static_cast<MainWindow*>(data);
+            self->library_refresh_source_ = 0;
+            if (self->middle_library_) self->middle_library_->refresh_active_page();
+            return G_SOURCE_REMOVE;
+        },
+        this);
 }
 
 void MainWindow::present() {
@@ -377,10 +438,6 @@ IPlayerService* MainWindow::get_backend() const {
 
 ThemeManager* MainWindow::get_theme_manager() const {
     return app_ ? app_->get_theme_manager() : nullptr;
-}
-
-VolumeDial* MainWindow::get_volume_dial() const {
-    return bottom_playback_ ? bottom_playback_->get_volume_dial() : nullptr;
 }
 
 void MainWindow::setup_after_backend() {

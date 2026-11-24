@@ -37,6 +37,7 @@ enum class ArtworkBucket {
 
 struct CacheEntry {
     GdkTexture* texture = nullptr;   ///< Owned reference (ref-counted)
+    std::string key;                 ///< Base artwork key (without bucket)
     std::string file_path;           ///< Real file on disk (for MPRIS artUrl)
     int bucket = 0;                  ///< Which bucket this was generated for
     size_t byte_size = 0;            ///< Actual memory size of this texture (width * height * 4)
@@ -87,12 +88,15 @@ private:
     size_t max_memory_bytes_ = 64ull * 1024 * 1024;
     size_t memory_usage_ = 0;
 
-    // LRU order: most recently used at back.
+    // LRU order: most recently used at back. Entries are keyed by
+    // "<artwork key>:<bucket>" so the same image can be cached at several sizes.
     std::list<std::string> lru_order_;
     std::unordered_map<std::string, CacheEntry> entries_;
+    std::unordered_map<std::string, std::string> file_paths_;
 
     std::string cache_dir_;
 
+    static std::string make_cache_key(const std::string& key, int bucket);
     void evict_lru();
     std::string make_cache_path(const std::string& key, int bucket) const;
     GdkTexture* load_texture_from_file(const std::string& path, int max_dim) const;

@@ -1,9 +1,8 @@
 /**
  * Lollypop C++ - Favourite Albums Page
  *
- * Grid of AlbumCard components showing only favourite albums.
- * Uses the same AlbumCard component as the Albums page
- * (plan Section 5.8).
+ * Apple Music-style grid of favourite albums. Uses the same labeled AlbumCard
+ * component and header treatment as the Albums page.
  */
 
 #pragma once
@@ -29,18 +28,26 @@ public:
     FavouriteAlbumsPage(const FavouriteAlbumsPage&) = delete;
     FavouriteAlbumsPage& operator=(const FavouriteAlbumsPage&) = delete;
 
-    GtkWidget* get_widget() const { return widget_; }
+    GtkWidget* get_widget() const override { return root_.get(); }
     void refresh() override;
     std::string get_page_id() const override { return "favorites"; }
 
 private:
     struct WidgetDeleter {
         void operator()(GtkWidget* w) const {
-            if (w) g_object_unref(w);
+            if (!w) return;
+            if (gtk_widget_get_parent(w) != nullptr) {
+                // GTK parents take ownership of the child's existing reference.
+                gtk_widget_unparent(w);
+            } else {
+                g_object_unref(w);
+            }
         }
     };
-    GtkWidget* widget_ = nullptr;  // FlowBox (content), owned by grid_
+    std::unique_ptr<GtkWidget, WidgetDeleter> root_;
     std::unique_ptr<GtkWidget, WidgetDeleter> grid_;
+
+    GtkWidget* subtitle_label_ = nullptr;
 
     MainWindow* main_window_;
     ILibraryService* library_service_;
@@ -48,6 +55,7 @@ private:
 
     void setup_ui();
     void populate(const std::vector<Album>& albums);
+    void update_header(size_t album_count);
     void on_album_played(const Album& album);
     void on_album_clicked(const Album& album);
 };

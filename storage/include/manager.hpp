@@ -57,6 +57,7 @@ public:
     void update_last_played(const std::string& track_id);
     bool insert_tracks_batch(const std::vector<Track>& tracks);
     std::vector<Track> get_tracks_by_ids(const std::vector<std::string>& track_ids);
+    std::vector<Track> get_tracks_by_album(const std::string& album_id);
 
     // Album operations
     std::vector<Album> get_all_albums();
@@ -74,6 +75,9 @@ public:
     std::vector<Track> get_tracks_by_artist(const std::string& artist_name);
     bool add_artist(const Artist& artist);
     bool update_artist(const Artist& artist);
+    bool update_artist_artwork(const std::string& artist_id, const std::string& artwork_path);
+    bool update_track_artwork(const std::string& track_id, const std::string& artwork_path);
+    bool update_album_artwork(const std::string& album_id, const std::string& artwork_path);
 
     // Playlist operations
     std::vector<Playlist> get_all_playlists();
@@ -155,9 +159,9 @@ private:
     Album row_to_album(sqlite3_stmt* stmt);
     Artist row_to_artist(sqlite3_stmt* stmt);
     Playlist row_to_playlist(sqlite3_stmt* stmt);
-    std::vector<Track> get_tracks_by_album(const std::string& album_id);
     void backfill_library_index(sqlite3* db);
     bool insert_track(const Track& track);
+    std::string ensure_album_artist_relationships(const Track& track);
     std::string lower_hex_randomblob(int bytes);
 };
 

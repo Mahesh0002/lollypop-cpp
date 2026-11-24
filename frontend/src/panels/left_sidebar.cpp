@@ -1,9 +1,12 @@
 /**
  * Lollypop C++ - Left Sidebar Implementation
  *
- * One button is one complete hit target. No ListBoxRow, no nested controls.
- * Geometry is fixed: 50x52px rows, 156x52px expanded rows, and a 22px icon
- * column that never changes position.
+ * The sidebar uses custom layout managers so all geometry comes from one
+ * source: the allocated panel height. Rows are 4.5% of that height, icons are
+ * square tiles with 5px gaps on every side, compact width is the tile plus its
+ * two side gaps, and expanded width is exactly three times compact width.
+ * Labels are shown/hidden directly so a hidden label never contributes to the
+ * fixed compact width. Active rows use color and weight only, with no tile.
  */
 
 #include "panels/left_sidebar.hpp"
@@ -12,23 +15,278 @@
 
 #include <gtk/gtk.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 
 namespace lollypop {
 namespace {
 
-// GTK/Adwaita reserves this much space around a flat button's child. The
-// content widgets below subtract it so the requested outer size is exact.
-constexpr int kThemePaddingH = 24;
-constexpr int kThemePaddingV = 10;
-constexpr int kContentHeight = LeftSidebar::kButtonHeight - kThemePaddingV; // 42
-// Keep the glyph centred on x=25 in both modes: the 26px slot starts at x=12,
-// so its 22px icon has its centre at 12 + 13 = 25.
-constexpr int kIconLeft = 12;
+constexpr const char* kRowHeightKey = "sidebar-row-height";
+constexpr const char* kExpandedKey = "sidebar-expanded";
+constexpr const char* kNavListKey = "sidebar-nav-list";
+constexpr const char* kIconSlotKey = "sidebar-icon-slot";
+constexpr const char* kIconKey = "sidebar-icon";
+constexpr const char* kLabelKey = "sidebar-label";
+constexpr const char* kScaledRowKey = "sidebar-scaled-row";
 
-int content_width(int outer_width) {
-    return outer_width - kThemePaddingH;
+int row_height_for(int panel_height) {
+    if (panel_height <= 0) return LeftSidebar::kFallbackRowHeight;
+    const double scaled = panel_height * LeftSidebar::kRowHeightFraction;
+    return std::max(LeftSidebar::kMinRowHeight,
+                    static_cast<int>(scaled + 0.5));
+}
+
+// Square tile side. The 5px gaps live inside the row and the compact width,
+// so the tile is the row height minus those two gaps.
+int icon_size_for(int row_height) {
+    return std::max(LeftSidebar::kMinIconSize,
+                    row_height - 2 * LeftSidebar::kIconGap);
+}
+
+int compact_width_for(int row_height) {
+    return icon_size_for(row_height) + 2 * LeftSidebar::kIconGap;
+}
+
+int expanded_width_for(int row_height) {
+    return 3 * compact_width_for(row_height);
+}
+
+int label_font_for(int row_height) {
+    const int scaled = static_cast<int>(row_height * 0.20 + 0.5);
+    return std::max(LeftSidebar::kMinLabelFont,
+                    scaled + LeftSidebar::kLabelFontBoost);
+}
+
+int child_count(GtkWidget* widget) {
+    int count = 0;
+    for (GtkWidget* child = widget ? gtk_widget_get_first_child(widget)
+                                   : nullptr;
+         child; child = gtk_widget_get_next_sibling(child)) {
+        ++count;
+    }
+    return count;
+}
+
+using ActivateCallback = void (*)(GtkWidget*, gpointer);
+
+struct ActivateContext {
+    GtkWidget* widget;
+    ActivateCallback callback;
+    gpointer user_data;
+};
+
+void on_activate_released(GtkGestureClick*, gint, gdouble, gdouble,
+                          gpointer data) {
+    auto* context = static_cast<ActivateContext*>(data);
+    if (context && context->callback) {
+        context->callback(context->widget, context->user_data);
+    }
+}
+
+gboolean on_activate_key_pressed(GtkEventControllerKey*, guint keyval,
+                                 guint, GdkModifierType, gpointer data) {
+    if (keyval != GDK_KEY_Return && keyval != GDK_KEY_KP_Enter &&
+        keyval != GDK_KEY_space) {
+        return FALSE;
+    }
+    auto* context = static_cast<ActivateContext*>(data);
+    if (context && context->callback) {
+        context->callback(context->widget, context->user_data);
+    }
+    return TRUE;
+}
+
+// Use plain boxes for sidebar rows: GTK theme buttons add internal padding
+// that cannot be removed reliably and breaks the strict row/tile geometry.
+void make_activatable(GtkWidget* widget, ActivateCallback callback,
+                      gpointer user_data) {
+    auto* context = new ActivateContext{widget, callback, user_data};
+    g_object_set_data_full(G_OBJECT(widget), "sidebar-activate-context",
+                           context, [](gpointer data) {
+                               delete static_cast<ActivateContext*>(data);
+                           });
+    gtk_widget_set_focusable(widget, TRUE);
+
+    auto* click = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click),
+                                  GDK_BUTTON_PRIMARY);
+    gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(click));
+    g_signal_connect(click, "released", G_CALLBACK(on_activate_released),
+                     context);
+
+    auto* key = gtk_event_controller_key_new();
+    gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(key));
+    g_signal_connect(key, "key-pressed",
+                     G_CALLBACK(on_activate_key_pressed), context);
+}
+
+int sidebar_row_count(GtkWidget* widget) {
+    int count = 0;
+    for (GtkWidget* child = widget ? gtk_widget_get_first_child(widget)
+                                   : nullptr;
+         child; child = gtk_widget_get_next_sibling(child)) {
+        if (g_object_get_data(G_OBJECT(child), kNavListKey) != nullptr) {
+            count += std::max(1, child_count(child));
+        } else {
+            ++count;
+        }
+    }
+    return std::max(1, count);
+}
+
+void set_geometry_data(GtkWidget* widget, int row_height) {
+    if (!widget) return;
+    g_object_set_data(G_OBJECT(widget), kRowHeightKey,
+                      GINT_TO_POINTER(row_height));
+}
+
+int row_for_widget(GtkWidget* widget) {
+    const int stored = GPOINTER_TO_INT(
+        g_object_get_data(G_OBJECT(widget), kRowHeightKey));
+    if (stored > 0) return stored;
+    return row_height_for(gtk_widget_get_height(widget));
+}
+
+bool is_expanded(GtkWidget* widget) {
+    return g_object_get_data(G_OBJECT(widget), kExpandedKey) != nullptr;
+}
+
+int sidebar_width_for(GtkWidget* widget) {
+    const int row = row_for_widget(widget);
+    return is_expanded(widget) ? expanded_width_for(row)
+                               : compact_width_for(row);
+}
+
+// Scale the square icon tile, its glyph and the label from one row height.
+void scale_button_children(GtkWidget* button, int row_height) {
+    if (!button) return;
+    if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), kScaledRowKey)) ==
+        row_height) {
+        return;
+    }
+
+    g_object_set_data(G_OBJECT(button), kScaledRowKey,
+                      GINT_TO_POINTER(row_height));
+
+    auto* icon_slot = static_cast<GtkWidget*>(
+        g_object_get_data(G_OBJECT(button), kIconSlotKey));
+    auto* icon = static_cast<GtkWidget*>(
+        g_object_get_data(G_OBJECT(button), kIconKey));
+    auto* label = static_cast<GtkWidget*>(
+        g_object_get_data(G_OBJECT(button), kLabelKey));
+
+    const int tile = icon_size_for(row_height);
+    const int glyph = std::max(LeftSidebar::kMinIconSize, tile * 3 / 5);
+
+    if (icon_slot) {
+        gtk_widget_set_size_request(icon_slot, tile, tile);
+        gtk_widget_set_margin_start(icon_slot, LeftSidebar::kIconGap);
+        gtk_widget_set_margin_end(icon_slot, LeftSidebar::kIconGap);
+        gtk_widget_set_margin_top(icon_slot, LeftSidebar::kIconGap);
+        gtk_widget_set_margin_bottom(icon_slot, LeftSidebar::kIconGap);
+    }
+    if (icon) {
+        gtk_image_set_pixel_size(GTK_IMAGE(icon), glyph);
+    }
+    if (label) {
+        PangoAttrList* attrs = pango_attr_list_new();
+        pango_attr_list_insert(
+            attrs, pango_attr_size_new_absolute(label_font_for(row_height) *
+                                                PANGO_SCALE));
+        gtk_label_set_attributes(GTK_LABEL(label), attrs);
+        pango_attr_list_unref(attrs);
+        gtk_widget_set_margin_start(label, LeftSidebar::kIconGap);
+    }
+}
+
+GtkSizeRequestMode sidebar_request_mode(GtkWidget*) {
+    return GTK_SIZE_REQUEST_HEIGHT_FOR_WIDTH;
+}
+
+void set_baselines(int* minimum_baseline, int* natural_baseline) {
+    if (minimum_baseline) *minimum_baseline = -1;
+    if (natural_baseline) *natural_baseline = -1;
+}
+
+void sidebar_measure(GtkWidget* widget, GtkOrientation orientation, int,
+                     int* minimum, int* natural, int* minimum_baseline,
+                     int* natural_baseline) {
+    const int row = row_for_widget(widget);
+    if (orientation == GTK_ORIENTATION_HORIZONTAL) {
+        const int width = sidebar_width_for(widget);
+        if (minimum) *minimum = width;
+        if (natural) *natural = width;
+    } else {
+        const int total = row * sidebar_row_count(widget);
+        if (minimum) *minimum = total;
+        if (natural) *natural = total;
+    }
+    set_baselines(minimum_baseline, natural_baseline);
+}
+
+void sidebar_allocate(GtkWidget* widget, int width, int height, int) {
+    const int row = row_height_for(height);
+    set_geometry_data(widget, row);
+    gtk_widget_set_size_request(widget, sidebar_width_for(widget), -1);
+
+    GtkWidget* header = nullptr;
+    GtkWidget* nav = nullptr;
+    for (GtkWidget* child = gtk_widget_get_first_child(widget); child;
+         child = gtk_widget_get_next_sibling(child)) {
+        if (g_object_get_data(G_OBJECT(child), kNavListKey) != nullptr) {
+            nav = child;
+        } else if (!header) {
+            header = child;
+        }
+    }
+    set_geometry_data(nav, row);
+
+    if (header) {
+        graphene_point_t position = {0.0f, 0.0f};
+        gtk_widget_allocate(header, width, row, -1,
+                            gsk_transform_translate(nullptr, &position));
+        for (GtkWidget* child = gtk_widget_get_first_child(header); child;
+             child = gtk_widget_get_next_sibling(child)) {
+            scale_button_children(child, row);
+        }
+    }
+
+    if (nav) {
+        const int nav_height = row * std::max(1, child_count(nav));
+        graphene_point_t position = {0.0f, static_cast<float>(row)};
+        gtk_widget_allocate(nav, width, nav_height, -1,
+                            gsk_transform_translate(nullptr, &position));
+    }
+}
+
+void nav_measure(GtkWidget* widget, GtkOrientation orientation, int,
+                 int* minimum, int* natural, int* minimum_baseline,
+                 int* natural_baseline) {
+    const int row = row_for_widget(widget);
+    if (orientation == GTK_ORIENTATION_HORIZONTAL) {
+        const int width = sidebar_width_for(widget);
+        if (minimum) *minimum = width;
+        if (natural) *natural = width;
+    } else {
+        const int total = row * std::max(1, child_count(widget));
+        if (minimum) *minimum = total;
+        if (natural) *natural = total;
+    }
+    set_baselines(minimum_baseline, natural_baseline);
+}
+
+void nav_allocate(GtkWidget* widget, int width, int, int) {
+    const int row = row_for_widget(widget);
+    int y = 0;
+    for (GtkWidget* child = gtk_widget_get_first_child(widget); child;
+         child = gtk_widget_get_next_sibling(child)) {
+        graphene_point_t position = {0.0f, static_cast<float>(y)};
+        gtk_widget_allocate(child, width, row, -1,
+                            gsk_transform_translate(nullptr, &position));
+        scale_button_children(child, row);
+        y += row;
+    }
 }
 
 std::filesystem::path state_path() {
@@ -55,38 +313,33 @@ LeftSidebar::ActionButton create_action_button(const char* icon_name,
                                                gpointer user_data,
                                                bool visible) {
     LeftSidebar::ActionButton action;
-    action.button = gtk_button_new();
-    gtk_button_set_has_frame(GTK_BUTTON(action.button), FALSE);
+    action.button = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(action.button, "sidebar-action-button");
-    gtk_widget_set_size_request(action.button, LeftSidebar::kButtonWidth,
-                                LeftSidebar::kButtonHeight);
-    gtk_widget_set_hexpand(action.button, FALSE);
-    gtk_widget_set_vexpand(action.button, FALSE);
-    gtk_widget_set_halign(action.button, GTK_ALIGN_START);
+    gtk_widget_set_halign(action.button, GTK_ALIGN_FILL);
     gtk_widget_set_valign(action.button, GTK_ALIGN_CENTER);
+    make_activatable(action.button,
+                     reinterpret_cast<ActivateCallback>(callback), user_data);
 
-    // Match the navigation rows exactly: a 26px slot anchored at the start of
-    // the button, with the 22px glyph centred inside it. This keeps the
-    // collapse icon on the same vertical axis as every navigation icon.
-    GtkWidget* icon_slot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_set_size_request(icon_slot,
-                                content_width(LeftSidebar::kButtonWidth),
-                                kContentHeight);
-    gtk_widget_set_halign(icon_slot, GTK_ALIGN_START);
-    gtk_widget_set_margin_start(icon_slot, kIconLeft);
-    gtk_widget_set_valign(icon_slot, GTK_ALIGN_CENTER);
-    gtk_widget_set_visible(icon_slot, TRUE);
-    action.icon_slot = icon_slot;
+    action.icon_slot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class(action.icon_slot, "sidebar-icon-square");
+    gtk_widget_set_halign(action.icon_slot, GTK_ALIGN_START);
+    gtk_widget_set_valign(action.icon_slot, GTK_ALIGN_CENTER);
+    gtk_widget_set_visible(action.icon_slot, TRUE);
+    g_object_set_data(G_OBJECT(action.button), kIconSlotKey, action.icon_slot);
 
     action.icon = gtk_image_new_from_icon_name(icon_name);
-    gtk_image_set_pixel_size(GTK_IMAGE(action.icon), LeftSidebar::kIconSize);
-    gtk_widget_set_halign(action.icon, GTK_ALIGN_CENTER);
-    gtk_widget_set_valign(action.icon, GTK_ALIGN_CENTER);
+    gtk_widget_add_css_class(action.icon, "sidebar-nav-icon");
+    // Fill the square tile so the symbolic glyph is centred inside it.
+    gtk_widget_set_hexpand(action.icon, TRUE);
+    gtk_widget_set_vexpand(action.icon, TRUE);
+    gtk_widget_set_halign(action.icon, GTK_ALIGN_FILL);
+    gtk_widget_set_valign(action.icon, GTK_ALIGN_FILL);
     gtk_widget_set_visible(action.icon, TRUE);
-    gtk_box_append(GTK_BOX(icon_slot), action.icon);
-    safe_button_set_child(GTK_BUTTON(action.button), icon_slot);
+    g_object_set_data(G_OBJECT(action.button), kIconKey, action.icon);
 
-    g_signal_connect(action.button, "clicked", callback, user_data);
+    gtk_box_append(GTK_BOX(action.icon_slot), action.icon);
+    safe_box_append(GTK_BOX(action.button), action.icon_slot);
+
     gtk_widget_set_tooltip_text(action.button, accessible_label);
     gtk_accessible_update_property(GTK_ACCESSIBLE(action.button),
                                    GTK_ACCESSIBLE_PROPERTY_LABEL,
@@ -112,16 +365,19 @@ LeftSidebar::~LeftSidebar() = default;
 
 void LeftSidebar::setup_ui() {
     sidebar_box_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_layout_manager(
+        sidebar_box_,
+        gtk_custom_layout_new(sidebar_request_mode, sidebar_measure,
+                              sidebar_allocate));
     gtk_widget_add_css_class(sidebar_box_, "sidebar");
-    gtk_widget_set_margin_top(sidebar_box_, 2);
     gtk_widget_set_vexpand(sidebar_box_, TRUE);
     gtk_widget_set_visible(sidebar_box_, TRUE);
     gtk_accessible_update_property(GTK_ACCESSIBLE(sidebar_box_),
                                    GTK_ACCESSIBLE_PROPERTY_LABEL,
                                    "Library navigation", -1);
 
-    // Header contains only the collapse control. About and fullscreen live in
-    // the window header menu so expanding the sidebar changes only the labels.
+    // Only the collapse control lives in the header; its icon uses the same
+    // square tile as every navigation row.
     header_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(header_box_, "sidebar-header");
     gtk_box_set_homogeneous(GTK_BOX(header_box_), FALSE);
@@ -133,11 +389,15 @@ void LeftSidebar::setup_ui() {
                                      G_CALLBACK(on_collapse_clicked), this,
                                      TRUE);
     collapse_button_ = collapse_.button;
-
     safe_box_append(GTK_BOX(header_box_), collapse_.button);
 
     nav_list_box_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_layout_manager(
+        nav_list_box_,
+        gtk_custom_layout_new(sidebar_request_mode, nav_measure, nav_allocate));
     gtk_widget_add_css_class(nav_list_box_, "sidebar-nav");
+    g_object_set_data(G_OBJECT(nav_list_box_), kNavListKey,
+                      GINT_TO_POINTER(1));
     gtk_widget_set_hexpand(nav_list_box_, TRUE);
     gtk_widget_set_halign(nav_list_box_, GTK_ALIGN_FILL);
     gtk_widget_set_vexpand(nav_list_box_, TRUE);
@@ -168,65 +428,64 @@ void LeftSidebar::add_nav_row(const NavigationItem& item) {
     NavRow row;
     row.id = item.id;
 
-    row.button = gtk_button_new();
-    gtk_button_set_has_frame(GTK_BUTTON(row.button), FALSE);
+    row.button = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(row.button, "sidebar-nav-item");
-    gtk_widget_set_size_request(row.button, kCompactWidth, kButtonHeight);
     gtk_widget_set_hexpand(row.button, TRUE);
     gtk_widget_set_vexpand(row.button, FALSE);
     gtk_widget_set_halign(row.button, GTK_ALIGN_FILL);
     gtk_widget_set_valign(row.button, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(row.button, TRUE);
+    make_activatable(row.button, on_nav_item_clicked, this);
     gtk_accessible_update_property(GTK_ACCESSIBLE(row.button),
                                    GTK_ACCESSIBLE_PROPERTY_LABEL,
                                    item.label.c_str(), -1);
 
     row.content = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_set_size_request(row.content,
-                                content_width(kCompactWidth), kContentHeight);
-    gtk_widget_set_hexpand(row.content, FALSE);
-    gtk_widget_set_halign(row.content, GTK_ALIGN_START);
-    gtk_widget_set_margin_start(row.content, kIconLeft);
+    gtk_widget_set_hexpand(row.content, TRUE);
+    gtk_widget_set_halign(row.content, GTK_ALIGN_FILL);
     gtk_widget_set_valign(row.content, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(row.content, TRUE);
 
+    GtkWidget* icon_slot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class(icon_slot, "sidebar-icon-square");
+    gtk_widget_set_halign(icon_slot, GTK_ALIGN_START);
+    gtk_widget_set_valign(icon_slot, GTK_ALIGN_CENTER);
+    gtk_widget_set_visible(icon_slot, TRUE);
+    g_object_set_data(G_OBJECT(row.button), kIconSlotKey, icon_slot);
+
     GtkWidget* icon = gtk_image_new_from_icon_name(item.icon_name.c_str());
-    gtk_image_set_pixel_size(GTK_IMAGE(icon), kIconSize);
     gtk_widget_add_css_class(icon, "sidebar-nav-icon");
-    // Same fixed 26px slot as the header icons, so every icon shares one
-    // vertical axis in both compact and expanded mode.
-    gtk_widget_set_size_request(icon, content_width(kCompactWidth),
-                                kContentHeight);
-    gtk_widget_set_halign(icon, GTK_ALIGN_CENTER);
-    gtk_widget_set_valign(icon, GTK_ALIGN_CENTER);
+    // Fill the square tile so the symbolic glyph is centred inside it.
+    gtk_widget_set_hexpand(icon, TRUE);
+    gtk_widget_set_vexpand(icon, TRUE);
+    gtk_widget_set_halign(icon, GTK_ALIGN_FILL);
+    gtk_widget_set_valign(icon, GTK_ALIGN_FILL);
     gtk_widget_set_visible(icon, TRUE);
+    g_object_set_data(G_OBJECT(row.button), kIconKey, icon);
 
     GtkWidget* label = gtk_label_new(item.label.c_str());
     gtk_label_set_xalign(GTK_LABEL(label), 0.0);
     gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
-    gtk_label_set_max_width_chars(GTK_LABEL(label), 9);
+    // Keep the label's minimum width tiny so it never inflates the fixed
+    // compact/expanded sidebar width. It expands to the full row in practice.
+    gtk_label_set_width_chars(GTK_LABEL(label), 1);
+    gtk_widget_set_size_request(label, 0, -1);
     gtk_widget_add_css_class(label, "sidebar-nav-label");
-    gtk_widget_set_halign(label, GTK_ALIGN_START);
+    gtk_widget_set_hexpand(label, TRUE);
+    gtk_widget_set_halign(label, GTK_ALIGN_FILL);
     gtk_widget_set_valign(label, GTK_ALIGN_CENTER);
-    gtk_widget_set_margin_start(label, 4);
     gtk_widget_set_visible(label, TRUE);
+    g_object_set_data(G_OBJECT(row.button), kLabelKey, label);
+    row.label = label;
 
-    row.revealer = gtk_revealer_new();
-    gtk_revealer_set_transition_type(GTK_REVEALER(row.revealer),
-                                     GTK_REVEALER_TRANSITION_TYPE_SLIDE_RIGHT);
-    gtk_revealer_set_transition_duration(GTK_REVEALER(row.revealer), 280);
-    gtk_revealer_set_child(GTK_REVEALER(row.revealer), label);
-    gtk_widget_set_visible(row.revealer, TRUE);
-
-    safe_box_append(GTK_BOX(row.content), icon);
-    safe_box_append(GTK_BOX(row.content), row.revealer);
-    safe_button_set_child(GTK_BUTTON(row.button), row.content);
+    gtk_box_append(GTK_BOX(icon_slot), icon);
+    safe_box_append(GTK_BOX(row.content), icon_slot);
+    safe_box_append(GTK_BOX(row.content), label);
+    safe_box_append(GTK_BOX(row.button), row.content);
     safe_box_append(GTK_BOX(nav_list_box_), row.button);
 
     g_object_set_data_full(G_OBJECT(row.button), "nav-item-id",
                            g_strdup(item.id.c_str()), g_free);
-    g_signal_connect(row.button, "clicked",
-                     G_CALLBACK(on_nav_item_clicked), this);
 
     nav_rows_.push_back(row);
 }
@@ -255,6 +514,10 @@ void LeftSidebar::toggle_expanded() {
 }
 
 void LeftSidebar::apply_expanded_state() {
+    g_object_set_data(G_OBJECT(sidebar_box_), kExpandedKey,
+                      GINT_TO_POINTER(expanded_ ? 1 : 0));
+    g_object_set_data(G_OBJECT(nav_list_box_), kExpandedKey,
+                      GINT_TO_POINTER(expanded_ ? 1 : 0));
     if (expanded_) {
         gtk_widget_remove_css_class(sidebar_box_, "compact");
     } else {
@@ -265,18 +528,15 @@ void LeftSidebar::apply_expanded_state() {
     update_label_visibility();
 }
 
-void LeftSidebar::set_row_width(NavRow& row, int width) {
-    gtk_widget_set_size_request(row.button, width, kButtonHeight);
-    gtk_widget_set_size_request(row.content, content_width(width),
-                                kContentHeight);
-}
-
 void LeftSidebar::update_sidebar_width() {
-    const int width = expanded_ ? kExpandedWidth : kCompactWidth;
-    gtk_widget_set_size_request(sidebar_box_, width, -1);
-    for (NavRow& row : nav_rows_) {
-        set_row_width(row, width);
-    }
+    const int panel_height = gtk_widget_get_height(sidebar_box_);
+    const int row = row_height_for(panel_height > 0
+                                       ? panel_height
+                                       : kFallbackRowHeight);
+    set_geometry_data(sidebar_box_, row);
+    set_geometry_data(nav_list_box_, row);
+    gtk_widget_set_size_request(sidebar_box_, sidebar_width_for(sidebar_box_),
+                                -1);
 }
 
 void LeftSidebar::update_toggle_icon() {
@@ -290,7 +550,7 @@ void LeftSidebar::update_toggle_icon() {
 
 void LeftSidebar::update_label_visibility() {
     for (NavRow& row : nav_rows_) {
-        gtk_revealer_set_reveal_child(GTK_REVEALER(row.revealer), expanded_);
+        gtk_widget_set_visible(row.label, expanded_);
     }
 }
 
@@ -318,11 +578,11 @@ void LeftSidebar::save_sidebar_state() {
     if (out) out << (expanded_ ? "1" : "0") << '\n';
 }
 
-void LeftSidebar::on_collapse_clicked(GtkButton*, gpointer user_data) {
+void LeftSidebar::on_collapse_clicked(GtkWidget*, gpointer user_data) {
     static_cast<LeftSidebar*>(user_data)->toggle_expanded();
 }
 
-void LeftSidebar::on_nav_item_clicked(GtkButton* button, gpointer user_data) {
+void LeftSidebar::on_nav_item_clicked(GtkWidget* button, gpointer user_data) {
     auto* self = static_cast<LeftSidebar*>(user_data);
     const char* id = static_cast<const char*>(
         g_object_get_data(G_OBJECT(button), "nav-item-id"));

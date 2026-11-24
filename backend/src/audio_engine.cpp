@@ -83,6 +83,19 @@ struct AudioEngine::Impl {
     // Audio pad linked flag
     bool audio_pad_linked = false;
 
+    // Last loaded file path for error recovery
+    std::string last_loaded_file;
+
+    // Gapless playback support
+    bool gapless_enabled = false;
+    std::string next_file_path;
+    std::atomic<bool> next_track_ready{false};
+    std::mutex next_track_mutex;
+    GstElement* next_filesrc = nullptr;
+    GstElement* next_decodebin = nullptr;
+    GstPad* next_decodebin_pad = nullptr;
+    bool next_audio_pad_linked = false;
+
     static gboolean bus_callback(GstBus* bus, GstMessage* msg, gpointer user_data);
     static gboolean position_timeout(gpointer user_data);
     void handle_message(GstMessage* msg);
@@ -95,6 +108,13 @@ struct AudioEngine::Impl {
                                        gpointer user_data);
     static GstFlowReturn on_viz_sample(GstAppSink* sink, gpointer user_data);
     GstPad* request_tee_pad(const char* pad_name);
+
+    // Gapless: build the next track's decodebin+filesrc (preroll it)
+    bool build_next_track(const std::string& file_path);
+    void clear_next_track();
+    // Called from the about-to-finish signal to swap in the next track
+    static void on_about_to_finish(GstElement* /*decodebin*/, gpointer user_data);
+    static GstPadProbeReturn on_next_decodebin_pad_added(GstPad* pad, GstPadProbeInfo* info, gpointer user_data);
 };
 
 // ---------------------------------------------------------------------------
@@ -556,6 +576,14 @@ void AudioEngine::Impl::destroy_pipeline() {
     autoaudiosink = nullptr;
     tee_viz_pad = nullptr;
     tee_audio_pad = nullptr;
+
+    // Clear gapless state
+    next_file_path.clear();
+    next_track_ready.store(false);
+    next_decodebin = nullptr;
+    next_filesrc = nullptr;
+    next_decodebin_pad = nullptr;
+    next_audio_pad_linked = false;
 }
 
 GstPad* AudioEngine::Impl::request_tee_pad(const char* pad_name) {
@@ -564,6 +592,178 @@ GstPad* AudioEngine::Impl::request_tee_pad(const char* pad_name) {
         pad = gst_element_get_request_pad(tee, pad_name);
     }
     return pad;
+}
+
+// ---------------------------------------------------------------------------
+// Gapless playback implementation
+// ---------------------------------------------------------------------------
+
+bool AudioEngine::Impl::build_next_track(const std::string& file_path) {
+    if (!pipeline) return false;
+
+    clear_next_track();
+
+    next_filesrc = gst_element_factory_make("filesrc", "next-filesrc");
+    next_decodebin = gst_element_factory_make("decodebin", "next-decodebin");
+
+    if (!next_filesrc || !next_decodebin) {
+        std::cerr << "AudioEngine: Failed to create next track elements" << std::endl;
+        clear_next_track();
+        return false;
+    }
+
+    g_object_set(next_filesrc, "location", file_path.c_str(), nullptr);
+
+    // Add to pipeline
+    gst_bin_add_many(GST_BIN(pipeline), next_filesrc, next_decodebin, nullptr);
+
+    // Link filesrc -> next_decodebin
+    if (!gst_element_link(next_filesrc, next_decodebin)) {
+        std::cerr << "AudioEngine: Failed to link next filesrc to decodebin" << std::endl;
+        clear_next_track();
+        return false;
+    }
+
+    // Set up pad-added handler for next_decodebin
+    g_signal_connect(next_decodebin, "pad-added",
+                     G_CALLBACK(on_next_decodebin_pad_added), this);
+
+    // Listen for about-to-finish on the current decodebin
+    if (decodebin) {
+        g_signal_connect(decodebin, "about-to-finish",
+                         G_CALLBACK(on_about_to_finish), this);
+    }
+
+    // Set next track to PAUSED to preroll
+    GstStateChangeReturn ret = gst_element_set_state(GST_ELEMENT(next_decodebin), GST_STATE_PAUSED);
+    if (ret == GST_STATE_CHANGE_FAILURE) {
+        std::cerr << "AudioEngine: Failed to preroll next track" << std::endl;
+        clear_next_track();
+        return false;
+    }
+
+    // Wait for preroll (async is fine - we just need it ready by EOS)
+    GstState state, pending;
+    ret = gst_element_get_state(GST_ELEMENT(next_decodebin), &state, &pending, 2 * GST_SECOND);
+    if (ret == GST_STATE_CHANGE_FAILURE) {
+        std::cerr << "AudioEngine: Next track preroll failed" << std::endl;
+        clear_next_track();
+        return false;
+    }
+
+    next_track_ready.store(true);
+    return true;
+}
+
+void AudioEngine::Impl::clear_next_track() {
+    if (next_decodebin) {
+        g_signal_handlers_disconnect_by_func(next_decodebin,
+                                             reinterpret_cast<gpointer>(
+                                                 G_CALLBACK(on_next_decodebin_pad_added)),
+                                             this);
+        gst_element_set_state(GST_ELEMENT(next_decodebin), GST_STATE_NULL);
+        gst_bin_remove(GST_BIN(pipeline), next_decodebin);
+        gst_object_unref(next_decodebin);
+        next_decodebin = nullptr;
+    }
+    if (next_filesrc) {
+        gst_element_set_state(GST_ELEMENT(next_filesrc), GST_STATE_NULL);
+        gst_bin_remove(GST_BIN(pipeline), next_filesrc);
+        gst_object_unref(next_filesrc);
+        next_filesrc = nullptr;
+    }
+    next_decodebin_pad = nullptr;
+    next_audio_pad_linked = false;
+    next_track_ready.store(false);
+    next_file_path.clear();
+}
+
+// Called when the current decodebin is about to finish - swap in the next track
+void AudioEngine::Impl::on_about_to_finish(GstElement* /*decodebin*/, gpointer user_data) {
+    auto* impl = static_cast<Impl*>(user_data);
+    if (!impl->next_track_ready.load()) return;
+
+    std::lock_guard<std::mutex> lock(impl->next_track_mutex);
+    if (!impl->next_audio_pad_linked || !impl->next_decodebin_pad) return;
+
+    // Swap the decodebin: unlink old, link new
+    // Unlink old decodebin from audioconvert
+    GstPad* audioconvert_sink = gst_element_get_static_pad(impl->audioconvert, "sink");
+    if (audioconvert_sink && gst_pad_is_linked(audioconvert_sink)) {
+        GstPad* old_src = gst_pad_get_peer(audioconvert_sink);
+        if (old_src) {
+            gst_pad_unlink(old_src, audioconvert_sink);
+            gst_object_unref(old_src);
+        }
+    }
+
+    // Link next_decodebin to audioconvert
+    if (impl->next_decodebin_pad && audioconvert_sink) {
+        if (gst_pad_link(impl->next_decodebin_pad, audioconvert_sink) != GST_PAD_LINK_OK) {
+            std::cerr << "AudioEngine: Failed to link next track for gapless playback" << std::endl;
+            if (audioconvert_sink) gst_object_unref(audioconvert_sink);
+            return;
+        }
+        impl->audio_pad_linked = true;
+    }
+    if (audioconvert_sink) gst_object_unref(audioconvert_sink);
+
+    // Clean up old decodebin
+    if (impl->decodebin) {
+        g_signal_handlers_disconnect_by_func(impl->decodebin,
+                                             reinterpret_cast<gpointer>(
+                                                 G_CALLBACK(Impl::on_decodebin_pad_added)),
+                                             impl);
+        gst_element_set_state(GST_ELEMENT(impl->decodebin), GST_STATE_NULL);
+        gst_bin_remove(GST_BIN(impl->pipeline), impl->decodebin);
+        gst_object_unref(impl->decodebin);
+    }
+
+    // Promote next decodebin to current
+    impl->decodebin = impl->next_decodebin;
+    impl->filesrc = impl->next_filesrc;
+    impl->next_decodebin = nullptr;
+    impl->next_filesrc = nullptr;
+    impl->next_decodebin_pad = nullptr;
+    impl->next_audio_pad_linked = false;
+    impl->next_track_ready.store(false);
+
+    // Update last_loaded_file to the new track
+    impl->last_loaded_file = impl->next_file_path;
+    impl->next_file_path.clear();
+
+    // Re-setup about-to-finish for the new current decodebin
+    g_signal_connect(impl->decodebin, "about-to-finish",
+                     G_CALLBACK(on_about_to_finish), impl);
+}
+
+// Pad probe callback for next_decodebin pad-added
+GstPadProbeReturn AudioEngine::Impl::on_next_decodebin_pad_added(GstPad* pad, GstPadProbeInfo* /*info*/, gpointer user_data) {
+    auto* impl = static_cast<Impl*>(user_data);
+
+    GstCaps* caps = gst_pad_get_current_caps(pad);
+    if (!caps) caps = gst_pad_query_caps(pad, nullptr);
+
+    bool is_audio = false;
+    if (caps) {
+        GstStructure* s = gst_caps_get_structure(caps, 0);
+        if (s && g_str_has_prefix(gst_structure_get_name(s), "audio/")) {
+            is_audio = true;
+        }
+        gst_caps_unref(caps);
+    }
+
+    if (!is_audio) return GST_PAD_PROBE_OK;
+
+    GstPad* sink_pad = gst_element_get_static_pad(impl->audioconvert, "sink");
+    if (!sink_pad) return GST_PAD_PROBE_OK;
+
+    // Store the pad for later linking in about-to-finish
+    impl->next_decodebin_pad = GST_PAD(gst_object_ref(pad));
+    impl->next_audio_pad_linked = false;  // Will be linked in about-to-finish
+
+    gst_object_unref(sink_pad);
+    return GST_PAD_PROBE_REMOVE;
 }
 
 // ---------------------------------------------------------------------------
@@ -597,8 +797,8 @@ bool AudioEngine::load_track(const std::string& file_path) {
         impl->bus_watch_id = gst_bus_add_watch(bus, Impl::bus_callback, this);
         gst_object_unref(bus);
 
-        // Position polling timer (100ms = 10fps).
-        impl->position_timeout_id = g_timeout_add(100, Impl::position_timeout,
+        // Position polling timer (33ms ~= 30fps) for smooth karaoke fill.
+        impl->position_timeout_id = g_timeout_add(33, Impl::position_timeout,
                                                   this);
 
         impl->current_state = PlaybackState::Stopped;
@@ -689,6 +889,7 @@ bool AudioEngine::load_track(const std::string& file_path) {
     {
         std::lock_guard<std::mutex> lock(impl->callback_mutex);
         impl->current_state = PlaybackState::Paused;
+        impl->last_loaded_file = file_path;  // Store for error recovery
         state_cb_copy = impl->state_cb;
     }
     if (state_cb_copy) state_cb_copy(impl->current_state);
@@ -712,6 +913,51 @@ void AudioEngine::stop() {
     Impl* impl = impl_.get();
     if (!impl || !impl->pipeline) return;
     impl->set_gst_state(PlaybackState::Stopped);
+}
+
+bool AudioEngine::recover_from_error() {
+    Impl* impl = impl_.get();
+    if (!impl) return false;
+
+    std::string file_to_reload;
+    {
+        std::lock_guard<std::mutex> lock(impl->callback_mutex);
+        file_to_reload = impl->last_loaded_file;
+    }
+
+    if (file_to_reload.empty()) {
+        std::cerr << "AudioEngine: No track to recover" << std::endl;
+        return false;
+    }
+
+    std::cerr << "AudioEngine: Attempting error recovery for: " << file_to_reload << std::endl;
+
+    // Destroy the current pipeline
+    impl->destroy_pipeline();
+
+    // Reset state
+    impl->current_state = PlaybackState::Stopped;
+    impl->audio_pad_linked = false;
+    impl->seek_pending.store(false);
+    impl->load_generation++;
+
+    // Rebuild pipeline and reload the track
+    if (!impl->build_pipeline(file_to_reload)) {
+        std::cerr << "AudioEngine: Failed to rebuild pipeline during recovery" << std::endl;
+        impl->destroy_pipeline();
+        return false;
+    }
+
+    // Re-setup bus watch
+    GstBus* bus = gst_pipeline_get_bus(GST_PIPELINE(impl->pipeline));
+    impl->bus_watch_id = gst_bus_add_watch(bus, Impl::bus_callback, this);
+    gst_object_unref(bus);
+
+    // Re-setup position timer at the same ~30fps cadence.
+    impl->position_timeout_id = g_timeout_add(33, Impl::position_timeout, this);
+
+    // Load the track again
+    return load_track(file_to_reload);
 }
 
 void AudioEngine::seek(double position_seconds) {
@@ -778,6 +1024,44 @@ double AudioEngine::get_volume() const {
     return impl_->volume_;
 }
 
+void AudioEngine::set_gapless_enabled(bool enabled) {
+    Impl* impl = impl_.get();
+    if (!impl) return;
+    impl->gapless_enabled = enabled;
+    if (!enabled) {
+        impl->clear_next_track();
+    }
+}
+
+bool AudioEngine::is_gapless_enabled() const {
+    Impl* impl = impl_.get();
+    if (!impl) return false;
+    return impl->gapless_enabled;
+}
+
+void AudioEngine::preload_next_track(const std::string& file_path) {
+    Impl* impl = impl_.get();
+    if (!impl || !impl->pipeline || !impl->gapless_enabled) return;
+    if (file_path.empty()) return;
+
+    std::lock_guard<std::mutex> lock(impl->next_track_mutex);
+    if (impl->next_file_path == file_path && impl->next_track_ready.load()) {
+        return;  // Already preloaded
+    }
+    impl->next_file_path = file_path;
+    if (!impl->build_next_track(file_path)) {
+        std::cerr << "AudioEngine: Failed to preload next track: " << file_path << std::endl;
+        impl->next_file_path.clear();
+    }
+}
+
+void AudioEngine::commit_next_track() {
+    Impl* impl = impl_.get();
+    if (!impl) return;
+    // The actual commit happens in on_about_to_finish callback
+    // This is just a no-op for API consistency
+}
+
 // ---------------------------------------------------------------------------
 // State queries
 // ---------------------------------------------------------------------------
@@ -809,6 +1093,37 @@ std::optional<double> AudioEngine::get_duration() const {
         return std::nullopt;
     }
     return static_cast<double>(dur) / GST_SECOND;
+}
+
+double AudioEngine::get_viz_sample_rate() const {
+    Impl* impl = impl_.get();
+    if (!impl || !impl->pipeline) return 44100.0;
+
+    // Query the caps on the appsink's sink pad to get the actual negotiated rate.
+    if (impl->appsink) {
+        GstPad* sink_pad = gst_element_get_static_pad(impl->appsink, "sink");
+        if (sink_pad) {
+            GstCaps* caps = gst_pad_get_current_caps(sink_pad);
+            if (!caps) {
+                caps = gst_pad_query_caps(sink_pad, nullptr);
+            }
+            if (caps) {
+                GstStructure* s = gst_caps_get_structure(caps, 0);
+                if (s) {
+                    gint rate = 0;
+                    if (gst_structure_get_int(s, "rate", &rate) && rate > 0) {
+                        gst_caps_unref(caps);
+                        gst_object_unref(sink_pad);
+                        return static_cast<double>(rate);
+                    }
+                }
+                gst_caps_unref(caps);
+            }
+            gst_object_unref(sink_pad);
+        }
+    }
+    // Fallback to the configured capsfilter rate.
+    return 44100.0;
 }
 
 // ---------------------------------------------------------------------------

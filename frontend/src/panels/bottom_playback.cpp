@@ -1,21 +1,19 @@
 /**
  * Lollypop C++ - Bottom Playback Implementation
  *
- *   [Artwork + Title/Artist] [Prev] [Wavy Progress] [Next] [Modes] [Volume] [PiP]
+ *   [Artwork + Title/Artist] [Prev] [Wavy Progress] [Next] [Shuffle/Loop] [PiP]
  *
- * The progress bar is the shared ProgressWave: the same Cairo sine wave and
- * transparent seek layer used by the right panel and PiP window.
+ * The wide progress strip uses the shared ProgressWave without spectrum
+ * input, so it stays a clean decorative wave rather than a visualizer.
  */
 
 #include "panels/bottom_playback.hpp"
 #include "panels/pip_window.hpp"
 #include "panels/progress_wave.hpp"
-#include "panels/spectrum_router.hpp"
 #include "main_window.hpp"
 #include "application.hpp"
 #include "services/IPlayerService.hpp"
 #include "ui/components/ArtworkView.hpp"
-#include "ui/components/VolumeDial.hpp"
 #include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
@@ -35,25 +33,19 @@ BottomPlayback::BottomPlayback(MainWindow* main_window)
       next_button_(nullptr),
       middle_section_(nullptr),
       right_box_(nullptr),
-      volume_dial_(nullptr),
       pip_button_(nullptr),
       shuffle_button_(nullptr),
-      repeat_button_(nullptr),
       loop_button_(nullptr) {
     setup_ui();
-    gtk_widget_add_tick_callback(main_box_, on_layout_tick, this, nullptr);
 
     if (main_window_) {
         if (auto* backend = main_window_->get_backend()) {
-            volume_dial_->set_volume(backend->get_volume());
             progress_wave_->set_can_seek(backend->can_seek());
         }
     }
 }
 
-BottomPlayback::~BottomPlayback() {
-    SpectrumRouter::instance().unregister_wave(progress_wave_.get());
-}
+BottomPlayback::~BottomPlayback() = default;
 
 void BottomPlayback::setup_ui() {
     main_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
@@ -67,9 +59,11 @@ void BottomPlayback::setup_ui() {
 }
 
 void BottomPlayback::create_row() {
-    // Left metadata, centered transport, flexible spacer, right-side controls.
+    // Left metadata: fixed 200px wide, artwork keeps its original 56x56 size.
     GtkWidget* left_section = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
     gtk_widget_add_css_class(left_section, "bottom-playback-left");
+    gtk_widget_add_css_class(left_section, "bottom-playback-music");
+    gtk_widget_set_size_request(left_section, 200, -1);
     gtk_widget_set_valign(left_section, GTK_ALIGN_CENTER);
     gtk_widget_set_hexpand(left_section, FALSE);
     gtk_widget_set_halign(left_section, GTK_ALIGN_START);
@@ -116,10 +110,9 @@ void BottomPlayback::create_row() {
     // Transport: Prev | shared wavy progress | Next.
     middle_section_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(middle_section_, "bottom-playback-middle");
-    gtk_widget_set_hexpand(middle_section_, FALSE);
-    gtk_widget_set_halign(middle_section_, GTK_ALIGN_START);
+    gtk_widget_set_hexpand(middle_section_, TRUE);
+    gtk_widget_set_halign(middle_section_, GTK_ALIGN_FILL);
     gtk_widget_set_valign(middle_section_, GTK_ALIGN_CENTER);
-    gtk_widget_set_size_request(middle_section_, 1584, -1);
     gtk_widget_set_visible(middle_section_, TRUE);
 
     prev_button_ = gtk_button_new();
@@ -156,54 +149,18 @@ void BottomPlayback::create_row() {
 
     safe_box_append(GTK_BOX(main_box_), middle_section_);
 
-    GtkWidget* tail_spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_set_hexpand(tail_spacer, TRUE);
-    gtk_widget_set_visible(tail_spacer, TRUE);
-    safe_box_append(GTK_BOX(main_box_), tail_spacer);
-
     create_right_section();
-}
-
-gboolean BottomPlayback::on_layout_tick(GtkWidget* widget, GdkFrameClock*,
-                                         gpointer user_data) {
-    auto* self = static_cast<BottomPlayback*>(user_data);
-    if (!self->middle_section_ || !self->right_box_ || !self->progress_widget_) {
-        return G_SOURCE_CONTINUE;
-    }
-
-    const int total_width = gtk_widget_get_width(widget);
-    if (total_width <= 0) return G_SOURCE_CONTINUE;
-
-    const int right_width = gtk_widget_get_width(self->right_box_);
-    int chrome = gtk_widget_get_width(self->prev_button_) +
-                 gtk_widget_get_width(self->next_button_);
-    if (chrome <= 0) chrome = 72;
-
-    const int available = total_width - 275 - right_width - 12 - chrome;
-    const int progress_width = std::clamp(available, 600, 1500);
-    const int middle_width = progress_width + chrome;
-
-    if (progress_width != self->last_progress_width_) {
-        self->last_progress_width_ = progress_width;
-        gtk_widget_set_size_request(self->progress_widget_, progress_width, 28);
-    }
-    if (middle_width != self->last_middle_width_) {
-        self->last_middle_width_ = middle_width;
-        gtk_widget_set_size_request(self->middle_section_, middle_width, -1);
-    }
-    return G_SOURCE_CONTINUE;
 }
 
 void BottomPlayback::create_progress(GtkWidget* parent) {
     progress_wave_ = std::make_unique<ProgressWave>();
-    SpectrumRouter::instance().register_wave(progress_wave_.get());
+    progress_wave_->set_wave_frequency(18.0);
     progress_widget_ = progress_wave_->get_widget();
 
     gtk_widget_add_css_class(progress_widget_, "bottom-playback-progress");
-    gtk_widget_set_hexpand(progress_widget_, FALSE);
+    gtk_widget_set_hexpand(progress_widget_, TRUE);
     gtk_widget_set_halign(progress_widget_, GTK_ALIGN_FILL);
     gtk_widget_set_valign(progress_widget_, GTK_ALIGN_CENTER);
-    gtk_widget_set_size_request(progress_widget_, 1500, 28);
     gtk_widget_set_visible(progress_widget_, TRUE);
 
     progress_wave_->set_seek_callback([this](double seconds) {
@@ -260,31 +217,11 @@ void BottomPlayback::create_right_section() {
                                        G_CALLBACK(on_shuffle_toggled));
     safe_box_append(GTK_BOX(modes_box), shuffle_button_);
 
-    repeat_button_ = make_mode_button("media-playlist-repeat-symbolic",
-                                      "Repeat playlist",
-                                      G_CALLBACK(on_repeat_toggled));
-    safe_box_append(GTK_BOX(modes_box), repeat_button_);
-
     loop_button_ = make_mode_button("media-playlist-repeat-song-symbolic",
                                     "Repeat track",
                                     G_CALLBACK(on_loop_toggled));
     safe_box_append(GTK_BOX(modes_box), loop_button_);
     safe_box_append(GTK_BOX(right_box_), modes_box);
-
-    volume_dial_ = std::make_unique<VolumeDial>();
-    volume_dial_->set_volume_changed_callback([this](double volume) {
-        if (main_window_) {
-            if (auto* backend = main_window_->get_backend()) {
-                backend->set_volume(volume);
-            }
-        }
-    });
-    gtk_widget_add_css_class(volume_dial_->get_widget(), "bottom-playback-volume-dial");
-    gtk_widget_set_size_request(volume_dial_->get_widget(), 40, 40);
-    gtk_widget_set_margin_start(volume_dial_->get_widget(), 4);
-    gtk_widget_set_margin_end(volume_dial_->get_widget(), 4);
-    gtk_widget_set_visible(volume_dial_->get_widget(), TRUE);
-    safe_box_append(GTK_BOX(right_box_), volume_dial_->get_widget());
 
     pip_button_ = gtk_button_new();
     gtk_button_set_has_frame(GTK_BUTTON(pip_button_), FALSE);
@@ -332,30 +269,16 @@ void BottomPlayback::set_playing(bool playing) {
     progress_wave_->set_playing(playing);
 }
 
-void BottomPlayback::set_volume(double volume) {
-    if (volume_dial_) {
-        volume_dial_->set_volume(volume);
-    }
-}
-
 void BottomPlayback::set_controls_sensitive(bool sensitive) {
     gtk_widget_set_sensitive(prev_button_, sensitive);
     gtk_widget_set_sensitive(next_button_, sensitive);
-    if (volume_dial_) {
-        gtk_widget_set_sensitive(volume_dial_->get_widget(), sensitive);
-    }
     gtk_widget_set_sensitive(pip_button_, sensitive);
-    gtk_widget_set_sensitive(shuffle_button_, true);
-    gtk_widget_set_sensitive(repeat_button_, true);
-    gtk_widget_set_sensitive(loop_button_, true);
+    gtk_widget_set_sensitive(shuffle_button_, sensitive);
+    gtk_widget_set_sensitive(loop_button_, sensitive);
 }
 
 void BottomPlayback::set_shuffle(bool enabled) {
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(shuffle_button_), enabled);
-}
-
-void BottomPlayback::set_repeat(bool enabled) {
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(repeat_button_), enabled);
 }
 
 void BottomPlayback::set_loop(bool enabled) {
@@ -399,15 +322,6 @@ void BottomPlayback::on_shuffle_toggled(GtkToggleButton* button, gpointer user_d
     if (self->main_window_) {
         if (auto* backend = self->main_window_->get_backend()) {
             backend->set_shuffle(gtk_toggle_button_get_active(button));
-        }
-    }
-}
-
-void BottomPlayback::on_repeat_toggled(GtkToggleButton* button, gpointer user_data) {
-    auto* self = static_cast<BottomPlayback*>(user_data);
-    if (self->main_window_) {
-        if (auto* backend = self->main_window_->get_backend()) {
-            backend->set_repeat(gtk_toggle_button_get_active(button));
         }
     }
 }

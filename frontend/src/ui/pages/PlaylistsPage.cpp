@@ -8,7 +8,10 @@
 #include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
+#include <cstring>
 #include <iostream>
+#include <random>
+#include <algorithm>
 
 namespace lollypop {
 
@@ -58,6 +61,31 @@ void PlaylistsPage::populate(const std::vector<Playlist>& playlists) {
             [this](const Playlist& p) { on_playlist_clicked(p); });
         item->set_play_callback(
             [this](const Playlist& p) { on_playlist_played(p); });
+        item->set_playlist_action_callback([this](const Playlist& p, const char* action) {
+            if (!main_window_) return;
+            IPlayerService* backend = main_window_->get_backend();
+            if (!backend) return;
+
+            if (std::strcmp(action, "play") == 0) {
+                backend->play_tracks(p.track_ids, 0);
+            } else if (std::strcmp(action, "shuffle") == 0) {
+                std::vector<std::string> shuffled = p.track_ids;
+                std::random_device rd;
+                std::mt19937 g(rd());
+                std::shuffle(shuffled.begin(), shuffled.end(), g);
+                backend->play_tracks(shuffled, 0);
+            } else if (std::strcmp(action, "add_to_queue") == 0) {
+                for (const auto& track_id : p.track_ids) {
+                    backend->enqueue_track(track_id, false);
+                }
+            } else if (std::strcmp(action, "rename") == 0) {
+                // TODO: Show rename dialog
+                std::cout << "[PlaylistsPage] Rename playlist: " << p.name << std::endl;
+            } else if (std::strcmp(action, "delete") == 0) {
+                // TODO: Implement delete_playlist in ILibraryService
+                std::cout << "[PlaylistsPage] Delete playlist: " << p.id << std::endl;
+            }
+        });
 
         GtkWidget* w = item->get_widget();
         safe_flow_box_append(GTK_FLOW_BOX(grid_.get()), w);

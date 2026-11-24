@@ -153,6 +153,10 @@ void ProgressWave::set_seek_callback(SeekCallback callback) {
     seek_callback_ = std::move(callback);
 }
 
+void ProgressWave::set_wave_frequency(double frequency) {
+    wave_frequency_ = std::max(1.0, frequency);
+}
+
 void ProgressWave::set_spectrum(const std::vector<float>& magnitudes) {
     spectrum_ = magnitudes;
     if (wave_area_) gtk_widget_queue_draw(wave_area_);
@@ -243,7 +247,7 @@ void ProgressWave::on_draw(GtkDrawingArea* area, cairo_t* cr, int width,
         // Wavelength is fixed to the full track length so the wave keeps its
         // shape while the played fraction grows (Quickshell fullLength).
         return center_y + local_amplitude *
-            std::sin((2.0 * M_PI * kWaveFrequency * (x - track_left) /
+            std::sin((2.0 * M_PI * self->wave_frequency_ * (x - track_left) /
                       track_length) + phase);
     };
 

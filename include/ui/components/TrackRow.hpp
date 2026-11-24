@@ -1,9 +1,10 @@
 /**
  * Lollypop C++ - TrackRow
  *
- * Shared track row component used by Songs, Album details, Artist details,
- * Liked Music, and Queue pages. Activating the row starts playback; there is
- * no inline play/pause button. Spring animations for hover/press states.
+ * Shared track row component used by Songs, Home, Album details, Artist
+ * details, Liked Music, and Queue pages. The whole row is the play control;
+ * only the trailing star is a separate action. No hover feedback: rows are
+ * separated by a centered hairline instead.
  */
 
 #pragma once
@@ -24,14 +25,23 @@ class ArtworkView;
 class EqualizerIndicator;
 
 // Direct children tagged with one of these roles are laid out by
-// create_track_columns_layout(). Title/Artist/Album receive 20/30/25 of the
-// available column space; every other role keeps its natural width.
+// create_track_columns_layout(). Artwork, duration and like are fixed-width;
+// Title/Artist/Album split what remains 20:30:25 (of the 75 total shares).
 enum class TrackColumnRole : int {
     Fixed = 0,
     Title = 1,
     Artist = 2,
     Album = 3,
 };
+
+struct TrackRowOptions {
+    bool show_track_number = false;
+    bool show_album = true;
+    bool enable_queue_actions = false;  // For queue page: show context menu
+};
+
+using QueueActionCallback = std::function<void(const Track&, const char* action)>;
+// action: "play_next", "add_to_queue", "remove_from_queue", "play_last", "add_to_playlist"
 
 void set_track_column_role(GtkWidget* widget, TrackColumnRole role);
 GtkLayoutManager* create_track_columns_layout();
@@ -40,8 +50,10 @@ class TrackRow {
 public:
     using PlayCallback = std::function<void(const Track&)>;
     using LikeCallback = std::function<void(const Track&, bool)>;
+    using QueueActionCallback = std::function<void(const Track&, const char* action)>;
 
-    TrackRow(MainWindow* main_window, const Track& track, int track_number);
+    TrackRow(MainWindow* main_window, const Track& track, int track_number,
+             TrackRowOptions options = {});
     ~TrackRow();
 
     TrackRow(const TrackRow&) = delete;
@@ -51,9 +63,16 @@ public:
 
     void set_play_callback(PlayCallback cb) { play_cb_ = std::move(cb); }
     void set_like_callback(LikeCallback cb) { like_cb_ = std::move(cb); }
+    void set_queue_action_callback(QueueActionCallback cb) { 
+    queue_action_cb_ = std::move(cb); 
+    if (options_.enable_queue_actions && queue_action_cb_) {
+        create_context_menu();
+    }
+}
 
     void set_playing(bool playing);
     void set_liked(bool liked);
+    void set_queue_position(int position);  // For queue page: update track number display
 
     /// Refresh every live row when playback changes. Safe on the main context.
     static void update_playing_state(const std::string& track_id, bool playing);
@@ -61,12 +80,19 @@ public:
 private:
     struct WidgetDeleter {
         void operator()(GtkWidget* w) const {
-            if (w) g_object_unref(w);
+            if (!w) return;
+            if (gtk_widget_get_parent(w) != nullptr) {
+                // GTK parents take ownership of the child's existing reference.
+                gtk_widget_unparent(w);
+            } else {
+                g_object_unref(w);
+            }
         }
     };
     std::unique_ptr<GtkWidget, WidgetDeleter> widget_;
     std::unique_ptr<ArtworkView> artwork_view_;
     std::unique_ptr<EqualizerIndicator> equalizer_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> number_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> title_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> artist_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> album_label_;
@@ -75,22 +101,31 @@ private:
 
     MainWindow* main_window_;
     Track track_;
+    TrackRowOptions options_;
+    int display_track_number_ = 0;
     PlayCallback play_cb_;
     LikeCallback like_cb_;
+    QueueActionCallback queue_action_cb_;
     bool playing_ = false;
     bool liked_ = false;
+    gint64 last_like_press_time_ = 0;
+    gint64 last_row_play_time_ = 0;
     static std::unordered_set<TrackRow*> live_rows_;
 
     void setup_ui();
+    void create_context_menu();
+    GMenu* create_menu_model();
     static void on_like_clicked(GtkButton* button, gpointer user_data);
+    static void on_like_pressed(GtkGestureClick* gesture, int n_press,
+                                double x, double y, gpointer user_data);
     static void on_row_activated(GtkListBoxRow* row, gpointer user_data);
-    static gboolean on_enter(GtkEventControllerMotion* controller, double x,
-                             double y, gpointer user_data);
-    static gboolean on_leave(GtkEventControllerMotion* controller,
-                             gpointer user_data);
     static gboolean on_pressed(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data);
     static gboolean on_released(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data);
-    void animate_hover(bool hover);
+    static void on_context_menu(GtkGestureClick* gesture, int n_press,
+                                double x, double y, gpointer user_data);
+    static void on_play_next(GSimpleAction* action, GVariant* parameter, gpointer user_data);
+    static void on_add_to_queue(GSimpleAction* action, GVariant* parameter, gpointer user_data);
+    static void on_remove_from_queue(GSimpleAction* action, GVariant* parameter, gpointer user_data);
     void animate_press(bool press);
 };
 

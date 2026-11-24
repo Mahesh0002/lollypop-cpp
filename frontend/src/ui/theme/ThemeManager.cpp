@@ -7,6 +7,7 @@
 #include <gtk/gtk.h>
 #include <iostream>
 #include <algorithm>
+#include <cstring>
 
 namespace lollypop {
 
@@ -39,8 +40,9 @@ ThemeManager::ThemeManager() {
 
     // Initialize font scale from GTK settings
     GtkSettings* settings = gtk_settings_get_default();
+    base_font_size_ = font_size_from_settings(settings);
     font_scale_ = 1.0;
-    
+
     // Connect to GTK font changes
     font_scale_signal_id_ = g_signal_connect(
         settings, "notify::gtk-font-name",
@@ -123,39 +125,57 @@ void ThemeManager::set_font_scale(double scale) {
     update_css_font_scale();
 }
 
-void ThemeManager::on_gtk_font_scale_changed(GtkSettings* settings, GParamSpec* pspec, gpointer user_data) {
+double ThemeManager::font_size_from_settings(GtkSettings* settings) {
+    if (!settings) return 0.0;
+
+    gchar* font_name = nullptr;
+    g_object_get(settings, "gtk-font-name", &font_name, nullptr);
+    if (!font_name) return 0.0;
+
+    // GTK font names end in the point size, e.g. "Cantarell 11" or
+    // "Noto Sans 13". Parsing the last token keeps family names with spaces.
+    double size = 0.0;
+    if (const char* last_space = std::strrchr(font_name, ' ')) {
+        size = g_ascii_strtod(last_space + 1, nullptr);
+    }
+    g_free(font_name);
+    return size > 0.0 ? size : 0.0;
+}
+
+void ThemeManager::on_gtk_font_scale_changed(GtkSettings* settings,
+                                             GParamSpec* pspec,
+                                             gpointer user_data) {
     (void)pspec;
-    (void)user_data;
-    // GTK font name changed - in GTK 4, we can query the property
-    // For now, we just note the change and could parse the font size
-    // For now, we just trigger a refresh
-    (void)settings;
+    auto* self = static_cast<ThemeManager*>(user_data);
+    if (!self || self->base_font_size_ <= 0.0) return;
+
+    const double size = font_size_from_settings(settings);
+    if (size <= 0.0) return;
+    self->set_font_scale(size / self->base_font_size_);
 }
 
 void ThemeManager::update_css_font_scale() {
-    // Update font scale CSS variable
-    gchar* css = g_strdup_printf(
-        ":root {\n"
-        "  --font-scale: %f;\n"
-        "}\n",
-        font_scale_);
-
-    gtk_css_provider_load_from_string(accent_css_provider_.get(), css);
-    g_free(css);
+    update_css_overrides();
 }
 
 void ThemeManager::update_css_accent() {
-    // Only update the accent provider with :root CSS custom properties.
-    // The base stylesheet in base_css_provider_ is never touched.
+    update_css_overrides();
+}
+
+void ThemeManager::update_css_overrides() {
+    // Both providers stay in sync: replacing only one :root block used to
+    // wipe the accent variables when the font size changed.
     gchar* css = g_strdup_printf(
         ":root {\n"
         "  --accent-color: rgba(%d, %d, %d, %f);\n"
         "  --accent-soft: rgba(%d, %d, %d, %f);\n"
+        "  --font-scale: %f;\n"
         "}\n",
         static_cast<int>(accent_r_ * 255), static_cast<int>(accent_g_ * 255),
         static_cast<int>(accent_b_ * 255), accent_a_,
         static_cast<int>(accent_r_ * 255), static_cast<int>(accent_g_ * 255),
-        static_cast<int>(accent_b_ * 255), accent_a_ * 0.15);
+        static_cast<int>(accent_b_ * 255), accent_a_ * 0.15,
+        font_scale_);
 
     gtk_css_provider_load_from_string(accent_css_provider_.get(), css);
     g_free(css);

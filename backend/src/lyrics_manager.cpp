@@ -228,7 +228,7 @@ void LyricsManager::set_fetch_fn(FetchFn fn) {
 std::optional<Lyrics> LyricsManager::get_lyrics(const std::string& track_id) {
     // Check cache first.
     if (cache_) {
-        CacheEntry entry;
+        CacheManagerEntry entry;
         if (cache_->get(cache_key(track_id), entry)) {
             Lyrics lyrics;
             lyrics.track_id = track_id;

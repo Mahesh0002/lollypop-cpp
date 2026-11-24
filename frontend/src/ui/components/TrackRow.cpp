@@ -1,7 +1,7 @@
 /**
  * Lollypop C++ - TrackRow Implementation
- * Shared track row with play/like actions.
- * Spring animations for hover/press states.
+ * Shared track row: the whole row plays, the trailing star toggles like.
+ * Press feedback only; no hover state.
  */
 
 #include "ui/components/TrackRow.hpp"
@@ -13,9 +13,11 @@
 #include "ui/animation/SpringAnimation.hpp"
 
 #include <gtk/gtk.h>
+#include <gio/gio.h>
 #include <algorithm>
 #include <iostream>
 #include <vector>
+#include <string>
 
 namespace lollypop {
 
@@ -25,6 +27,8 @@ namespace {
 
 constexpr int kColumnSpacing = track_list_metrics::kColumnGap;
 constexpr const char* kTrackColumnRoleKey = "track-column-role";
+constexpr const char* kTrackColumnSquareKey = "track-column-square";
+constexpr const char* kTrackRowBoxKey = "track-row-box";
 constexpr int kTitleShare = 20;
 constexpr int kArtistShare = 30;
 constexpr int kAlbumShare = 25;
@@ -59,6 +63,19 @@ void track_columns_measure(GtkWidget* widget, GtkOrientation orientation,
     int nat_baseline = -1;
     int visible_children = 0;
 
+    // Track rows have a fixed height. Measuring children vertically would ask
+    // the like button for 22px while its CSS/theme minimum is larger, which
+    // emits Gtk-WARNING spam. Since the custom allocate() assigns child heights
+    // directly, a fixed report here is both accurate and warning-free.
+    if (orientation == GTK_ORIENTATION_VERTICAL &&
+        g_object_get_data(G_OBJECT(widget), kTrackRowBoxKey)) {
+        if (minimum) *minimum = track_list_metrics::kRowHeight;
+        if (natural) *natural = track_list_metrics::kRowHeight;
+        if (minimum_baseline) *minimum_baseline = -1;
+        if (natural_baseline) *natural_baseline = -1;
+        return;
+    }
+
     for (GtkWidget* child = gtk_widget_get_first_child(widget); child;
          child = gtk_widget_get_next_sibling(child)) {
         if (!gtk_widget_get_visible(child)) continue;
@@ -68,9 +85,21 @@ void track_columns_measure(GtkWidget* widget, GtkOrientation orientation,
         int child_nat = 0;
         int child_min_baseline = -1;
         int child_nat_baseline = -1;
-        gtk_widget_measure(child, orientation, for_size,
-                           &child_min, &child_nat,
-                           &child_min_baseline, &child_nat_baseline);
+        if (g_object_get_data(G_OBJECT(child), kTrackColumnSquareKey)) {
+            // GtkPicture reports the texture's natural size for large
+            // for_size values; pin the thumbnail to its configured square.
+            child_min = child_nat = track_list_metrics::kArtworkSize;
+        } else {
+            // Row children are laid out at a fixed height; measuring width
+            // against that height makes GTK warn that the button needs at
+            // least its CSS minimum height. Width is independent of the row
+            // height here, so measure without a height constraint.
+            const int measure_for = orientation == GTK_ORIENTATION_HORIZONTAL
+                                        ? -1 : for_size;
+            gtk_widget_measure(child, orientation, measure_for,
+                               &child_min, &child_nat,
+                               &child_min_baseline, &child_nat_baseline);
+        }
 
         if (orientation == GTK_ORIENTATION_HORIZONTAL) {
             min_size += child_min;
@@ -132,9 +161,18 @@ void track_columns_allocate(GtkWidget* widget, int width, int height,
     int available = width - fixed_total - gaps;
     int shares[3] = {0, 0, 0};
     if (available > 0) {
-        shares[0] = available * kTitleShare / kTotalShare;
-        shares[1] = available * kArtistShare / kTotalShare;
-        shares[2] = available - shares[0] - shares[1];
+        const bool has_album = std::any_of(
+            children.begin(), children.end(), [](GtkWidget* child) {
+                return column_role(child) == TrackColumnRole::Album;
+            });
+        if (has_album) {
+            shares[0] = available * kTitleShare / kTotalShare;
+            shares[1] = available * kArtistShare / kTotalShare;
+            shares[2] = available - shares[0] - shares[1];
+        } else {
+            shares[0] = available * 40 / 100;
+            shares[1] = available - shares[0];
+        }
     }
     for (int i = 0; i < 3; ++i) {
         shares[i] = std::max(shares[i], flex_minimum[i]);
@@ -162,8 +200,17 @@ void track_columns_allocate(GtkWidget* widget, int width, int height,
         const int idx = role_index(column_role(children[i]));
         if (idx >= 0) widths[i] = shares[idx];
         const int child_width = std::max(0, widths[i]);
-        graphene_point_t position = {static_cast<float>(x), 0.0f};
-        gtk_widget_allocate(children[i], child_width, height, baseline,
+
+        // Artwork is a fixed square: give it its natural size and center it
+        // vertically instead of stretching it over the full row height.
+        const bool square = GPOINTER_TO_INT(
+            g_object_get_data(G_OBJECT(children[i]), kTrackColumnSquareKey)) != 0;
+        const int child_height = square ? std::min(height, child_width) : height;
+        const int y = square ? (height - child_height) / 2 : 0;
+        graphene_point_t position = {static_cast<float>(x),
+                                     static_cast<float>(y)};
+        gtk_widget_allocate(children[i], child_width, child_height,
+                            square ? -1 : baseline,
                             gsk_transform_translate(nullptr, &position));
         x += child_width + kColumnSpacing;
     }
@@ -184,9 +231,13 @@ GtkLayoutManager* create_track_columns_layout() {
                                  track_columns_allocate);
 }
 
-TrackRow::TrackRow(MainWindow* main_window, const Track& track, int track_number)
-    : main_window_(main_window), track_(track) {
-    (void)track_number;
+TrackRow::TrackRow(MainWindow* main_window, const Track& track, int track_number,
+                   TrackRowOptions options)
+    : main_window_(main_window),
+      track_(track),
+      options_(options),
+      display_track_number_(track.track_number > 0 ? track.track_number
+                                                    : track_number) {
     setup_ui();
     live_rows_.insert(this);
 
@@ -212,41 +263,56 @@ void TrackRow::setup_ui() {
     gtk_widget_set_size_request(widget_.get(), -1,
                                 track_list_metrics::kRowHeight);
     gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(widget_.get()), TRUE);
+    gtk_widget_set_cursor_from_name(widget_.get(), "pointer");
     gtk_widget_set_visible(widget_.get(), TRUE);
 
     GtkWidget* box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL,
                                  track_list_metrics::kColumnGap);
     gtk_widget_set_layout_manager(box, create_track_columns_layout());
+    g_object_set_data(G_OBJECT(box), kTrackRowBoxKey, GINT_TO_POINTER(1));
     gtk_widget_set_margin_start(box, track_list_metrics::kSideMargin);
     gtk_widget_set_margin_end(box, track_list_metrics::kSideMargin);
     gtk_widget_set_margin_top(box, 0);
     gtk_widget_set_margin_bottom(box, 0);
     gtk_widget_set_visible(box, TRUE);
 
-    // Artwork thumbnail replaces the track number for an Apple Music look.
-    artwork_view_ = std::make_unique<ArtworkView>();
-    artwork_view_->set_preferred_size(track_list_metrics::kArtworkSize,
-                                      track_list_metrics::kArtworkSize);
-    artwork_view_->set_corner_radius(
-        track_list_metrics::kArtworkCornerRadius);
-    gtk_widget_add_css_class(artwork_view_->get_widget(), "track-row-artwork");
-    artwork_view_->set_artwork_path(track_.artwork_path);
-    gtk_widget_set_visible(artwork_view_->get_widget(), TRUE);
+    if (options_.show_track_number) {
+        number_label_.reset(gtk_label_new(
+            std::to_string(display_track_number_).c_str()));
+        g_object_ref_sink(number_label_.get());
+        gtk_widget_add_css_class(number_label_.get(), "track-row-number");
+        gtk_label_set_xalign(GTK_LABEL(number_label_.get()), 0.5);
+        gtk_widget_set_size_request(number_label_.get(), 34, -1);
+        gtk_widget_set_valign(number_label_.get(), GTK_ALIGN_CENTER);
+        gtk_widget_set_visible(number_label_.get(), TRUE);
+        gtk_box_append(GTK_BOX(box), number_label_.get());
+    } else {
+        artwork_view_ = std::make_unique<ArtworkView>();
+        artwork_view_->set_preferred_size(track_list_metrics::kArtworkSize,
+                                          track_list_metrics::kArtworkSize);
+        artwork_view_->set_corner_radius(
+            track_list_metrics::kArtworkCornerRadius);
+        gtk_widget_add_css_class(artwork_view_->get_widget(), "track-row-artwork");
+        artwork_view_->set_artwork_path(track_.artwork_path);
+        gtk_widget_set_visible(artwork_view_->get_widget(), TRUE);
 
-    GtkWidget* artwork_stack = gtk_overlay_new();
-    gtk_widget_set_size_request(artwork_stack,
-                                track_list_metrics::kArtworkSize,
-                                track_list_metrics::kArtworkSize);
-    gtk_widget_set_visible(artwork_stack, TRUE);
-    gtk_overlay_set_child(GTK_OVERLAY(artwork_stack),
-                          artwork_view_->get_widget());
+        GtkWidget* artwork_stack = gtk_overlay_new();
+        gtk_widget_set_size_request(artwork_stack,
+                                    track_list_metrics::kArtworkSize,
+                                    track_list_metrics::kArtworkSize);
+        g_object_set_data(G_OBJECT(artwork_stack), kTrackColumnSquareKey,
+                          GINT_TO_POINTER(1));
+        gtk_widget_set_visible(artwork_stack, TRUE);
+        gtk_overlay_set_child(GTK_OVERLAY(artwork_stack),
+                              artwork_view_->get_widget());
 
-    equalizer_ = std::make_unique<EqualizerIndicator>();
-    gtk_overlay_add_overlay(GTK_OVERLAY(artwork_stack),
-                            equalizer_->get_widget());
-    gtk_overlay_set_measure_overlay(GTK_OVERLAY(artwork_stack),
-                                    equalizer_->get_widget(), FALSE);
-    gtk_box_append(GTK_BOX(box), artwork_stack);
+        equalizer_ = std::make_unique<EqualizerIndicator>();
+        gtk_overlay_add_overlay(GTK_OVERLAY(artwork_stack),
+                                equalizer_->get_widget());
+        gtk_overlay_set_measure_overlay(GTK_OVERLAY(artwork_stack),
+                                        equalizer_->get_widget(), FALSE);
+        gtk_box_append(GTK_BOX(box), artwork_stack);
+    }
 
     // Title
     title_label_.reset(gtk_label_new(track_.title.c_str()));
@@ -274,18 +340,20 @@ void TrackRow::setup_ui() {
     gtk_widget_set_visible(artist_label_.get(), TRUE);
     gtk_box_append(GTK_BOX(box), artist_label_.get());
 
-    // Album
-    album_label_.reset(gtk_label_new(track_.album.c_str()));
-    g_object_ref_sink(album_label_.get());
-    gtk_widget_add_css_class(album_label_.get(), "track-row-album");
-    gtk_label_set_xalign(GTK_LABEL(album_label_.get()), 0.0);
-    gtk_label_set_ellipsize(GTK_LABEL(album_label_.get()),
-                            PANGO_ELLIPSIZE_END);
-    gtk_widget_set_hexpand(album_label_.get(), FALSE);
-    gtk_widget_set_valign(album_label_.get(), GTK_ALIGN_CENTER);
-    set_track_column_role(album_label_.get(), TrackColumnRole::Album);
-    gtk_widget_set_visible(album_label_.get(), TRUE);
-    gtk_box_append(GTK_BOX(box), album_label_.get());
+    if (options_.show_album) {
+        // Album
+        album_label_.reset(gtk_label_new(track_.album.c_str()));
+        g_object_ref_sink(album_label_.get());
+        gtk_widget_add_css_class(album_label_.get(), "track-row-album");
+        gtk_label_set_xalign(GTK_LABEL(album_label_.get()), 0.0);
+        gtk_label_set_ellipsize(GTK_LABEL(album_label_.get()),
+                                PANGO_ELLIPSIZE_END);
+        gtk_widget_set_hexpand(album_label_.get(), FALSE);
+        gtk_widget_set_valign(album_label_.get(), GTK_ALIGN_CENTER);
+        set_track_column_role(album_label_.get(), TrackColumnRole::Album);
+        gtk_widget_set_visible(album_label_.get(), TRUE);
+        gtk_box_append(GTK_BOX(box), album_label_.get());
+    }
 
     // Duration
     int dur_min = track_.duration / 60;
@@ -305,6 +373,9 @@ void TrackRow::setup_ui() {
     like_button_.reset(gtk_button_new());
     g_object_ref_sink(like_button_.get());
     gtk_button_set_has_frame(GTK_BUTTON(like_button_.get()), FALSE);
+    gtk_widget_set_size_request(like_button_.get(),
+                                track_list_metrics::kLikeButtonSize,
+                                track_list_metrics::kLikeButtonSize);
     gtk_widget_add_css_class(like_button_.get(), "track-row-like-button");
     gtk_widget_set_tooltip_text(like_button_.get(),
                                 liked_ ? "Unlike" : "Like");
@@ -323,6 +394,14 @@ void TrackRow::setup_ui() {
     gtk_widget_set_margin_bottom(like_button_.get(), 0);
     g_signal_connect(like_button_.get(), "clicked",
                      G_CALLBACK(on_like_clicked), this);
+    // Remember star presses so the row's activate signal doesn't also play.
+    auto* like_gesture = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(like_gesture),
+                                  GDK_BUTTON_PRIMARY);
+    g_signal_connect(like_gesture, "pressed",
+                     G_CALLBACK(on_like_pressed), this);
+    gtk_widget_add_controller(like_button_.get(),
+                              GTK_EVENT_CONTROLLER(like_gesture));
     gtk_widget_set_visible(like_button_.get(), TRUE);
     gtk_box_append(GTK_BOX(box), like_button_.get());
 
@@ -331,17 +410,7 @@ void TrackRow::setup_ui() {
     g_signal_connect(widget_.get(), "activate",
                      G_CALLBACK(on_row_activated), this);
 
-    // Use GtkEventControllerMotion for hover detection (GTK4 compatible)
-    // instead of enter-notify-event/leave-notify-event which don't work
-    // on GtkListBoxRow.
-    auto* motion_ctrl = gtk_event_controller_motion_new();
-    g_object_set_data_full(G_OBJECT(motion_ctrl), "track-row-this", this,
-                           nullptr);
-    g_signal_connect(motion_ctrl, "enter", G_CALLBACK(on_enter), this);
-    g_signal_connect(motion_ctrl, "leave", G_CALLBACK(on_leave), this);
-    gtk_widget_add_controller(widget_.get(), motion_ctrl);
-
-    // Press gesture for spring animation
+    // Press gesture for click feedback
     auto* click_gesture = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click_gesture), 0); // All buttons
     g_signal_connect(click_gesture, "pressed", G_CALLBACK(on_pressed), this);
@@ -391,26 +460,21 @@ void TrackRow::on_like_clicked(GtkButton* button, gpointer user_data) {
     if (self->like_cb_) self->like_cb_(self->track_, !self->liked_);
 }
 
+void TrackRow::on_like_pressed(GtkGestureClick* gesture, int n_press,
+                               double x, double y, gpointer user_data) {
+    (void)gesture; (void)n_press; (void)x; (void)y;
+    TrackRow* self = static_cast<TrackRow*>(user_data);
+    self->last_like_press_time_ = g_get_monotonic_time();
+}
+
 void TrackRow::on_row_activated(GtkListBoxRow* row, gpointer user_data) {
     (void)row;
     TrackRow* self = static_cast<TrackRow*>(user_data);
+    // A press on the trailing star, or a click already handled by the row
+    // gesture, must not trigger a second playback.
+    if (g_get_monotonic_time() - self->last_like_press_time_ < 300000) return;
+    if (g_get_monotonic_time() - self->last_row_play_time_ < 300000) return;
     if (self->play_cb_) self->play_cb_(self->track_);
-}
-
-gboolean TrackRow::on_enter(GtkEventControllerMotion* controller, double x,
-                            double y, gpointer user_data) {
-    (void)controller; (void)x; (void)y;
-    TrackRow* self = static_cast<TrackRow*>(user_data);
-    self->animate_hover(true);
-    return FALSE;
-}
-
-gboolean TrackRow::on_leave(GtkEventControllerMotion* controller,
-                            gpointer user_data) {
-    (void)controller;
-    TrackRow* self = static_cast<TrackRow*>(user_data);
-    self->animate_hover(false);
-    return FALSE;
 }
 
 gboolean TrackRow::on_pressed(GtkGestureClick* gesture, int n_press,
@@ -423,19 +487,23 @@ gboolean TrackRow::on_pressed(GtkGestureClick* gesture, int n_press,
 
 gboolean TrackRow::on_released(GtkGestureClick* gesture, int n_press,
                                double x, double y, gpointer user_data) {
-    (void)gesture; (void)n_press; (void)x; (void)y;
+    (void)n_press; (void)x; (void)y;
     TrackRow* self = static_cast<TrackRow*>(user_data);
     self->animate_press(false);
-    return FALSE;
-}
 
-void TrackRow::animate_hover(bool hover) {
-    // Use CSS class for hover effect (lighter than spring animation for list rows)
-    if (hover) {
-        gtk_widget_add_css_class(widget_.get(), "hover");
-    } else {
-        gtk_widget_remove_css_class(widget_.get(), "hover");
+    // The row-level press gesture claims the click, so GtkListBoxRow's
+    // "activate" signal is not reliable here. Drive playback from the gesture
+    // itself; the trailing star has its own gesture and guard below.
+    if (gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture)) !=
+        GDK_BUTTON_PRIMARY) {
+        return FALSE;
     }
+    if (g_get_monotonic_time() - self->last_like_press_time_ < 300000) {
+        return FALSE;
+    }
+    self->last_row_play_time_ = g_get_monotonic_time();
+    if (self->play_cb_) self->play_cb_(self->track_);
+    return FALSE;
 }
 
 void TrackRow::animate_press(bool press) {
@@ -445,6 +513,74 @@ void TrackRow::animate_press(bool press) {
     } else {
         gtk_widget_remove_css_class(widget_.get(), "pressed");
     }
+}
+
+void TrackRow::set_queue_position(int position) {
+    display_track_number_ = position;
+    if (number_label_) {
+        gtk_label_set_text(GTK_LABEL(number_label_.get()), std::to_string(position).c_str());
+    }
+}
+
+
+void TrackRow::create_context_menu() {
+    /* Add right-click gesture for context menu */
+    auto* right_click = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(right_click), GDK_BUTTON_SECONDARY);
+    g_signal_connect(right_click, "pressed", G_CALLBACK(on_context_menu), this);
+    gtk_widget_add_controller(widget_.get(), GTK_EVENT_CONTROLLER(right_click));
+
+    /* Set up action group for menu items using GSimpleActionGroup */
+    auto* action_group = g_simple_action_group_new();
+    g_action_map_add_action_entries(G_ACTION_MAP(action_group),
+        (GActionEntry[]){
+            { "play-next", [](GSimpleAction*, GVariant*, gpointer self) {
+                auto* row = static_cast<TrackRow*>(self);
+                if (row->queue_action_cb_) row->queue_action_cb_(row->track_, "play_next");
+            }, nullptr, nullptr, nullptr },
+            { "add-to-queue", [](GSimpleAction*, GVariant*, gpointer self) {
+                auto* row = static_cast<TrackRow*>(self);
+                if (row->queue_action_cb_) row->queue_action_cb_(row->track_, "add_to_queue");
+            }, nullptr, nullptr, nullptr },
+            { "remove-from-queue", [](GSimpleAction*, GVariant*, gpointer self) {
+                auto* row = static_cast<TrackRow*>(self);
+                if (row->queue_action_cb_) row->queue_action_cb_(row->track_, "remove_from_queue");
+            }, nullptr, nullptr, nullptr },
+            { "play-last", [](GSimpleAction*, GVariant*, gpointer self) {
+                auto* row = static_cast<TrackRow*>(self);
+                if (row->queue_action_cb_) row->queue_action_cb_(row->track_, "play_last");
+            }, nullptr, nullptr, nullptr },
+            { "add-to-playlist", [](GSimpleAction*, GVariant*, gpointer self) {
+                auto* row = static_cast<TrackRow*>(self);
+                if (row->queue_action_cb_) row->queue_action_cb_(row->track_, "add_to_playlist");
+            }, nullptr, nullptr, nullptr },
+        }, 5, this);
+    gtk_widget_insert_action_group(widget_.get(), "track-row", G_ACTION_GROUP(action_group));
+}
+
+void TrackRow::on_context_menu(GtkGestureClick* gesture, int n_press,
+                               double x, double y, gpointer user_data) {
+    (void)gesture; (void)n_press; (void)x; (void)y;
+    TrackRow* self = static_cast<TrackRow*>(user_data);
+    if (!self->queue_action_cb_) return;
+
+    // Create popover menu
+    GtkWidget* popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(self->create_menu_model()));
+    gtk_widget_set_parent(popover, self->widget_.get());
+    GdkRectangle rect = {static_cast<int>(x), static_cast<int>(y), 1, 1};
+    gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
+    gtk_popover_set_position(GTK_POPOVER(popover), GTK_POS_BOTTOM);
+    gtk_widget_set_visible(popover, TRUE);
+}
+
+GMenu* TrackRow::create_menu_model() {
+    GMenu* menu = g_menu_new();
+    g_menu_append(menu, "Play Next", "track-row.play-next");
+    g_menu_append(menu, "Add to Queue", "track-row.add-to-queue");
+    g_menu_append(menu, "Remove from Queue", "track-row.remove-from-queue");
+    g_menu_append(menu, "Play Last", "track-row.play-last");
+    g_menu_append(menu, "Add to Playlist...", "track-row.add-to-playlist");
+    return menu;
 }
 
 } // namespace lollypop

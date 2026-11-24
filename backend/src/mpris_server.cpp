@@ -28,6 +28,7 @@ constexpr const char* kIntrospectionXml = R"(
     <property name="DesktopEntry" type="s" access="read"/>
     <property name="SupportedUriSchemes" type="as" access="read"/>
     <property name="SupportedMimeTypes" type="as" access="read"/>
+    <method name="Raise"/>
   </interface>
   <interface name="org.mpris.MediaPlayer2.Player">
     <property name="PlaybackStatus" type="s" access="read"/>
@@ -200,6 +201,7 @@ struct MprisServer::Impl {
     PlayPauseCallback play_pause_cb;
     StopCallback stop_cb;
     OpenUriCallback open_uri_cb;
+    RaiseCallback raise_cb;
 
     void emit_properties_changed(const char* interface_name,
                                   const std::map<Glib::ustring, Glib::VariantBase>& changed_entries) {
@@ -261,12 +263,23 @@ struct MprisServer::Impl {
         const Glib::VariantContainerBase& parameters,
         const Glib::RefPtr<Gio::DBus::MethodInvocation>& invocation) {
 
-        if (interface_name != kPlayerInterface) {
-            invocation->return_value({});
-            return;
-        }
-
         try {
+            // Handle Raise on the root interface
+            if (interface_name == kRootInterface) {
+                if (method_name == "Raise") {
+                    if (raise_cb) raise_cb();
+                    invocation->return_value({});
+                    return;
+                }
+                invocation->return_value({});
+                return;
+            }
+
+            if (interface_name != kPlayerInterface) {
+                invocation->return_value({});
+                return;
+            }
+
             if (method_name == "Next") {
                 if (next_cb) next_cb();
                 invocation->return_value({});
@@ -582,7 +595,8 @@ void MprisServer::update_shuffle(bool shuffle) {
 
 void MprisServer::update_capabilities(bool can_go_next, bool can_go_previous,
                                       bool can_play, bool can_pause,
-                                      bool can_seek) {
+                                      bool can_seek, bool can_control) {
+    impl_->can_control = can_control;
     impl_->can_go_next = can_go_next;
     impl_->can_go_previous = can_go_previous;
     impl_->can_play = can_play;
@@ -598,6 +612,7 @@ void MprisServer::update_capabilities(bool can_go_next, bool can_go_previous,
     add("CanPlay", can_play);
     add("CanPause", can_pause);
     add("CanSeek", can_seek);
+    add("CanControl", can_control);
     impl_->emit_properties_changed(kPlayerInterface, entries);
 }
 
@@ -636,6 +651,9 @@ void MprisServer::set_stop_callback(StopCallback cb) {
 }
 void MprisServer::set_open_uri_callback(OpenUriCallback cb) {
     impl_->open_uri_cb = std::move(cb);
+}
+void MprisServer::set_raise_callback(RaiseCallback cb) {
+    impl_->raise_cb = std::move(cb);
 }
 
 }  // namespace lollypop

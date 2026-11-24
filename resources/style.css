@@ -4,6 +4,12 @@
  * GTK4 compatible - uses CSS custom properties (GTK 4.16+)
  * Baseline: GTK 4.24.1 - supports custom properties and media queries
  *
+ * Referenced files (kept as comments so other models can follow the wiring):
+ *   frontend/src/ui/pages/AlbumDetailPage.cpp
+ *   frontend/src/ui/components/AlbumCard.cpp
+ *   frontend/src/panels/middle_library.cpp
+ *   resources/lollypop.gresource.xml
+ *
  * NOTE: backdrop-filter is NOT available in GTK CSS. Glass effects use translucent fills only.
  * Custom properties set by ThemeManager at runtime override --accent-color.
  * @font-face is not supported in GTK CSS - font loaded via GResource and ThemeManager
@@ -45,18 +51,19 @@
     --shadow-strong: rgba(0, 0, 0, 0.50);
     --shadow-subtle: rgba(0, 0, 0, 0.20);
 
-    /* Typography scale (Apple type scale in px) */
-    --font-display: 34px;
-    --font-title1: 28px;
-    --font-title2: 22px;
-    --font-title3: 20px;
-    --font-headline: 17px;
-    --font-body: 17px;
-    --font-callout: 16px;
-    --font-subhead: 15px;
-    --font-footnote: 13px;
-    --font-caption1: 12px;
-    --font-caption2: 11px;
+    /* Typography scale (Apple type scale in px, scaled by GTK font size) */
+    --font-scale: 1;
+    --font-display: calc(34px * var(--font-scale));
+    --font-title1: calc(28px * var(--font-scale));
+    --font-title2: calc(22px * var(--font-scale));
+    --font-title3: calc(20px * var(--font-scale));
+    --font-headline: calc(17px * var(--font-scale));
+    --font-body: calc(17px * var(--font-scale));
+    --font-callout: calc(16px * var(--font-scale));
+    --font-subhead: calc(15px * var(--font-scale));
+    --font-footnote: calc(13px * var(--font-scale));
+    --font-caption1: calc(12px * var(--font-scale));
+    --font-caption2: calc(11px * var(--font-scale));
 
     /* Font weights */
     --font-weight-thin: 100;
@@ -75,7 +82,7 @@
     --radius-md: 12px;
     --radius-lg: 16px;
     --radius-xl: 24px;
-    --radius-pill: 999px;
+    --radius-control: 8px;
 
     /* Translucent material tokens — NO backdrop-filter (not in GTK CSS) */
     --glass-ultra-thin-bg: rgba(255, 255, 255, 0.04);
@@ -150,7 +157,7 @@ searchentry {
     color: var(--text-primary);
     background-color: var(--bg-secondary);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-pill);
+    border-radius: var(--radius-control);
     padding: 8px 16px;
 }
 
@@ -241,32 +248,28 @@ listboxrow:selected {
 .sidebar {
     background-color: var(--bg-secondary);
     border-right: 1px solid var(--border-subtle);
-    min-width: 50px;
+    min-width: 0;
 }
 
 .sidebar-header {
     background-color: transparent;
-    min-height: 52px;
+    min-height: 0;
 }
 
 .sidebar-menu-button,
 .sidebar-action-button,
 .sidebar-nav-item {
-    min-width: 50px;
-    min-height: 52px;
-    border-radius: 10px;
+    min-width: 0;
+    min-height: 0;
+    border-radius: 0;
     padding: 0;
     margin: 0;
 }
 
 .sidebar button {
+    min-width: 0;
+    min-height: 0;
     padding: 0;
-}
-
-.sidebar-nav-item:hover,
-.sidebar-menu-button:hover,
-.sidebar-action-button:hover {
-    background-color: var(--bg-hover);
 }
 
 .sidebar button:focus,
@@ -280,23 +283,39 @@ listboxrow:selected {
     margin-top: 0;
 }
 
+/* Square icon slot. The 5px gap lives in the widget margins, so the slot
+ * itself is row-height - 10px and the compact panel is slot + 10px wide. */
+.sidebar-icon-square {
+    min-width: 0;
+    min-height: 0;
+    border-radius: 0;
+    background-color: transparent;
+}
+
+/* Apple's source list uses color and weight for selection: no grey tile,
+ * no hover wash, and no accent color anywhere in the sidebar. */
+.sidebar-nav-item:hover,
+.sidebar-action-button:hover {
+    background-color: transparent;
+}
+
 .sidebar-nav-item.active {
-    background-color: var(--bg-selected);
+    background-color: transparent;
 }
 
 .sidebar-nav-item.active .sidebar-nav-icon {
-    color: var(--accent-color);
+    color: var(--text-primary);
 }
 
 .sidebar-nav-item.active .sidebar-nav-label {
     color: var(--text-primary);
-    font-weight: var(--font-weight-medium);
+    font-weight: var(--font-weight-semibold);
 }
 
 .sidebar-nav-icon {
     color: var(--text-secondary);
-    min-width: 26px;
-    min-height: 22px;
+    min-width: 0;
+    min-height: 0;
 }
 
 .sidebar-nav-label {
@@ -305,33 +324,27 @@ listboxrow:selected {
     font-weight: var(--font-weight-regular);
 }
 
+.sidebar-nav-item:focus,
+.sidebar-action-button:focus {
+    outline: 1px solid rgba(255, 255, 255, 0.35);
+    outline-offset: -2px;
+    box-shadow: none;
+    border: none;
+}
+
 .sidebar.compact {
-    min-width: 50px;
-}
-
-.sidebar.compact .sidebar-nav-item {
-    padding: 0;
-    border-radius: 10px;
-}
-
-.sidebar.compact .sidebar-nav-item .sidebar-nav-label {
     min-width: 0;
 }
 
-.sidebar.compact .sidebar-nav-item:hover {
-    background-color: var(--bg-hover);
-}
-
-.sidebar.compact .sidebar-nav-item .sidebar-nav-icon {
-    color: var(--text-secondary);
+.sidebar.compact .sidebar-nav-item,
+.sidebar.compact .sidebar-action-button {
+    min-width: 0;
+    padding: 0;
+    border-radius: 0;
 }
 
 .sidebar.compact .sidebar-nav-item.active .sidebar-nav-icon {
-    color: var(--accent-color);
-}
-
-.sidebar.compact .sidebar-header {
-    min-height: 52px;
+    color: var(--text-primary);
 }
 
 /* ============================================================================
@@ -384,6 +397,43 @@ listboxrow:selected {
     font-weight: var(--font-weight-semibold);
     letter-spacing: -0.3px;
     margin-bottom: 16px;
+}
+
+/* Large page header shared by Albums and Favourite Albums. */
+.albums-page-header,
+.favourite-albums-page-header {
+    margin: 24px 24px 20px 24px;
+}
+
+.page-title {
+    color: var(--text-primary);
+    font-size: 30px;
+    font-weight: var(--font-weight-semibold);
+    letter-spacing: -0.6px;
+    line-height: 1.15;
+}
+
+.page-subtitle {
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: var(--font-weight-regular);
+    margin-top: 4px;
+}
+
+.page-sort-button {
+    min-height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-control);
+    background-color: rgba(255, 255, 255, 0.06);
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: var(--font-weight-regular);
+}
+
+.page-sort-button:hover {
+    background-color: rgba(255, 255, 255, 0.11);
+    color: var(--text-primary);
 }
 
 .library-placeholder {
@@ -491,14 +541,14 @@ listboxrow:selected {
 
 .home-subtitle {
     color: var(--text-secondary);
-    font-size: 15px;
+    font-size: 16px;
     font-weight: var(--font-weight-regular);
     margin-left: 4px;
 }
 
 .section-title {
     color: var(--text-primary);
-    font-size: 17px;
+    font-size: 18px;
     font-weight: var(--font-weight-semibold);
     letter-spacing: -0.2px;
     margin-bottom: 16px;
@@ -555,6 +605,47 @@ listboxrow:selected {
     box-shadow: 0 0 0 1px var(--border-focus);
 }
 
+/* Apple-style album tiles: transparent chrome, square cover, plain metadata.
+ * The generic button treatment above is intentionally overridden here. */
+.album-card {
+    background-color: transparent;
+    border: 0;
+    border-radius: var(--radius-sm);
+    box-shadow: none;
+    margin: 0;
+    /* GTK buttons carry theme padding by default; remove it so the card's
+     * natural width is exactly the 150px artwork and the grid can fit four
+     * columns at the current middle-panel width. */
+    padding: 0;
+    min-width: 0;
+}
+
+.album-card-content {
+    background-color: transparent;
+}
+
+.album-card:hover {
+    background-color: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    transform: none;
+}
+
+.album-card:hover .album-artwork {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+.album-card:active,
+.album-card.active {
+    transform: scale(0.98);
+    opacity: 0.86;
+}
+
+.album-card:focus {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
+}
+
 .album-artwork,
 .artist-artwork {
     border-radius: var(--radius-sm);
@@ -562,21 +653,28 @@ listboxrow:selected {
     min-height: 0;
 }
 
+.album-card .artwork-view-image,
+.album-card .artwork-view-fallback {
+    border-radius: 6px;
+    box-shadow: none;
+}
+
 .album-title,
 .artist-card .album-title {
     color: var(--text-primary);
     font-size: 14px;
     font-weight: var(--font-weight-semibold);
+    letter-spacing: -0.1px;
     margin-top: 8px;
     margin-bottom: 2px;
 }
 
 .album-artist,
 .artist-card .album-artist {
-    color: var(--text-tertiary);
+    color: var(--text-secondary);
     font-size: 12px;
     font-weight: var(--font-weight-regular);
-    margin-bottom: 12px;
+    margin-bottom: 0;
 }
 
 .track-row {
@@ -592,10 +690,7 @@ listboxrow:selected {
 }
 
 
-.track-row:hover {
-    background-color: var(--bg-hover);
-}
-
+/* No hover feedback on track rows; a centered hairline separates them. */
 .track-row.pressed,
 .track-row:selected {
     background-color: var(--bg-selected);
@@ -622,24 +717,64 @@ listboxrow:selected {
 }
 
 .detail-artwork {
-    border-radius: 18px;
-    box-shadow: 0 20px 56px rgba(0, 0, 0, 0.38);
-    min-width: 0;
-    min-height: 0;
+    border-radius: 12px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
+    min-width: 240px;
+    min-height: 240px;
+}
+
+.detail-artwork-image {
+    border-radius: 12px;
 }
 
 .detail-title {
     color: var(--text-primary);
-    font-size: 32px;
-    font-weight: var(--font-weight-bold);
+    font-size: 28px;
+    font-weight: var(--font-weight-semibold);
     letter-spacing: -0.5px;
-    margin-bottom: 8px;
 }
 
 .detail-meta {
     color: var(--text-secondary);
-    font-size: 15px;
-    margin-bottom: 16px;
+    font-size: 13px;
+    margin-top: 2px;
+}
+
+/* Album detail: actions live beside the artwork, songs fill the width below. */
+.album-detail-page {
+    background-image: linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.04),
+        rgba(255, 255, 255, 0.00) 40%
+    );
+    min-width: 0;
+}
+
+.album-detail-actions {
+    margin-top: 10px;
+}
+
+.album-detail-action-button {
+    min-height: 36px;
+    padding: 0 18px;
+    border-radius: var(--radius-control);
+    background-color: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: var(--font-weight-semibold);
+}
+
+.album-detail-play-button {
+    background-color: var(--accent-color);
+    color: #ffffff;
+}
+
+.album-detail-play-button:hover {
+    background-color: var(--accent-hover);
+}
+
+.album-detail-songs-title {
+    margin-top: 8px;
 }
 
 .search-empty {
@@ -726,6 +861,8 @@ listboxrow:selected {
 .right-now-playing {
     background-color: var(--bg-secondary);
     border-left: 1px solid var(--border-subtle);
+    min-width: 0;
+    min-height: 0;
 }
 
 .now-playing-content,
@@ -821,7 +958,7 @@ listboxrow:selected {
 .now-playing-mode-button {
     min-width: 40px;
     min-height: 40px;
-    border-radius: var(--radius-pill);
+    border-radius: var(--radius-control);
     padding: 8px;
 }
 
@@ -901,6 +1038,81 @@ listboxrow:selected {
     font-weight: var(--font-weight-medium);
 }
 
+/* Synced lyrics (right panel): Apple Music-style scrolling karaoke list. */
+.synced-lyrics-view {
+    background-color: transparent;
+    color: var(--text-primary);
+    min-width: 0;
+}
+
+.lyrics-heading {
+    color: var(--text-tertiary);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.lyrics-scroller {
+    background-color: transparent;
+    min-width: 0;
+}
+
+.lyrics-list {
+    background-color: transparent;
+    padding: 4px 0 28px 0;
+    min-width: 0;
+}
+
+.lyrics-list > row {
+    background-color: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+}
+
+.lyrics-row {
+    background-color: transparent;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-size: 15px;
+    font-weight: var(--font-weight-medium);
+    padding: 6px 12px;
+    min-width: 0;
+}
+
+.lyrics-row.future {
+    color: var(--text-secondary);
+}
+
+.lyrics-row.past {
+    color: var(--text-tertiary);
+}
+
+.lyrics-row.active {
+    color: var(--text-primary);
+}
+
+.lyrics-row.active .lyrics-line {
+    font-size: 18px;
+    font-weight: var(--font-weight-bold);
+    color: var(--text-primary);
+}
+
+.lyrics-row.hover {
+    background-color: var(--bg-hover);
+}
+
+.lyrics-line {
+    background-color: transparent;
+    color: inherit;
+    min-width: 0;
+}
+
+.lyrics-message {
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.6;
+}
+
 .queue-item-art {
     border-radius: var(--radius-xs);
     min-width: 40px;
@@ -938,6 +1150,10 @@ listboxrow:selected {
     min-width: 0;
 }
 
+.bottom-playback-music {
+    min-width: 200px;
+}
+
 .bottom-playback-middle,
 .bottom-playback-center,
 .bottom-playback-right {
@@ -960,7 +1176,7 @@ listboxrow:selected {
 .bottom-playback-title {
     color: var(--text-primary);
     font-size: 14px;
-    font-weight: var(--font-weight-medium);
+    font-weight: var(--font-weight-semibold);
 }
 
 .bottom-playback-artist {
@@ -972,7 +1188,7 @@ listboxrow:selected {
 .bottom-playback-control-button {
     min-width: 36px;
     min-height: 36px;
-    border-radius: var(--radius-pill);
+    border-radius: var(--radius-control);
     padding: 0;
     color: var(--text-primary);
     transition: background-color 100ms ease-out, transform 50ms ease-out;
@@ -1009,26 +1225,8 @@ listboxrow:selected {
 .bottom-playback-mode-button {
     min-width: 30px;
     min-height: 30px;
-    border-radius: var(--radius-pill);
+    border-radius: var(--radius-control);
     padding: 0;
-}
-
-.bottom-playback-volume-dial {
-    min-width: 40px;
-    min-height: 40px;
-    border-radius: var(--radius-pill);
-    padding: 0;
-    background-color: transparent;
-    color: var(--text-primary);
-}
-
-.bottom-playback-volume-dial:hover {
-    background-color: var(--bg-hover);
-}
-
-.bottom-playback-volume-dial:disabled {
-    opacity: 0.4;
-    color: var(--text-disabled);
 }
 
 .bottom-playback-volume-scale,
@@ -1068,7 +1266,7 @@ listboxrow:selected {
 .bottom-playback-pip-button {
     min-width: 30px;
     min-height: 30px;
-    border-radius: var(--radius-pill);
+    border-radius: var(--radius-control);
     padding: 0;
 }
 
@@ -1113,62 +1311,169 @@ scrollbar button {
 }
 
 /* ============================================================================
- * 12. Picture-in-Picture Window
+ * 12. Picture-in-Picture Window (Liquid Glass)
  * ============================================================================ */
 
-.pip-content {
-    background-color: var(--bg-secondary);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg);
-    box-shadow: 0 16px 48px var(--shadow-strong);
+.pip-window {
+    background-color: var(--glass-regular-bg);
+    backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid var(--glass-regular-border);
+    border-radius: 16px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.4);
+}
+.pip-window:focus-within {
+    border-color: var(--accent-color);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.4), 0 0 0 2px var(--accent-color);
+}
+
+.pip-header {
+    margin-bottom: 4px;
+}
+
+.pip-artwork {
+    border-radius: 8px;
+    box-shadow: 0 4px 16px var(--shadow-strong);
+}
+
+.pip-info-box {
+    min-width: 0;
 }
 
 .pip-title {
     color: var(--text-primary);
-    font-size: 15px;
-    font-weight: var(--font-weight-semibold);
+    font-size: 14px;
+    font-weight: 600;
 }
 
-.pip-artist {
+.pip-subtitle {
     color: var(--text-secondary);
-    font-size: 13px;
-    font-weight: var(--font-weight-regular);
+    font-size: 12px;
+    font-weight: 400;
 }
 
-.pip-control-button,
-.pip-volume-button,
+.pip-menu-button,
 .pip-close-button {
-    min-width: 36px;
-    min-height: 36px;
-    border-radius: var(--radius-pill);
-    padding: 8px;
+    min-width: 32px;
+    min-height: 32px;
+    border-radius: 50%;
+    padding: 4px;
     color: var(--text-primary);
 }
-
-.pip-control-button:hover,
-.pip-volume-button:hover {
+.pip-menu-button:hover {
     background-color: var(--bg-hover);
 }
-
-.pip-control-button:disabled {
-    opacity: 0.4;
-    color: var(--text-disabled);
-}
-
 .pip-close-button {
     color: var(--text-tertiary);
 }
-
 .pip-close-button:hover {
+    background-color: var(--destructive-bg);
+    color: white;
+}
+
+/* Transport */
+.pip-transport {
+    margin: 4px 0;
+}
+.pip-control-button {
+    min-width: 40px;
+    min-height: 40px;
+    border-radius: 50%;
+    padding: 8px;
+    color: var(--text-primary);
+}
+.pip-control-button:hover {
+    background-color: var(--bg-hover);
+}
+.pip-play-pause {
+    min-width: 48px;
+    min-height: 48px;
+    border-radius: 50%;
+    background-color: var(--accent-color);
+    color: white;
+    box-shadow: 0 4px 16px var(--accent-shadow);
+}
+.pip-play-pause:hover {
+    background-color: var(--accent-hover);
+}
+.pip-play-pause:active {
+    transform: scale(0.95);
+}
+
+/* Progress */
+.pip-progress-row {
+    margin: 4px 0;
+}
+.pip-time {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-variant-numeric: tabular-nums;
+    min-width: 40px;
+}
+.pip-progress {
+    /* ProgressWave styles */
+}
+
+/* Lyrics */
+.pip-lyrics-row {
+    margin-top: 4px;
+}
+.pip-lyrics {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+/* Footer */
+.pip-footer {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-subtle);
+}
+.pip-mode-button {
+    min-width: 32px;
+    min-height: 32px;
+    border-radius: 50%;
+    padding: 4px;
+    color: var(--text-tertiary);
+}
+.pip-mode-button:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+}
+.pip-mode-button:checked {
+    color: var(--accent-color);
+    background-color: var(--accent-bg);
+}
+.pip-volume-button {
+    min-width: 32px;
+    min-height: 32px;
+    border-radius: 50%;
+    padding: 4px;
+    color: var(--text-tertiary);
+}
+.pip-volume-button:hover {
     background-color: var(--bg-hover);
     color: var(--text-primary);
 }
 
+/* Linked box for mode buttons */
+.linked > *:first-child {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}
+.linked > *:last-child {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+}
+.linked > *:not(:first-child):not(:last-child) {
+    border-radius: 0;
+}
+
+/* Volume scale in popover */
 .pip-volume-scale {
     min-width: 24px;
     min-height: 100px;
 }
-
 .pip-volume-scale slider {
     min-width: 14px;
     min-height: 14px;
@@ -1177,17 +1482,14 @@ scrollbar button {
     border: none;
     box-shadow: 0 2px 8px var(--shadow-subtle);
 }
-
 .pip-volume-scale slider:hover {
     background-color: var(--text-primary);
 }
-
 .pip-volume-scale trough {
     min-width: 4px;
     border-radius: 2px;
     background-color: var(--bg-tertiary);
 }
-
 .pip-volume-scale highlight {
     background-color: var(--accent-color);
     border-radius: 2px;
@@ -1305,7 +1607,7 @@ scrollbar button {
 .main-header-menu {
     min-width: 36px;
     min-height: 36px;
-    border-radius: var(--radius-pill);
+    border-radius: var(--radius-control);
     color: var(--text-secondary);
 }
 
@@ -1328,12 +1630,19 @@ scrollbar button {
 }
 
 /* Grid pages (standalone). The Home grid already has page padding. */
-.albums-grid,
 .artists-grid,
-.playlists-grid,
-.favourite-albums-grid {
+.playlists-grid {
     background-color: transparent;
     padding: 8px 24px 24px 24px;
+    min-width: 0;
+    min-height: 0;
+}
+
+/* Albums pages own their large header, so only the grid needs side padding. */
+.albums-grid,
+.favourite-albums-grid {
+    background-color: transparent;
+    padding: 0 20px 24px 20px;
     min-width: 0;
     min-height: 0;
 }
@@ -1366,15 +1675,15 @@ scrollbar button {
 .artist-detail-content {
     background-image: linear-gradient(
         180deg,
-        rgba(167, 139, 250, 0.10),
-        rgba(167, 139, 250, 0.00) 40%
+        rgba(255, 255, 255, 0.04),
+        rgba(255, 255, 255, 0.00) 40%
     );
     min-width: 0;
 }
 
 .album-detail-content > box > button,
 .artist-detail-content > box > button {
-    border-radius: var(--radius-pill);
+    border-radius: var(--radius-control);
     padding: 10px 20px;
     font-size: var(--font-subhead);
     font-weight: var(--font-weight-semibold);
@@ -1415,26 +1724,30 @@ scrollbar button {
 
 /* Songs table: quiet column labels, compact pill filter, tabular numbers. */
 .songs-header {
-    min-height: 44px;
+    min-height: 0;
+}
+
+.songs-columns {
+    min-height: 22px;
 }
 
 .songs-header button {
-    min-height: 28px;
-    padding: 4px 8px;
+    min-height: 22px;
+    padding: 0 6px;
     border-radius: var(--radius-xs);
 }
 
 .songs-column-header {
     color: var(--text-tertiary);
-    font-size: var(--font-caption1);
+    font-size: calc(14px * var(--font-scale));
     font-weight: var(--font-weight-semibold);
     letter-spacing: 0.5px;
 }
 
 .songs-genre-filter {
-    min-height: 32px;
-    padding: 4px 10px;
-    border-radius: var(--radius-pill);
+    min-height: 35px;
+    padding: 4px 11px;
+    border-radius: var(--radius-control);
     background-color: var(--glass-thin-bg);
     border: 1px solid var(--glass-thin-border);
     color: var(--text-secondary);
@@ -1446,42 +1759,34 @@ scrollbar button {
     color: var(--text-primary);
 }
 
-/* Track row details. C++ toggles .hover/.pressed on the row directly. */
-.track-row.hover {
-    background-color: var(--bg-hover);
-}
-
+/* Track row details. Press/selected states only: no hover feedback. */
 .track-row-duration {
     color: var(--text-tertiary);
-    font-size: var(--font-footnote);
+    font-size: calc(15px * var(--font-scale));
+    font-weight: var(--font-weight-regular);
     font-feature-settings: "tnum";
+    letter-spacing: -0.1px;
 }
 
 .track-row-like-button {
-    min-width: 32px;
-    min-height: 32px;
-    border-radius: var(--radius-pill);
+    min-width: 34px;
+    min-height: 34px;
+    padding: 0;
+    border-radius: var(--radius-control);
     color: var(--text-tertiary);
-    opacity: 0.55;
-    transition: opacity 150ms ease-out, background-color 150ms ease-out;
+    opacity: 0.8;
 }
 
-.track-row.hover .track-row-like-button,
 .track-row.playing .track-row-like-button,
 .track-row-like-button:focus {
     opacity: 1;
-}
-
-.track-row-like-button:hover {
-    background-color: var(--bg-active);
-    color: var(--text-primary);
 }
 
 /* Custom-drawn volume dial and waveform surfaces. */
 .volume-dial {
     min-width: 48px;
     min-height: 48px;
-    border-radius: var(--radius-pill);
+    border-radius: var(--radius-control);
     background-color: transparent;
     color: var(--accent-color);
     transition: background-color 150ms ease-out, transform 150ms ease-out;
@@ -1536,10 +1841,7 @@ searchentry:focus,
 .now-playing-mode-button:focus,
 .pip-control-button:focus,
 .pip-volume-button:focus,
-.pip-close-button:focus,
-.sidebar-menu-button:focus,
-.sidebar-action-button:focus,
-.sidebar-nav-item:focus {
+.pip-close-button:focus {
     outline: 2px solid var(--border-focus);
     outline-offset: 2px;
 }
@@ -1559,41 +1861,63 @@ searchentry:focus,
     }
 }
 /* ============================================================================
- * 18. Apple Music-style compact track rows (artwork, 20px height)
+ * 18. Apple HIG-inspired compact track rows (~53px touch targets)
  * ============================================================================ */
 
 .track-row {
-    min-height: 20px;
+    min-height: 53px;
     padding: 0;
+}
+
+/* Centered 90%-width hairline between rows. */
+.track-row:not(:last-child) {
+    background-image: linear-gradient(to right,
+                                      var(--border-subtle),
+                                      var(--border-subtle));
+    background-repeat: no-repeat;
+    background-position: center bottom;
+    background-size: 90% 1px;
 }
 
 .track-row-artwork .artwork-view-image,
 .track-row-artwork .artwork-view-fallback {
-    border-radius: 3px;
+    border-radius: 8px;
     box-shadow: none;
 }
 
 .track-row-like-button {
-    min-width: 20px;
-    min-height: 20px;
+    min-width: 34px;
+    min-height: 34px;
     padding: 0;
 }
 
-/* Typography hierarchy and pinned-header polish for the music list. */
+.track-row-number {
+    color: var(--text-tertiary);
+    font-size: calc(15px * var(--font-scale));
+    font-weight: var(--font-weight-regular);
+    font-variant-numeric: tabular-nums;
+}
+
+/* HIG type scale: headline / subhead / footnote, semibold and normal only. */
 .track-row-title {
     color: var(--text-primary);
-    font-size: 13px;
-    font-weight: var(--font-weight-medium);
+    font-size: calc(20px * var(--font-scale));
+    font-weight: var(--font-weight-semibold);
+    letter-spacing: -0.3px;
 }
 
 .track-row-artist {
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: calc(17px * var(--font-scale));
+    font-weight: var(--font-weight-regular);
+    letter-spacing: -0.1px;
 }
 
 .track-row-album {
     color: var(--text-tertiary);
-    font-size: 12px;
+    font-size: calc(15px * var(--font-scale));
+    font-weight: var(--font-weight-regular);
+    letter-spacing: -0.1px;
 }
 
 .track-row.playing .track-row-title {
@@ -1607,7 +1931,8 @@ searchentry:focus,
 }
 
 .songs-column-header {
-    font-size: 11px;
+    font-size: calc(14px * var(--font-scale));
+    font-weight: var(--font-weight-regular);
 }
 
 .middle-sticky-header {

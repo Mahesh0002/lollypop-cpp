@@ -63,7 +63,7 @@ bool ArtworkManager::request_artwork(const ArtworkRequest& request,
                                       ArtworkReadyCallback cb) {
     // If already cached, deliver immediately (no extraction needed).
     {
-        CacheEntry entry;
+        CacheManagerEntry entry;
         if (cache_ && cache_->get(request.key, entry)) {
             if (cb) cb(request.key, entry.file_path);
             return true;
@@ -99,7 +99,7 @@ bool ArtworkManager::request_artwork(const ArtworkRequest& request,
 bool ArtworkManager::get_cached_artwork(const std::string& key,
                                          std::string& artwork_path) const {
     if (!cache_) return false;
-    CacheEntry entry;
+    CacheManagerEntry entry;
     if (!cache_->get(key, entry)) return false;
     artwork_path = entry.file_path;
     return true;
@@ -152,7 +152,7 @@ void ArtworkManager::process_request(const QueuedRequest& queued) {
     std::string artwork_path;
 
     // 1. Check cache first.
-    CacheEntry entry;
+    CacheManagerEntry entry;
     if (cache_ && cache_->get(req.key, entry)) {
         artwork_path = entry.file_path;
     }

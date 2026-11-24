@@ -48,10 +48,26 @@ public:
     void set_volume(double volume);  // 0.0 - 1.0
     double get_volume() const;
 
+    // Attempt to recover from an error by rebuilding the pipeline and
+    // reloading the last track. Returns true if recovery succeeded.
+    bool recover_from_error();
+
+    // Gapless playback support
+    void set_gapless_enabled(bool enabled);
+    bool is_gapless_enabled() const;
+    // Preload the next track for gapless transition. Call when the current track
+    // is near end (e.g., within 2 seconds). The track will be ready when EOS fires.
+    void preload_next_track(const std::string& file_path);
+    // Called internally when the preloaded track should become active.
+    void commit_next_track();
+
     // State queries
     PlaybackState get_state() const;
     std::optional<double> get_position() const;
     std::optional<double> get_duration() const;
+
+    // Get the visualization branch sample rate (for VisualizerEngine FFT accuracy)
+    double get_viz_sample_rate() const;
 
     // Callbacks
     void set_position_callback(PositionCallback cb);
