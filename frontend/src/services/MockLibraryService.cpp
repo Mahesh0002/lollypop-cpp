@@ -60,6 +60,25 @@ std::vector<Track> MockLibraryService::get_playlist_tracks(
     return {};
 }
 
+bool MockLibraryService::create_playlist(const std::string& /*name*/) {
+    return false;
+}
+
+bool MockLibraryService::rename_playlist(const std::string& /*playlist_id*/,
+                                         const std::string& /*name*/) {
+    return false;
+}
+
+bool MockLibraryService::delete_playlist(const std::string& /*playlist_id*/) {
+    return false;
+}
+
+bool MockLibraryService::add_tracks_to_playlist(
+    const std::string& /*playlist_id*/,
+    const std::vector<std::string>& /*track_ids*/) {
+    return false;
+}
+
 std::vector<std::string> MockLibraryService::get_all_genres() {
     return {};
 }
@@ -138,6 +157,11 @@ std::string MockLibraryService::get_artwork_path_for_artist(
 }
 
 void MockLibraryService::set_library_changed_callback(
+    LibraryChangedCallback /*cb*/) {
+    // Mock: no-op
+}
+
+void MockLibraryService::add_library_changed_callback(
     LibraryChangedCallback /*cb*/) {
     // Mock: no-op
 }

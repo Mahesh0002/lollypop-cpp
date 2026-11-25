@@ -64,6 +64,7 @@ installed) or switch the session language to Arabic/Hebrew and restart.
 - [ ] Enter/Space activates the focused tile, favourite, row, or button.
 - [ ] Pointer hover and keyboard focus reveal the same favourite control.
 - [ ] No tooltip appears without an equivalent accessible name.
+- [ ] Playlist add/rename/delete dialogs accept Enter/Escape and return focus to the invoking tile.
 
 ## 4. Reduced motion
 

@@ -13,6 +13,7 @@
 #include "ui/components/ArtworkView.hpp"
 #include "ui/components/TrackRow.hpp"
 #include "ui/components/SyncedLyricsView.hpp"
+#include "ui/components/PlaylistDialogs.hpp"
 #include "ui/theme/ThemeManager.hpp"
 #include "lyrics/LyricTypes.hpp"
 #include "util/accessibility.hpp"
@@ -865,8 +866,9 @@ void RightNowPlaying::populate_queue(
             } else if (std::strcmp(action, "play_last") == 0) {
                 enqueue_later(false);
             } else if (std::strcmp(action, "add_to_playlist") == 0) {
-                // TODO: Show playlist selection dialog; queue is the fallback.
-                enqueue_later(false);
+                playlist_dialogs::show_add_to_playlist_dialog(
+                    main_window_->get_window(), library_service_,
+                    {action_track_id});
             }
         });
 

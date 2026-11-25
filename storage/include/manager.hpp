@@ -84,6 +84,7 @@ public:
     Playlist get_playlist(const std::string& playlist_id);
     std::vector<Track> get_smart_playlist_tracks(const std::string& playlist_id);
     bool create_playlist(const std::string& name);
+    bool rename_playlist(const std::string& playlist_id, const std::string& name);
     bool create_smart_playlist(const std::string& name, const std::string& criteria);
     bool update_smart_playlist(const std::string& playlist_id,
                                const std::string& name,

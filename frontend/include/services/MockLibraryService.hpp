@@ -35,6 +35,13 @@ public:
     std::vector<Playlist> get_all_playlists() override;
     Playlist get_playlist(const std::string& playlist_id) override;
     std::vector<Track> get_playlist_tracks(const std::string& playlist_id) override;
+    bool create_playlist(const std::string& name) override;
+    bool rename_playlist(const std::string& playlist_id,
+                         const std::string& name) override;
+    bool delete_playlist(const std::string& playlist_id) override;
+    bool add_tracks_to_playlist(
+        const std::string& playlist_id,
+        const std::vector<std::string>& track_ids) override;
 
     // Genres
     std::vector<std::string> get_all_genres() override;
@@ -71,6 +78,7 @@ public:
 
     // Callbacks
     void set_library_changed_callback(LibraryChangedCallback cb) override;
+    void add_library_changed_callback(LibraryChangedCallback cb) override;
 
 private:
     LibraryChangedCallback library_changed_cb_;

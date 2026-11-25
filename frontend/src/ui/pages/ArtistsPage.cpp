@@ -8,6 +8,7 @@
 #include "ui/pages/ArtistsPage.hpp"
 #include "main_window.hpp"
 #include "services/IPlayerService.hpp"
+#include "ui/components/PlaylistDialogs.hpp"
 #include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
@@ -312,13 +313,25 @@ void ArtistsPage::populate(const std::vector<Artist>& artists) {
                         std::shuffle(track_ids.begin(), track_ids.end(), g);
                         if (!track_ids.empty()) backend->play_tracks(track_ids, 0);
                     }
-                } else if (std::strcmp(action, "add_to_queue") == 0 ||
-                           std::strcmp(action, "add_to_playlist") == 0) {
+                } else if (std::strcmp(action, "add_to_queue") == 0) {
                     if (library_service_) {
-                        auto tracks = library_service_->get_tracks_by_artist(a.id);
+                        auto tracks =
+                            library_service_->get_tracks_by_artist(a.name);
                         for (const auto& track : tracks) {
                             backend->enqueue_track(track.id, false);
                         }
+                    }
+                } else if (std::strcmp(action, "add_to_playlist") == 0) {
+                    if (library_service_) {
+                        auto tracks =
+                            library_service_->get_tracks_by_artist(a.name);
+                        std::vector<std::string> track_ids;
+                        for (const auto& track : tracks) {
+                            track_ids.push_back(track.id);
+                        }
+                        playlist_dialogs::show_add_to_playlist_dialog(
+                            main_window_->get_window(), library_service_,
+                            track_ids);
                     }
                 }
             });

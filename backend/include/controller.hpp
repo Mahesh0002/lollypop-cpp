@@ -125,11 +125,16 @@ public:
     Playlist get_playlist(const std::string& playlist_id);
     std::vector<Track> get_playlist_tracks(const std::string& playlist_id);
     std::vector<Track> get_smart_playlist_tracks(const std::string& playlist_id);
-    void create_playlist(const std::string& name);
+    bool create_playlist(const std::string& name) override;
+    bool rename_playlist(const std::string& playlist_id,
+                         const std::string& name) override;
+    bool delete_playlist(const std::string& playlist_id) override;
+    bool add_tracks_to_playlist(
+        const std::string& playlist_id,
+        const std::vector<std::string>& track_ids) override;
     void create_smart_playlist(const std::string& name, const std::string& criteria);
     void update_smart_playlist(const std::string& id, const std::string& name,
                                const std::string& criteria);
-    void delete_playlist(const std::string& playlist_id);
     void add_track_to_playlist(const std::string& playlist_id, const std::string& track_id);
     void remove_track_from_playlist(const std::string& playlist_id, const std::string& track_id);
 

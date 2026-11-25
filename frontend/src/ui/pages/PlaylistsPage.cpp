@@ -5,6 +5,7 @@
 #include "ui/pages/PlaylistsPage.hpp"
 #include "main_window.hpp"
 #include "services/IPlayerService.hpp"
+#include "ui/components/PlaylistDialogs.hpp"
 #include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
@@ -87,11 +88,11 @@ void PlaylistsPage::populate(const std::vector<Playlist>& playlists) {
                     backend->enqueue_track(track_id, false);
                 }
             } else if (std::strcmp(action, "rename") == 0) {
-                // TODO: Show rename dialog
-                std::cout << "[PlaylistsPage] Rename playlist: " << p.name << std::endl;
+                playlist_dialogs::show_rename_playlist_dialog(
+                    main_window_->get_window(), library_service_, p);
             } else if (std::strcmp(action, "delete") == 0) {
-                // TODO: Implement delete_playlist in ILibraryService
-                std::cout << "[PlaylistsPage] Delete playlist: " << p.id << std::endl;
+                playlist_dialogs::show_delete_playlist_dialog(
+                    main_window_->get_window(), library_service_, p);
             }
         });
 

@@ -5,6 +5,7 @@
 #include "ui/pages/FavouriteAlbumsPage.hpp"
 #include "main_window.hpp"
 #include "services/IPlayerService.hpp"
+#include "ui/components/PlaylistDialogs.hpp"
 #include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
@@ -134,11 +135,8 @@ void FavouriteAlbumsPage::populate(const std::vector<Album>& albums) {
                     backend->enqueue_track(a.track_ids[i], false);
                 }
             } else if (std::strcmp(action, "add_to_playlist") == 0) {
-                // TODO: Show playlist selection dialog
-                // For now, add to queue as fallback
-                for (const auto& track_id : a.track_ids) {
-                    backend->enqueue_track(track_id, false);
-                }
+                playlist_dialogs::show_add_to_playlist_dialog(
+                    main_window_->get_window(), library_service_, a.track_ids);
             } else if (std::strcmp(action, "toggle_favorite") == 0) {
                 if (library_service_) {
                     library_service_->toggle_favorite_album(a.id);

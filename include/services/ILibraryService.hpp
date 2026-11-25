@@ -37,6 +37,13 @@ public:
     virtual std::vector<Playlist> get_all_playlists() = 0;
     virtual Playlist get_playlist(const std::string& playlist_id) = 0;
     virtual std::vector<Track> get_playlist_tracks(const std::string& playlist_id) = 0;
+    virtual bool create_playlist(const std::string& name) = 0;
+    virtual bool rename_playlist(const std::string& playlist_id,
+                                 const std::string& name) = 0;
+    virtual bool delete_playlist(const std::string& playlist_id) = 0;
+    virtual bool add_tracks_to_playlist(
+        const std::string& playlist_id,
+        const std::vector<std::string>& track_ids) = 0;
 
     // --- Genres ---
     virtual std::vector<std::string> get_all_genres() = 0;

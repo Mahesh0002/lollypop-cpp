@@ -1191,19 +1191,48 @@ Playlist BackendController::get_playlist(const std::string& playlist_id) {
     return storage_->get_playlist(playlist_id);
 }
 
-void BackendController::create_playlist(const std::string& name) {
-    storage_->create_playlist(name);
+bool BackendController::create_playlist(const std::string& name) {
+    const bool ok = storage_->create_playlist(name);
+    if (!ok) return false;
     invalidate_read_caches();
+    emit_library_changed();
+    return true;
 }
 
-void BackendController::delete_playlist(const std::string& playlist_id) {
-    storage_->delete_playlist(playlist_id);
+bool BackendController::rename_playlist(const std::string& playlist_id,
+                                        const std::string& name) {
+    const bool ok = storage_->rename_playlist(playlist_id, name);
+    if (!ok) return false;
     invalidate_read_caches();
+    emit_library_changed();
+    return true;
+}
+
+bool BackendController::delete_playlist(const std::string& playlist_id) {
+    const bool ok = storage_->delete_playlist(playlist_id);
+    if (!ok) return false;
+    invalidate_read_caches();
+    emit_library_changed();
+    return true;
+}
+
+bool BackendController::add_tracks_to_playlist(
+    const std::string& playlist_id,
+    const std::vector<std::string>& track_ids) {
+    bool ok = true;
+    for (const auto& track_id : track_ids) {
+        if (!storage_->add_track_to_playlist(playlist_id, track_id)) {
+            ok = false;
+        }
+    }
+    if (!ok) return false;
+    invalidate_read_caches();
+    emit_library_changed();
+    return true;
 }
 
 void BackendController::add_track_to_playlist(const std::string& playlist_id, const std::string& track_id) {
-    storage_->add_track_to_playlist(playlist_id, track_id);
-    invalidate_read_caches();
+    (void)add_tracks_to_playlist(playlist_id, {track_id});
 }
 
 void BackendController::remove_track_from_playlist(const std::string& playlist_id, const std::string& track_id) {

@@ -1735,6 +1735,23 @@ bool StorageManager::create_playlist(const std::string& name) {
     return rc == SQLITE_DONE;
 }
 
+bool StorageManager::rename_playlist(const std::string& playlist_id,
+                                     const std::string& name) {
+    if (name.empty()) return false;
+    const char* sql =
+        "UPDATE playlists SET name = ?, date_modified = ? WHERE id = ?;";
+    sqlite3_stmt* stmt;
+    if (sqlite3_prepare_v2(impl_->db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        return false;
+    }
+    sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(stmt, 2, now_epoch_seconds());
+    sqlite3_bind_text(stmt, 3, playlist_id.c_str(), -1, SQLITE_TRANSIENT);
+    const int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return rc == SQLITE_DONE && sqlite3_changes(impl_->db) > 0;
+}
+
 bool StorageManager::delete_playlist(const std::string& playlist_id) {
     const char* sql = "DELETE FROM playlists WHERE id = ?;";
     sqlite3_stmt* stmt;

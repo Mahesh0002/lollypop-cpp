@@ -28,6 +28,7 @@ set(FRONTEND_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/ErrorState.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/HomePage.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/LoadingState.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/PlaylistDialogs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/PlaylistItem.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/TrackRow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/VolumeDial.cpp
@@ -64,6 +65,7 @@ set(FRONTEND_HEADERS
     ${CMAKE_SOURCE_DIR}/include/ui/components/AlbumCard.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/ui/components/AppleAlbumTile.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/ui/components/AppleArtistTile.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/ui/components/PlaylistDialogs.hpp
     ${CMAKE_SOURCE_DIR}/include/ui/components/ArtistItem.hpp
     ${CMAKE_SOURCE_DIR}/include/ui/components/ArtworkView.hpp
     ${CMAKE_SOURCE_DIR}/include/ui/components/EmptyState.hpp
