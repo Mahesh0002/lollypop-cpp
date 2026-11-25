@@ -1,7 +1,8 @@
 /**
  * Lollypop C++ - Artist Detail Page
  *
- * Artist artwork, name, albums, and tracks (plan Section 5.11).
+ * Album-style detail hero: square artwork on the top-left, artist metadata
+ * and actions on the right, with the artist's tracks below.
  */
 
 #pragma once
@@ -9,16 +10,17 @@
 #include <gtk/gtk.h>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "ui/components/LibraryPage.hpp"
+#include "ui/components/PageStateHost.hpp"
 #include "ui/components/TrackRow.hpp"
-#include "ui/components/ArtworkView.hpp"
-#include "ui/components/EmptyState.hpp"
 #include "types.hpp"
 #include "services/ILibraryService.hpp"
 
 namespace lollypop {
 
+class ArtworkView;
 class MainWindow;
 
 class ArtistDetailPage : public LibraryPage {
@@ -29,7 +31,7 @@ public:
     ArtistDetailPage(const ArtistDetailPage&) = delete;
     ArtistDetailPage& operator=(const ArtistDetailPage&) = delete;
 
-    GtkWidget* get_widget() const override { return widget_.get(); }
+    GtkWidget* get_widget() const override { return host_.get_widget(); }
     void refresh() override;
     std::string get_page_id() const override { return "artist_detail"; }
 
@@ -42,14 +44,15 @@ private:
             if (w) g_object_unref(w);
         }
     };
-    std::unique_ptr<GtkWidget, WidgetDeleter> widget_;
-    std::unique_ptr<GtkWidget, WidgetDeleter> state_container_;
+    PageStateHost host_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> widget_;  // page content, owned by host_
     std::unique_ptr<GtkWidget, WidgetDeleter> content_box_;
     std::unique_ptr<ArtworkView> artwork_view_;
-    std::unique_ptr<GtkWidget, WidgetDeleter> name_label_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> title_label_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> secondary_label_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> meta_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> track_list_box_;
     std::unique_ptr<GtkWidget, WidgetDeleter> no_tracks_label_;
-    std::unique_ptr<EmptyState> artist_missing_state_;
 
     MainWindow* main_window_;
     ILibraryService* library_service_;
@@ -62,6 +65,11 @@ private:
     void populate_tracks(const std::vector<Track>& tracks);
     void on_track_played(const Track& track);
     void on_track_liked(const Track& track, bool liked);
+    void on_play_artist();
+    void on_shuffle_artist();
+
+    static void on_play_artist_trampoline(GtkButton* button, gpointer user_data);
+    static void on_shuffle_artist_trampoline(GtkButton* button, gpointer user_data);
 };
 
 } // namespace lollypop

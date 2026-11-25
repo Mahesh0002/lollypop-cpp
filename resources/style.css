@@ -765,7 +765,8 @@ listboxrow:selected {
 }
 
 /* Album detail: actions live beside the artwork, songs fill the width below. */
-.album-detail-page {
+.album-detail-page,
+.artist-detail-page {
     background-image: linear-gradient(
         180deg,
         rgba(255, 255, 255, 0.04),
