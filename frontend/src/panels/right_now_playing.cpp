@@ -220,7 +220,9 @@ void RightNowPlaying::create_artwork_section() {
     artwork_view_->set_corner_radius(12.0);
 
     GtkWidget* artwork = artwork_view_->get_widget();
-    gtk_widget_set_hexpand(artwork, TRUE);
+    // Keep the requested square allocation and center it inside the pane;
+    // expanding the widget itself would widen it into a rectangle.
+    gtk_widget_set_hexpand(artwork, FALSE);
     gtk_widget_set_halign(artwork, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(artwork, GTK_ALIGN_CENTER);
     safe_box_append(GTK_BOX(artwork_box_), artwork);

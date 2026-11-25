@@ -336,8 +336,6 @@ button {
     border-left: 1px solid var(--border-subtle);
 }
 
-.apple-album-name:dir(rtl),
-.apple-album-artist:dir(rtl) {
-    text-align: right;
-}
+/* GtkLabel xalign already follows the text direction, so LTR/RTL metadata
+ * alignment is set in C++ rather than with unsupported CSS text-align. */
 

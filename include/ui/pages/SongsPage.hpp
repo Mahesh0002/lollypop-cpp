@@ -15,6 +15,7 @@
 #include <mutex>
 
 #include "ui/components/LibraryPage.hpp"
+#include "ui/components/PageStateHost.hpp"
 #include "ui/components/TrackListMetrics.hpp"
 #include "ui/components/TrackRow.hpp"
 #include "services/ILibraryService.hpp"
@@ -31,7 +32,7 @@ public:
     SongsPage(const SongsPage&) = delete;
     SongsPage& operator=(const SongsPage&) = delete;
 
-    GtkWidget* get_widget() const { return widget_.get(); }
+    GtkWidget* get_widget() const override { return host_.get_widget(); }
     GtkWidget* get_header_widget() const { return header_box_.get(); }
     void reattach_header();
     void refresh() override;
@@ -45,6 +46,7 @@ private:
             if (w) g_object_unref(w);
         }
     };
+    PageStateHost host_;
     std::unique_ptr<GtkWidget, WidgetDeleter> widget_;  // Box (content: header + ListBox)
     std::unique_ptr<GtkWidget, WidgetDeleter> header_box_;
     std::unique_ptr<GtkWidget, WidgetDeleter> list_box_;

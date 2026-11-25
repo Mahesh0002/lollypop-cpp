@@ -34,7 +34,12 @@ constexpr int kDetailHeaderHeight = 240;
 } // namespace
 
 AlbumDetailPage::AlbumDetailPage(MainWindow* main_window, ILibraryService* library_service)
-    : main_window_(main_window), library_service_(library_service) {
+    : host_("disc-symbolic", "Album not found",
+            "This album is no longer in your library.",
+            "Album unavailable",
+            "The library could not be loaded. Try again.",
+            [this] { refresh(); }),
+      main_window_(main_window), library_service_(library_service) {
     setup_ui();
 }
 
@@ -200,11 +205,32 @@ void AlbumDetailPage::setup_ui() {
     gtk_widget_set_visible(track_list_box_.get(), TRUE);
     safe_box_append(GTK_BOX(music_box), track_list_box_.get());
 
+    // Keep the album header visible when the album has no playable tracks.
+    no_tracks_label_.reset(gtk_label_new("No tracks available for this album."));
+    g_object_ref_sink(no_tracks_label_.get());
+    gtk_widget_add_css_class(no_tracks_label_.get(), "empty-state-description");
+    gtk_label_set_wrap(GTK_LABEL(no_tracks_label_.get()), TRUE);
+    gtk_label_set_max_width_chars(GTK_LABEL(no_tracks_label_.get()), 40);
+    gtk_label_set_xalign(GTK_LABEL(no_tracks_label_.get()), 0.5);
+    gtk_widget_set_halign(no_tracks_label_.get(), GTK_ALIGN_CENTER);
+    gtk_widget_set_margin_top(no_tracks_label_.get(), 24);
+    gtk_widget_set_margin_bottom(no_tracks_label_.get(), 24);
+    gtk_widget_set_visible(no_tracks_label_.get(), FALSE);
+    safe_box_append(GTK_BOX(music_box), no_tracks_label_.get());
+
     safe_box_append(GTK_BOX(widget_.get()), content_box_.get());
+    host_.set_content(widget_.get());
 }
 
 void AlbumDetailPage::refresh() {
-    if (!library_service_ || current_album_id_.empty()) return;
+    if (!library_service_) {
+        host_.show_error();
+        return;
+    }
+    if (current_album_id_.empty()) {
+        host_.show_empty();
+        return;
+    }
 
     // The album grid is built from get_all_albums(), so resolve through the
     // same query as a fallback when the single-album lookup misses. This also
@@ -225,6 +251,7 @@ void AlbumDetailPage::refresh() {
     if (album.id.empty()) {
         std::cerr << "[AlbumDetailPage] album not found: " << current_album_id_
                   << std::endl;
+        host_.show_empty();
         return;
     }
     if (album.track_ids.empty()) {
@@ -234,6 +261,7 @@ void AlbumDetailPage::refresh() {
     }
 
     current_album_ = album;
+    host_.show_content();
     populate_album(album);
 }
 
@@ -276,6 +304,9 @@ void AlbumDetailPage::populate_album(const Album& album) {
     // Load tracks - use safe helper to avoid invalid sibling pointers after unparenting
     safe_list_box_remove_all(GTK_LIST_BOX(track_list_box_.get()));
     track_rows_.clear();
+    const bool has_tracks = !tracks.empty();
+    gtk_widget_set_visible(track_list_box_.get(), has_tracks);
+    gtk_widget_set_visible(no_tracks_label_.get(), !has_tracks);
     populate_tracks(tracks);
 }
 

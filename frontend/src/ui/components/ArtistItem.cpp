@@ -51,6 +51,10 @@ void ArtistItem::setup_ui() {
     artwork_view_ = std::make_unique<ArtworkView>();
     artwork_view_->set_preferred_size(140, 140);
     gtk_widget_add_css_class(artwork_view_->get_widget(), "artist-artwork");
+    // The card is wider than the artwork request. Center the square instead
+    // of letting the vertical box stretch it to the card's inner width.
+    gtk_widget_set_hexpand(artwork_view_->get_widget(), FALSE);
+    gtk_widget_set_halign(artwork_view_->get_widget(), GTK_ALIGN_CENTER);
     artwork_view_->set_artwork_path(artist_.artwork_path);
     gtk_box_append(GTK_BOX(box), artwork_view_->get_widget());
 

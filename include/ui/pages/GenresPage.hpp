@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "ui/components/LibraryPage.hpp"
+#include "ui/components/PageStateHost.hpp"
 #include "services/ILibraryService.hpp"
 
 namespace lollypop {
@@ -27,7 +28,7 @@ public:
     GenresPage(const GenresPage&) = delete;
     GenresPage& operator=(const GenresPage&) = delete;
 
-    GtkWidget* get_widget() const { return widget_; }
+    GtkWidget* get_widget() const override { return host_.get_widget(); }
     void refresh() override;
     std::string get_page_id() const override { return "genres"; }
 
@@ -37,7 +38,7 @@ private:
             if (w) g_object_unref(w);
         }
     };
-    GtkWidget* widget_ = nullptr;  // ListBox (content), owned by list_box_
+    PageStateHost host_;
     std::unique_ptr<GtkWidget, WidgetDeleter> list_box_;
 
     MainWindow* main_window_;

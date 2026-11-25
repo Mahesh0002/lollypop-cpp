@@ -16,14 +16,18 @@
 namespace lollypop {
 
 PlaylistsPage::PlaylistsPage(MainWindow* main_window, ILibraryService* library_service)
-    : main_window_(main_window), library_service_(library_service) {
+    : host_("view-list-symbolic", "No playlists yet",
+            "Create a playlist to group songs you listen to together.",
+            "Playlists unavailable",
+            "The library could not be loaded. Try again.",
+            [this] { refresh(); }),
+      main_window_(main_window), library_service_(library_service) {
     setup_ui();
 }
 
 PlaylistsPage::~PlaylistsPage() = default;
 
 void PlaylistsPage::setup_ui() {
-    // Root widget is the FlowBox directly (implements GtkScrollable)
     grid_.reset(gtk_flow_box_new());
     g_object_ref_sink(grid_.get());
     gtk_widget_add_css_class(grid_.get(), "playlists-grid");
@@ -35,8 +39,7 @@ void PlaylistsPage::setup_ui() {
     gtk_widget_set_hexpand(grid_.get(), TRUE);
     gtk_widget_set_vexpand(grid_.get(), TRUE);
     gtk_widget_set_visible(grid_.get(), TRUE);
-
-    widget_ = grid_.get();
+    host_.set_content(grid_.get());
 }
 
 void PlaylistsPage::refresh() {
@@ -44,10 +47,19 @@ void PlaylistsPage::refresh() {
     safe_flow_box_remove_all(GTK_FLOW_BOX(grid_.get()));
     playlist_items_.clear();
 
-    if (library_service_) {
-        auto playlists = library_service_->get_all_playlists();
-        populate(playlists);
+    if (!library_service_) {
+        host_.show_error();
+        return;
     }
+
+    auto playlists = library_service_->get_all_playlists();
+    if (playlists.empty()) {
+        host_.show_empty();
+        return;
+    }
+
+    host_.show_content();
+    populate(playlists);
 }
 
 void PlaylistsPage::populate(const std::vector<Playlist>& playlists) {

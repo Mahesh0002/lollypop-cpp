@@ -4,11 +4,13 @@
 
 #include "ui/components/PlaylistItem.hpp"
 #include "main_window.hpp"
+#include "util/accessibility.hpp"
 
 #include <gtk/gtk.h>
 #include <gio/gio.h>
 #include <cstring>
 #include <iostream>
+#include <string>
 
 namespace lollypop {
 
@@ -24,6 +26,10 @@ void PlaylistItem::setup_ui() {
     g_object_ref_sink(widget_.get());
     gtk_button_set_has_frame(GTK_BUTTON(widget_.get()), FALSE);
     gtk_widget_add_css_class(widget_.get(), "album-card");
+    const std::string tooltip = "View " + playlist_.name;
+    const std::string accessible_label = "Playlist: " + playlist_.name;
+    gtk_widget_set_tooltip_text(widget_.get(), tooltip.c_str());
+    accessibility::set_label(widget_.get(), accessible_label.c_str());
     gtk_widget_set_hexpand(widget_.get(), FALSE);
     gtk_widget_set_valign(widget_.get(), GTK_ALIGN_START);
     gtk_widget_set_size_request(widget_.get(), 160, 220);
@@ -46,6 +52,10 @@ void PlaylistItem::setup_ui() {
                                 GTK_CONTENT_FIT_COVER);
     gtk_widget_add_css_class(artwork_image_.get(), "album-artwork");
     gtk_widget_set_size_request(artwork_image_.get(), 140, 140);
+    // Keep the placeholder square inside the wider card instead of letting
+    // the vertical box stretch it.
+    gtk_widget_set_hexpand(artwork_image_.get(), FALSE);
+    gtk_widget_set_halign(artwork_image_.get(), GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(box), artwork_image_.get());
 
     // Name

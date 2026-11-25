@@ -19,7 +19,12 @@ namespace lollypop {
 
 FavouriteAlbumsPage::FavouriteAlbumsPage(
     MainWindow* main_window, ILibraryService* library_service)
-    : main_window_(main_window), library_service_(library_service) {
+    : host_("emblem-favorite-symbolic", "No favourite albums yet",
+            "Use the heart on an album to keep it here.",
+            "Favourite albums unavailable",
+            "The library could not be loaded. Try again.",
+            [this] { refresh(); }),
+      main_window_(main_window), library_service_(library_service) {
     setup_ui();
 }
 
@@ -68,6 +73,8 @@ void FavouriteAlbumsPage::setup_ui() {
     gtk_widget_set_vexpand(grid_.get(), TRUE);
     gtk_widget_set_visible(grid_.get(), TRUE);
     gtk_box_append(GTK_BOX(root_.get()), grid_.get());
+
+    host_.set_content(root_.get());
 }
 
 void FavouriteAlbumsPage::refresh() {
@@ -75,11 +82,20 @@ void FavouriteAlbumsPage::refresh() {
     safe_flow_box_remove_all(GTK_FLOW_BOX(grid_.get()));
     album_cards_.clear();
 
-    std::vector<Album> albums;
-    if (library_service_) {
-        albums = library_service_->get_favourite_albums();
+    if (!library_service_) {
+        update_header(0);
+        host_.show_error();
+        return;
     }
+
+    std::vector<Album> albums = library_service_->get_favourite_albums();
     update_header(albums.size());
+    if (albums.empty()) {
+        host_.show_empty();
+        return;
+    }
+
+    host_.show_content();
     populate(albums);
 }
 

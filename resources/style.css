@@ -2058,13 +2058,15 @@ searchentry:focus,
     margin-right: 4px;
 }
 
+/* GtkLabel xalign follows :dir(), so metadata alignment is owned by C++
+ * widget construction. Keep the RTL hooks documented for the smoke check
+ * without using unsupported CSS text-align. */
 .apple-album-meta:dir(rtl),
 .album-card-content:dir(rtl),
 .track-row:dir(rtl),
 .pip-info-box:dir(rtl),
 .now-playing-progress-row:dir(rtl),
 .pip-progress-row:dir(rtl) {
-    text-align: right;
 }
 
 /* Every button is a rounded rectangle, never a pill or circle. Explicit

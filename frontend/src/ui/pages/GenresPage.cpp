@@ -13,14 +13,18 @@
 namespace lollypop {
 
 GenresPage::GenresPage(MainWindow* main_window, ILibraryService* library_service)
-    : main_window_(main_window), library_service_(library_service) {
+    : host_("view-list-symbolic", "No genres yet",
+            "Add music with genre tags to see genres here.",
+            "Genres unavailable",
+            "The library could not be loaded. Try again.",
+            [this] { refresh(); }),
+      main_window_(main_window), library_service_(library_service) {
     setup_ui();
 }
 
 GenresPage::~GenresPage() = default;
 
 void GenresPage::setup_ui() {
-    // Root widget is the ListBox directly (implements GtkScrollable)
     list_box_.reset(gtk_list_box_new());
     g_object_ref_sink(list_box_.get());
     gtk_widget_add_css_class(list_box_.get(), "genres-list");
@@ -29,18 +33,26 @@ void GenresPage::setup_ui() {
     gtk_widget_set_hexpand(list_box_.get(), TRUE);
     gtk_widget_set_vexpand(list_box_.get(), TRUE);
     gtk_widget_set_visible(list_box_.get(), TRUE);
-
-    widget_ = list_box_.get();
+    host_.set_content(list_box_.get());
 }
 
 void GenresPage::refresh() {
     // Use safe helper to avoid invalid sibling pointers after unparenting
     safe_list_box_remove_all(GTK_LIST_BOX(list_box_.get()));
 
-    if (library_service_) {
-        auto genres = library_service_->get_all_genres();
-        populate(genres);
+    if (!library_service_) {
+        host_.show_error();
+        return;
     }
+
+    auto genres = library_service_->get_all_genres();
+    if (genres.empty()) {
+        host_.show_empty();
+        return;
+    }
+
+    host_.show_content();
+    populate(genres);
 }
 
 void GenresPage::populate(const std::vector<std::string>& genres) {
@@ -77,10 +89,10 @@ void GenresPage::on_genre_view_clicked(GtkButton* button, gpointer user_data) {
     (void)button;
     auto* self = static_cast<GenresPage*>(user_data);
     if (!self) return;
-    
+
     const char* genre = static_cast<const char*>(g_object_get_data(G_OBJECT(button), "genre"));
     if (!genre) return;
-    
+
     std::cout << "[GenresPage] View genre: " << genre << std::endl;
     if (self->main_window_) {
         MiddleLibrary* middle = self->main_window_->get_middle_library();

@@ -32,7 +32,12 @@ static void free_load_data(gpointer data) {
 }
 
 SongsPage::SongsPage(MainWindow* main_window, ILibraryService* library_service)
-    : main_window_(main_window), library_service_(library_service),
+    : host_("folder-music-symbolic", "No songs found",
+            "Try a different genre filter or add music to your library.",
+            "Songs unavailable",
+            "The library could not be loaded. Try again.",
+            [this] { refresh(); }),
+      main_window_(main_window), library_service_(library_service),
       sort_column_("title"), sort_ascending_(true), genre_filter_(""), generation_(0),
       loading_(false), loaded_count_(0), total_count_(0) {
     setup_ui();
@@ -72,6 +77,7 @@ void SongsPage::setup_ui() {
 
     widget_.reset(main_box);
     g_object_ref_sink(widget_.get());
+    host_.set_content(widget_.get());
 }
 
 void SongsPage::create_header(GtkWidget* main_box) {
@@ -193,7 +199,10 @@ void SongsPage::on_sort_header_clicked(GtkButton* button, gpointer user_data) {
 }
 
 void SongsPage::reload() {
-    if (!library_service_) return;
+    if (!library_service_) {
+        host_.show_error();
+        return;
+    }
 
     std::lock_guard lock(load_mutex_);
     generation_++;
@@ -213,6 +222,12 @@ void SongsPage::reload() {
         total_count_ = sorted_ids_.size();
     }
 
+    if (total_count_ == 0) {
+        host_.show_empty();
+        return;
+    }
+
+    host_.show_content();
     // Load first page
     load_page(0);
 }

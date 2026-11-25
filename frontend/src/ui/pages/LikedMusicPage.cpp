@@ -13,14 +13,18 @@
 namespace lollypop {
 
 LikedMusicPage::LikedMusicPage(MainWindow* main_window, ILibraryService* library_service)
-    : main_window_(main_window), library_service_(library_service) {
+    : host_("emblem-favorite-symbolic", "No liked songs yet",
+            "Songs you like will appear here.",
+            "Liked songs unavailable",
+            "The library could not be loaded. Try again.",
+            [this] { refresh(); }),
+      main_window_(main_window), library_service_(library_service) {
     setup_ui();
 }
 
 LikedMusicPage::~LikedMusicPage() = default;
 
 void LikedMusicPage::setup_ui() {
-    // Root widget is the ListBox directly (implements GtkScrollable)
     list_box_.reset(gtk_list_box_new());
     g_object_ref_sink(list_box_.get());
     gtk_widget_add_css_class(list_box_.get(), "liked-music-list");
@@ -29,8 +33,7 @@ void LikedMusicPage::setup_ui() {
     gtk_widget_set_hexpand(list_box_.get(), TRUE);
     gtk_widget_set_vexpand(list_box_.get(), TRUE);
     gtk_widget_set_visible(list_box_.get(), TRUE);
-
-    widget_ = list_box_.get();
+    host_.set_content(list_box_.get());
 }
 
 void LikedMusicPage::refresh() {
@@ -38,10 +41,19 @@ void LikedMusicPage::refresh() {
     safe_list_box_remove_all(GTK_LIST_BOX(list_box_.get()));
     track_rows_.clear();
 
-    if (library_service_) {
-        auto tracks = library_service_->get_liked_tracks();
-        populate(tracks);
+    if (!library_service_) {
+        host_.show_error();
+        return;
     }
+
+    auto tracks = library_service_->get_liked_tracks();
+    if (tracks.empty()) {
+        host_.show_empty();
+        return;
+    }
+
+    host_.show_content();
+    populate(tracks);
 }
 
 void LikedMusicPage::populate(const std::vector<Track>& tracks) {

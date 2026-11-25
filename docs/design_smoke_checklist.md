@@ -59,7 +59,7 @@ installed) or switch the session language to Arabic/Hebrew and restart.
 
 ## 3. Focus and keyboard
 
-- [ ] Tab reaches sidebar rows, album tiles, artist cards, favourite buttons, track rows, transport controls, and the queue Undo button.
+- [ ] Tab reaches sidebar rows, album tiles, artist cards, playlist cards, favourite buttons, track rows, transport controls, and the queue Undo button.
 - [ ] Each focused control shows the single accent focus ring.
 - [ ] Enter/Space activates the focused tile, favourite, row, or button.
 - [ ] Pointer hover and keyboard focus reveal the same favourite control.
@@ -78,6 +78,8 @@ Enable the desktop "reduce animation" setting and restart the app.
 - [ ] Generate the stress data with `scripts/stress_test.sh` or use the harness fixtures in `tests/test_layout_stress.cpp`.
 - [ ] 240-character track/artist/album names ellipsize without widening the right panel.
 - [ ] Missing artwork shows the fallback tile/row artwork without blank gaps.
+- [ ] Artist, playlist, and right-pane artwork frames stay square at every panel width.
+- [ ] Cover art crops to fill square frames; no artwork appears stretched into a rectangle.
 - [ ] A 1000-track queue remains scrollable and responsive; row actions still work.
 - [ ] Removing a queue row shows Undo; Undo restores the exact original index.
 - [ ] Stale Undo hides itself when the queue changes; failure disables Undo with clear copy.

@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "ui/components/LibraryPage.hpp"
+#include "ui/components/PageStateHost.hpp"
 #include "ui/components/PlaylistItem.hpp"
 #include "services/ILibraryService.hpp"
 
@@ -27,7 +28,7 @@ public:
     PlaylistsPage(const PlaylistsPage&) = delete;
     PlaylistsPage& operator=(const PlaylistsPage&) = delete;
 
-    GtkWidget* get_widget() const { return widget_; }
+    GtkWidget* get_widget() const override { return host_.get_widget(); }
     void refresh() override;
     std::string get_page_id() const override { return "playlists"; }
 
@@ -37,7 +38,7 @@ private:
             if (w) g_object_unref(w);
         }
     };
-    GtkWidget* widget_ = nullptr;  // FlowBox (content), owned by grid_
+    PageStateHost host_;
     std::unique_ptr<GtkWidget, WidgetDeleter> grid_;
 
     MainWindow* main_window_;

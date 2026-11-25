@@ -284,8 +284,9 @@ void ArtworkView::set_preferred_size(int width, int height) {
     gtk_widget_set_size_request(artwork_image_.get(), width, height);
     gtk_widget_set_size_request(fallback_image_.get(), width, height);
 
-    gtk_widget_set_halign(widget_.get(), GTK_ALIGN_FILL);
-    gtk_widget_set_valign(widget_.get(), GTK_ALIGN_FILL);
+    // Keep the caller's alignment on the overlay itself. Only the overlay
+    // children need to fill; forcing FILL here would stretch a square request
+    // into the extra width granted by a GtkBox.
     gtk_widget_set_halign(artwork_image_.get(), GTK_ALIGN_FILL);
     gtk_widget_set_valign(artwork_image_.get(), GTK_ALIGN_FILL);
     gtk_widget_set_halign(fallback_image_.get(), GTK_ALIGN_FILL);

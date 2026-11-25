@@ -14,6 +14,7 @@
 
 #include "ui/components/LibraryPage.hpp"
 #include "ui/components/AlbumCard.hpp"
+#include "ui/components/PageStateHost.hpp"
 #include "services/ILibraryService.hpp"
 
 namespace lollypop {
@@ -28,7 +29,7 @@ public:
     FavouriteAlbumsPage(const FavouriteAlbumsPage&) = delete;
     FavouriteAlbumsPage& operator=(const FavouriteAlbumsPage&) = delete;
 
-    GtkWidget* get_widget() const override { return root_.get(); }
+    GtkWidget* get_widget() const override { return host_.get_widget(); }
     void refresh() override;
     std::string get_page_id() const override { return "favorites"; }
 
@@ -38,7 +39,8 @@ private:
             if (w) g_object_unref(w);
         }
     };
-    std::unique_ptr<GtkWidget, WidgetDeleter> root_;
+    PageStateHost host_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> root_;  // page content, owned by host_
     std::unique_ptr<GtkWidget, WidgetDeleter> grid_;
 
     GtkWidget* subtitle_label_ = nullptr;
