@@ -34,13 +34,7 @@ public:
 private:
     struct WidgetDeleter {
         void operator()(GtkWidget* w) const {
-            if (!w) return;
-            // Managed widgets are ref-sunk at construction, so a container
-            // holds a second reference while the widget is parented.
-            if (gtk_widget_get_parent(w) != nullptr) {
-                gtk_widget_unparent(w);
-            }
-            g_object_unref(w);
+            if (w) g_object_unref(w);
         }
     };
     GtkWidget* widget_ = nullptr;  // FlowBox (content), owned by grid_
