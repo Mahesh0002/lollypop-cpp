@@ -20,6 +20,7 @@ set(FRONTEND_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/services/MockLyricsService.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/AlbumCard.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/AppleAlbumTile.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/AppleArtistTile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/ArtistItem.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/ArtworkView.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/components/EmptyState.cpp
@@ -62,6 +63,7 @@ set(FRONTEND_HEADERS
     ${CMAKE_SOURCE_DIR}/include/types.hpp
     ${CMAKE_SOURCE_DIR}/include/ui/components/AlbumCard.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/ui/components/AppleAlbumTile.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/ui/components/AppleArtistTile.hpp
     ${CMAKE_SOURCE_DIR}/include/ui/components/ArtistItem.hpp
     ${CMAKE_SOURCE_DIR}/include/ui/components/ArtworkView.hpp
     ${CMAKE_SOURCE_DIR}/include/ui/components/EmptyState.hpp

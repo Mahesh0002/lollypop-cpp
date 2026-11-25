@@ -415,8 +415,9 @@ listboxrow:selected {
     margin-bottom: 16px;
 }
 
-/* Large page header shared by Albums and Favourite Albums. */
+/* Large page header shared by Albums, Artists, and Favourite Albums. */
 .albums-page-header,
+.artists-page-header,
 .favourite-albums-page-header {
     margin: 24px 24px 20px 24px;
 }
@@ -1703,7 +1704,6 @@ scrollbar button {
 }
 
 /* Grid pages (standalone). The Home grid already has page padding. */
-.artists-grid,
 .playlists-grid {
     background-color: transparent;
     padding: 8px 24px 24px 24px;
@@ -1711,7 +1711,8 @@ scrollbar button {
     min-height: 0;
 }
 
-/* Albums pages own their large header, so only the grid needs side padding. */
+/* Grid pages with a large header only need side padding on the grid. */
+.artists-grid,
 .albums-grid,
 .favourite-albums-grid {
     background-color: transparent;
