@@ -219,11 +219,12 @@ void RightNowPlaying::create_artwork_section() {
     artwork_view_->set_corner_radius(12.0);
 
     GtkWidget* artwork = artwork_view_->get_widget();
-    // The tile is width-driven; the artwork fills it on both axes.
-    gtk_widget_set_hexpand(artwork, TRUE);
-    gtk_widget_set_vexpand(artwork, TRUE);
-    gtk_widget_set_halign(artwork, GTK_ALIGN_FILL);
-    gtk_widget_set_valign(artwork, GTK_ALIGN_FILL);
+    // Keep the square request. The pane may be taller than the artwork, so
+    // expanding or stretching it would turn the square into a tall rectangle.
+    gtk_widget_set_hexpand(artwork, FALSE);
+    gtk_widget_set_vexpand(artwork, FALSE);
+    gtk_widget_set_halign(artwork, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(artwork, GTK_ALIGN_START);
     safe_box_append(GTK_BOX(artwork_box_), artwork);
 
     safe_box_append(GTK_BOX(content_box_), artwork_box_);
@@ -594,10 +595,11 @@ void RightNowPlaying::adapt_to_allocation(int width, int height) {
         artwork_view_->set_corner_radius(static_cast<double>(side) / 24.0);
         last_artwork_side_ = side;
         GtkWidget* artwork = artwork_view_->get_widget();
-        gtk_widget_set_hexpand(artwork, TRUE);
-        gtk_widget_set_vexpand(artwork, TRUE);
-        gtk_widget_set_halign(artwork, GTK_ALIGN_FILL);
-        gtk_widget_set_valign(artwork, GTK_ALIGN_FILL);
+        gtk_widget_set_hexpand(artwork, FALSE);
+        gtk_widget_set_vexpand(artwork, FALSE);
+        gtk_widget_set_halign(artwork, GTK_ALIGN_CENTER);
+        gtk_widget_set_valign(artwork, GTK_ALIGN_START);
+        gtk_widget_queue_resize(artwork_box_);
     }
 
     const int horizontal_margin = compact ? 8 : 12;
