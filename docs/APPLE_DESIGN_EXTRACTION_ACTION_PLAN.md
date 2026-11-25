@@ -327,7 +327,7 @@ These are **candidates**, not proven bugs. They are derived from direct file ins
 
 **Definition of done:** all documented components have documented states and runtime checks are listed.
 
-**Implementation note:** the matrix covers `AlbumCard`, `AppleAlbumTile`, `TrackRow`, sidebar rows, PiP, state components, `QueueList`, and the new `QueueUndoBar`. Generic `button:disabled` and canonical focus styles cover the shared cases; queue empty copy now states the next action.
+**Implementation note:** the matrix covers `AlbumCard`, `AppleAlbumTile`, `TrackRow`, sidebar rows, PiP, state components, `QueueList`, and the new `QueueUndoBar`. It also covers `ArtistsPage`, `ArtistItem`, and `ArtistDetailPage`: artist cards have canonical focus rings and accessible names, and artist pages expose empty, unavailable, missing-artist, and no-tracks states. Generic `button:disabled` and canonical focus styles cover the shared cases; queue empty copy now states the next action.
 
 #### P1-2: Forgiveness for queue actions — IMPLEMENTED
 

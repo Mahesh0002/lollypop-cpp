@@ -29,6 +29,12 @@ void ArtistDetailPage::setup_ui() {
     gtk_widget_add_css_class(widget_.get(), "library-scrolled");
     gtk_widget_set_visible(widget_.get(), TRUE);
 
+    state_container_.reset(gtk_box_new(GTK_ORIENTATION_VERTICAL, 0));
+    g_object_ref_sink(state_container_.get());
+    gtk_widget_set_hexpand(state_container_.get(), TRUE);
+    gtk_widget_set_vexpand(state_container_.get(), TRUE);
+    gtk_widget_set_visible(state_container_.get(), TRUE);
+
     content_box_.reset(gtk_box_new(GTK_ORIENTATION_VERTICAL, 24));
     g_object_ref_sink(content_box_.get());
     gtk_widget_add_css_class(content_box_.get(), "artist-detail-content");
@@ -37,6 +43,7 @@ void ArtistDetailPage::setup_ui() {
     gtk_widget_set_margin_start(content_box_.get(), 24);
     gtk_widget_set_margin_end(content_box_.get(), 24);
     gtk_widget_set_visible(content_box_.get(), TRUE);
+    safe_box_append(GTK_BOX(state_container_.get()), content_box_.get());
 
     // Artwork uses the shared cached view, with a visible fallback when the
     // library has no artist image yet.
@@ -67,17 +74,50 @@ void ArtistDetailPage::setup_ui() {
     gtk_widget_set_visible(track_list_box_.get(), TRUE);
     safe_box_append(GTK_BOX(content_box_.get()), track_list_box_.get());
 
-    safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()), content_box_.get());
+    // An inline state keeps artwork and the artist name visible when there
+    // are no tracks to show.
+    no_tracks_label_.reset(gtk_label_new("No tracks available for this artist."));
+    g_object_ref_sink(no_tracks_label_.get());
+    gtk_widget_add_css_class(no_tracks_label_.get(), "empty-state-description");
+    gtk_label_set_wrap(GTK_LABEL(no_tracks_label_.get()), TRUE);
+    gtk_label_set_max_width_chars(GTK_LABEL(no_tracks_label_.get()), 40);
+    gtk_label_set_xalign(GTK_LABEL(no_tracks_label_.get()), 0.5);
+    gtk_widget_set_halign(no_tracks_label_.get(), GTK_ALIGN_CENTER);
+    gtk_widget_set_margin_top(no_tracks_label_.get(), 24);
+    gtk_widget_set_margin_bottom(no_tracks_label_.get(), 24);
+    gtk_widget_set_visible(no_tracks_label_.get(), FALSE);
+    safe_box_append(GTK_BOX(content_box_.get()), no_tracks_label_.get());
+
+    artist_missing_state_ = std::make_unique<EmptyState>();
+    artist_missing_state_->setup("avatar-default-symbolic", "Artist not found",
+                                 "This artist is no longer in your library.");
+    gtk_widget_set_visible(artist_missing_state_->get_widget(), FALSE);
+    safe_box_append(GTK_BOX(state_container_.get()), artist_missing_state_->get_widget());
+
+    safe_scrolled_window_set_child(GTK_SCROLLED_WINDOW(widget_.get()),
+                                   state_container_.get());
 }
 
 void ArtistDetailPage::refresh() {
-    if (!current_artist_id_.empty() && library_service_) {
-        auto artist = library_service_->get_artist(current_artist_id_);
-        if (!artist.id.empty()) {
-            current_artist_ = artist;
-            populate_artist(artist);
-        }
+    if (!library_service_ || current_artist_id_.empty()) {
+        current_artist_ = Artist{};
+        gtk_widget_set_visible(content_box_.get(), FALSE);
+        gtk_widget_set_visible(artist_missing_state_->get_widget(), TRUE);
+        return;
     }
+
+    auto artist = library_service_->get_artist(current_artist_id_);
+    if (artist.id.empty()) {
+        current_artist_ = Artist{};
+        gtk_widget_set_visible(content_box_.get(), FALSE);
+        gtk_widget_set_visible(artist_missing_state_->get_widget(), TRUE);
+        return;
+    }
+
+    current_artist_ = artist;
+    gtk_widget_set_visible(content_box_.get(), TRUE);
+    gtk_widget_set_visible(artist_missing_state_->get_widget(), FALSE);
+    populate_artist(artist);
 }
 
 void ArtistDetailPage::set_artist(const std::string& artist_id) {
@@ -96,10 +136,14 @@ void ArtistDetailPage::populate_artist(const Artist& artist) {
     safe_list_box_remove_all(GTK_LIST_BOX(track_list_box_.get()));
     track_rows_.clear();
 
+    std::vector<Track> tracks;
     if (library_service_) {
-        auto tracks = library_service_->get_tracks_by_artist(artist.name);
-        populate_tracks(tracks);
+        tracks = library_service_->get_tracks_by_artist(artist.name);
     }
+    const bool has_tracks = !tracks.empty();
+    gtk_widget_set_visible(track_list_box_.get(), has_tracks);
+    gtk_widget_set_visible(no_tracks_label_.get(), !has_tracks);
+    populate_tracks(tracks);
 }
 
 void ArtistDetailPage::populate_tracks(const std::vector<Track>& tracks) {

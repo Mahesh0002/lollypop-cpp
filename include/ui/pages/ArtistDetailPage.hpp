@@ -13,6 +13,7 @@
 #include "ui/components/LibraryPage.hpp"
 #include "ui/components/TrackRow.hpp"
 #include "ui/components/ArtworkView.hpp"
+#include "ui/components/EmptyState.hpp"
 #include "types.hpp"
 #include "services/ILibraryService.hpp"
 
@@ -28,7 +29,7 @@ public:
     ArtistDetailPage(const ArtistDetailPage&) = delete;
     ArtistDetailPage& operator=(const ArtistDetailPage&) = delete;
 
-    GtkWidget* get_widget() const { return widget_.get(); }
+    GtkWidget* get_widget() const override { return widget_.get(); }
     void refresh() override;
     std::string get_page_id() const override { return "artist_detail"; }
 
@@ -42,11 +43,13 @@ private:
         }
     };
     std::unique_ptr<GtkWidget, WidgetDeleter> widget_;
-    std::unique_ptr<GtkWidget, WidgetDeleter> scrolled_window_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> state_container_;
     std::unique_ptr<GtkWidget, WidgetDeleter> content_box_;
     std::unique_ptr<ArtworkView> artwork_view_;
     std::unique_ptr<GtkWidget, WidgetDeleter> name_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> track_list_box_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> no_tracks_label_;
+    std::unique_ptr<EmptyState> artist_missing_state_;
 
     MainWindow* main_window_;
     ILibraryService* library_service_;

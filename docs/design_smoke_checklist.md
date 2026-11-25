@@ -59,7 +59,7 @@ installed) or switch the session language to Arabic/Hebrew and restart.
 
 ## 3. Focus and keyboard
 
-- [ ] Tab reaches sidebar rows, album tiles, favourite buttons, track rows, transport controls, and the queue Undo button.
+- [ ] Tab reaches sidebar rows, album tiles, artist cards, favourite buttons, track rows, transport controls, and the queue Undo button.
 - [ ] Each focused control shows the single accent focus ring.
 - [ ] Enter/Space activates the focused tile, favourite, row, or button.
 - [ ] Pointer hover and keyboard focus reveal the same favourite control.
