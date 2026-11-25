@@ -58,6 +58,7 @@ public:
 
     // --- Queue operations ---
     virtual bool enqueue_track(const std::string& track_id, bool next = false) = 0;
+    virtual bool insert_into_queue(const std::string& track_id, size_t index) = 0;
     virtual bool remove_from_queue(size_t index) = 0;
     virtual bool move_queue_item(size_t from, size_t to) = 0;
     virtual bool play_queue_index(size_t index) = 0;

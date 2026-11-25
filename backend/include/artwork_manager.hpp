@@ -86,7 +86,8 @@ public:
 
     // Generate a stable cache key from album identity.
     static std::string make_key(const std::string& album_artist,
-                                 const std::string& album);
+                                 const std::string& album,
+                                 const std::string& file_path = {});
 
     // Set the extraction function. If unset, ArtworkManager falls back to
     // checking for folder artwork (cover.jpg, etc.) next to file_path.

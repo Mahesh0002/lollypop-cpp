@@ -34,12 +34,8 @@ void LikedMusicPage::setup_ui() {
 }
 
 void LikedMusicPage::refresh() {
-    GtkWidget* child = gtk_widget_get_first_child(list_box_.get());
-    while (child) {
-        GtkWidget* next = gtk_widget_get_next_sibling(child);
-        gtk_list_box_remove(GTK_LIST_BOX(list_box_.get()), child);
-        child = next;
-    }
+    // Use safe helper to avoid invalid sibling pointers after unparenting
+    safe_list_box_remove_all(GTK_LIST_BOX(list_box_.get()));
     track_rows_.clear();
 
     if (library_service_) {

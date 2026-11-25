@@ -89,6 +89,7 @@ set(FRONTEND_HEADERS
     ${CMAKE_SOURCE_DIR}/include/ui/pages/SongsPage.hpp
     ${CMAKE_SOURCE_DIR}/include/ui/theme/AccentColorManager.hpp
     ${CMAKE_SOURCE_DIR}/include/ui/theme/ThemeManager.hpp
+    ${CMAKE_SOURCE_DIR}/include/ui/theme/design_tokens.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/panels/apple_sidebar.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/panels/bottom_playback.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/panels/left_sidebar.hpp
@@ -101,6 +102,7 @@ set(FRONTEND_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/panels/waveform_widget.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/services/MockLibraryService.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/services/MockLyricsService.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/util/accessibility.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/util/safe_gtk.hpp
 )
 

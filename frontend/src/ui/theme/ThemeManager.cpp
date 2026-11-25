@@ -3,6 +3,7 @@
  */
 
 #include "ui/theme/ThemeManager.hpp"
+#include "ui/theme/design_tokens.hpp"
 
 #include <gtk/gtk.h>
 #include <iostream>
@@ -163,22 +164,21 @@ void ThemeManager::update_css_accent() {
 }
 
 void ThemeManager::update_css_overrides() {
-    // Both providers stay in sync: replacing only one :root block used to
-    // wipe the accent variables when the font size changed.
-    gchar* css = g_strdup_printf(
-        ":root {\n"
-        "  --accent-color: rgba(%d, %d, %d, %f);\n"
-        "  --accent-soft: rgba(%d, %d, %d, %f);\n"
-        "  --font-scale: %f;\n"
-        "}\n",
-        static_cast<int>(accent_r_ * 255), static_cast<int>(accent_g_ * 255),
-        static_cast<int>(accent_b_ * 255), accent_a_,
-        static_cast<int>(accent_r_ * 255), static_cast<int>(accent_g_ * 255),
-        static_cast<int>(accent_b_ * 255), accent_a_ * 0.15,
-        font_scale_);
+    // The high-priority provider emits every canonical token from one C++
+    // source, so the runtime layer cannot drift from the stylesheet defaults.
+    const int r = static_cast<int>(accent_r_ * 255);
+    const int g = static_cast<int>(accent_g_ * 255);
+    const int b = static_cast<int>(accent_b_ * 255);
+    const std::string accent = "rgba(" + std::to_string(r) + ", " +
+                               std::to_string(g) + ", " + std::to_string(b) +
+                               ", " + std::to_string(accent_a_) + ")";
+    const std::string accent_soft =
+        "rgba(" + std::to_string(r) + ", " + std::to_string(g) + ", " +
+        std::to_string(b) + ", " + std::to_string(accent_a_ * 0.15) + ")";
 
-    gtk_css_provider_load_from_string(accent_css_provider_.get(), css);
-    g_free(css);
+    const std::string css =
+        design_tokens::build_css(font_scale_, accent, accent_soft);
+    gtk_css_provider_load_from_string(accent_css_provider_.get(), css.c_str());
 }
 
 } // namespace lollypop

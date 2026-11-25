@@ -290,7 +290,7 @@ void SyncedLyricsView::set_active_index(int index) {
 void SyncedLyricsView::on_vadjustment_changed(GtkAdjustment* adjustment, gpointer user_data) {
     (void)adjustment;
     auto* self = static_cast<SyncedLyricsView*>(user_data);
-    if (!self->synced_) return;
+    if (!self->synced_ || self->programmatic_scroll_) return;
 
     double now = g_get_monotonic_time() / 1000000.0;
     self->follow_paused_until_ = now + SCROLL_PAUSE_SECONDS;
@@ -360,7 +360,7 @@ gboolean SyncedLyricsView::on_scroll_measure(gpointer user_data) {
         self->animate_to(target);
         delete data;
     } else {
-        gtk_adjustment_set_value(adj, target);
+        self->set_adjustment_value(adj, target);
         delete data;
     }
     return G_SOURCE_REMOVE;
@@ -380,7 +380,7 @@ void SyncedLyricsView::schedule_top(bool animate) {
         animate_to(0.0);
     } else {
         GtkAdjustment* adj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(scroller_));
-        if (adj) gtk_adjustment_set_value(adj, 0.0);
+        if (adj) set_adjustment_value(adj, 0.0);
     }
 }
 
@@ -399,7 +399,7 @@ gboolean SyncedLyricsView::on_animate_step(gpointer user_data) {
     double elapsed = g_get_monotonic_time() / 1000000.0 - data->start_time;
     double progress = elapsed / SCROLL_DURATION;
     if (progress >= 1.0) {
-        gtk_adjustment_set_value(data->adj, data->start_value + data->delta);
+        self->set_adjustment_value(data->adj, data->start_value + data->delta);
         if (self->anim_data_ == data) self->anim_data_ = nullptr;
         self->anim_source_ = 0;
         delete data;
@@ -407,7 +407,7 @@ gboolean SyncedLyricsView::on_animate_step(gpointer user_data) {
     }
     // Cubic ease-out: 1 - (1 - t)^3
     double eased = 1.0 - std::pow(1.0 - progress, 3);
-    gtk_adjustment_set_value(data->adj, data->start_value + data->delta * eased);
+    self->set_adjustment_value(data->adj, data->start_value + data->delta * eased);
     return G_SOURCE_CONTINUE;
 }
 
@@ -419,7 +419,7 @@ void SyncedLyricsView::animate_to(double target) {
     double start_value = gtk_adjustment_get_value(adj);
     double delta = target - start_value;
     if (std::abs(delta) < 1.0) {
-        gtk_adjustment_set_value(adj, target);
+        set_adjustment_value(adj, target);
         return;
     }
 
@@ -429,6 +429,14 @@ void SyncedLyricsView::animate_to(double target) {
     auto* data = new AnimateData{this, adj, start_value, delta, start_time};
     anim_data_ = data;
     anim_source_ = g_timeout_add(16, &SyncedLyricsView::on_animate_step, data);
+}
+
+void SyncedLyricsView::set_adjustment_value(GtkAdjustment* adj, double value) {
+    // Programmatic scrolling must not be mistaken for a user scroll and
+    // pause line-following for four seconds.
+    programmatic_scroll_ = true;
+    gtk_adjustment_set_value(adj, value);
+    programmatic_scroll_ = false;
 }
 
 void SyncedLyricsView::cancel_scroll() {

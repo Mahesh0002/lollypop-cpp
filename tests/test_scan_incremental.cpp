@@ -137,15 +137,10 @@ TEST_F(IncrementalScanTest, CachePersistsAcrossInstances) {
         scanner1.scan_file(test_dir_ + "/persist.mp3");
     } // scanner1 destroyed, cache saved
 
-    // Verify cache file exists and has content
-    EXPECT_TRUE(std::filesystem::exists(cache_path_));
-    std::ifstream cache_file(cache_path_);
-    std::string line;
-    int cache_entries = 0;
-    while (std::getline(cache_file, line)) {
-        if (!line.empty()) cache_entries++;
-    }
-    EXPECT_GT(cache_entries, 0);
+    // Verify versioned binary cache exists and has a header plus entries.
+    std::error_code ec;
+    EXPECT_TRUE(std::filesystem::exists(cache_path_, ec));
+    EXPECT_GT(std::filesystem::file_size(cache_path_, ec), 12u);
 
     {
         LibraryScanner scanner2;

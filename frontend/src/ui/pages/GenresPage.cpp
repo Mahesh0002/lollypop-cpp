@@ -34,12 +34,8 @@ void GenresPage::setup_ui() {
 }
 
 void GenresPage::refresh() {
-    GtkWidget* child = gtk_widget_get_first_child(list_box_.get());
-    while (child) {
-        GtkWidget* next = gtk_widget_get_next_sibling(child);
-        gtk_list_box_remove(GTK_LIST_BOX(list_box_.get()), child);
-        child = next;
-    }
+    // Use safe helper to avoid invalid sibling pointers after unparenting
+    safe_list_box_remove_all(GTK_LIST_BOX(list_box_.get()));
 
     if (library_service_) {
         auto genres = library_service_->get_all_genres();

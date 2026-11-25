@@ -82,6 +82,127 @@ uint64_t fnv1a(const std::string& value) {
     return hash;
 }
 
+// Incremental cache file format:
+//   magic (uint32) | version (uint32) | entry_count (uint32)
+//   repeated: path, mtime, size, metadata_hash, has_track, [track fields]
+// Strings are length-prefixed so paths may contain any delimiter.
+constexpr uint32_t kCacheMagic = 0x32434C4C;  // "LLC2"
+constexpr uint32_t kCacheVersion = 3;
+constexpr uint32_t kMaxCacheStringLength = 16u * 1024u * 1024u;
+constexpr uint32_t kMaxCacheEntries = 2'000'000;
+
+template <typename T>
+bool write_value(std::ostream& out, T value) {
+    out.write(reinterpret_cast<const char*>(&value), sizeof(value));
+    return static_cast<bool>(out);
+}
+
+template <typename T>
+bool read_value(std::istream& in, T& value) {
+    in.read(reinterpret_cast<char*>(&value), sizeof(value));
+    return in.gcount() == static_cast<std::streamsize>(sizeof(value));
+}
+
+bool write_cache_string(std::ostream& out, const std::string& value) {
+    const auto size = static_cast<uint32_t>(value.size());
+    return write_value<uint32_t>(out, size) &&
+           (out.write(value.data(), static_cast<std::streamsize>(size)),
+            static_cast<bool>(out));
+}
+
+bool read_cache_string(std::istream& in, std::string& value) {
+    uint32_t size = 0;
+    if (!read_value<uint32_t>(in, size) || size > kMaxCacheStringLength) {
+        return false;
+    }
+    std::string result(size, '\0');
+    if (size > 0) {
+        in.read(result.data(), static_cast<std::streamsize>(size));
+        if (in.gcount() != static_cast<std::streamsize>(size)) return false;
+    }
+    value = std::move(result);
+    return true;
+}
+
+uint64_t compute_metadata_hash(const Track& track) {
+    std::string key;
+    auto append = [&key](const std::string& value) {
+        key += value;
+        key += '\x1f';
+    };
+    append(track.title);
+    append(track.artist);
+    append(track.album);
+    append(track.album_artist);
+    append(track.genre);
+    append(std::to_string(track.track_number));
+    append(std::to_string(track.disc_number));
+    append(std::to_string(track.year));
+    append(std::to_string(track.duration));
+    return fnv1a(key);
+}
+
+bool write_track(std::ostream& out, const Track& track) {
+    return write_cache_string(out, track.id) &&
+           write_cache_string(out, track.title) &&
+           write_cache_string(out, track.artist) &&
+           write_cache_string(out, track.album) &&
+           write_cache_string(out, track.album_artist) &&
+           write_cache_string(out, track.genre) &&
+           write_value<int32_t>(out, track.track_number) &&
+           write_value<int32_t>(out, track.disc_number) &&
+           write_value<int32_t>(out, track.year) &&
+           write_value<int32_t>(out, track.duration) &&
+           write_cache_string(out, track.file_path) &&
+           write_cache_string(out, track.artwork_path) &&
+           write_cache_string(out, track.embedded_lyrics) &&
+           write_value<uint8_t>(out, track.liked ? 1 : 0) &&
+           write_value<int32_t>(out, track.play_count) &&
+           write_value<int64_t>(out, track.last_played) &&
+           write_value<int64_t>(out, track.date_added);
+}
+
+bool read_track(std::istream& in, Track& track) {
+    int32_t track_number = 0;
+    int32_t disc_number = 0;
+    int32_t year = 0;
+    int32_t duration = 0;
+    uint8_t liked = 0;
+    int32_t play_count = 0;
+    int64_t last_played = 0;
+    int64_t date_added = 0;
+
+    if (!read_cache_string(in, track.id) ||
+        !read_cache_string(in, track.title) ||
+        !read_cache_string(in, track.artist) ||
+        !read_cache_string(in, track.album) ||
+        !read_cache_string(in, track.album_artist) ||
+        !read_cache_string(in, track.genre) ||
+        !read_value<int32_t>(in, track_number) ||
+        !read_value<int32_t>(in, disc_number) ||
+        !read_value<int32_t>(in, year) ||
+        !read_value<int32_t>(in, duration) ||
+        !read_cache_string(in, track.file_path) ||
+        !read_cache_string(in, track.artwork_path) ||
+        !read_cache_string(in, track.embedded_lyrics) ||
+        !read_value<uint8_t>(in, liked) ||
+        !read_value<int32_t>(in, play_count) ||
+        !read_value<int64_t>(in, last_played) ||
+        !read_value<int64_t>(in, date_added)) {
+        return false;
+    }
+
+    track.track_number = track_number;
+    track.disc_number = disc_number;
+    track.year = year;
+    track.duration = duration;
+    track.liked = liked != 0;
+    track.play_count = play_count;
+    track.last_played = last_played;
+    track.date_added = date_added;
+    return true;
+}
+
 std::string artwork_extension(const TagLib::ByteVector& data,
                               const std::string& mime_type) {
     if (mime_type == "image/png") return ".png";
@@ -147,8 +268,33 @@ std::string save_artwork(const TagLib::ByteVector& data, const std::string& mime
     return path.string();
 }
 
-void extract_artwork(TagLib::File* file, Track& track, const std::string& key) {
-    if (!file) return;
+uint64_t artwork_data_hash(const TagLib::ByteVector& data) {
+    if (data.isEmpty()) return 0;
+    const std::string bytes(data.data(), data.size());
+    const uint64_t hash = fnv1a(bytes);
+    return hash == 0 ? 1 : hash;
+}
+
+std::string save_artwork_if_changed(const TagLib::ByteVector& data,
+                                    const std::string& mime_type,
+                                    const std::string& key,
+                                    uint64_t cached_hash,
+                                    const std::string& cached_path,
+                                    uint64_t& out_hash) {
+    if (data.isEmpty()) return {};
+    out_hash = artwork_data_hash(data);
+    if (cached_hash != 0 && cached_hash == out_hash && !cached_path.empty()) {
+        std::error_code ec;
+        if (std::filesystem::exists(cached_path, ec)) return cached_path;
+    }
+    return save_artwork(data, mime_type, key);
+}
+
+uint64_t extract_artwork(TagLib::File* file, Track& track,
+                         const std::string& key, uint64_t cached_hash,
+                         const std::string& cached_path) {
+    if (!file) return 0;
+    uint64_t result_hash = 0;
 
     // ID3v2 APIC picture (MP3 and other ID3v2-tagged formats)
     if (auto* mpeg = dynamic_cast<TagLib::MPEG::File*>(file)) {
@@ -158,8 +304,9 @@ void extract_artwork(TagLib::File* file, Track& track, const std::string& key) {
                 if (auto* pic =
                         dynamic_cast<TagLib::ID3v2::AttachedPictureFrame*>(
                             frames.front())) {
-                    track.artwork_path = save_artwork(
-                        pic->picture(), pic->mimeType().to8Bit(true), key);
+                    track.artwork_path = save_artwork_if_changed(
+                        pic->picture(), pic->mimeType().to8Bit(true), key,
+                        cached_hash, cached_path, result_hash);
                 }
             }
         }
@@ -170,8 +317,9 @@ void extract_artwork(TagLib::File* file, Track& track, const std::string& key) {
         const auto pictures = flac->pictureList();
         if (!pictures.isEmpty()) {
             const TagLib::FLAC::Picture* picture = pictures.front();
-            track.artwork_path = save_artwork(
-                picture->data(), picture->mimeType().to8Bit(true), key);
+            track.artwork_path = save_artwork_if_changed(
+                picture->data(), picture->mimeType().to8Bit(true), key,
+                cached_hash, cached_path, result_hash);
         }
     }
 
@@ -191,8 +339,9 @@ void extract_artwork(TagLib::File* file, Track& track, const std::string& key) {
                                : (cover.format() == TagLib::MP4::CoverArt::BMP
                                       ? "image/bmp"
                                       : "image/jpeg"));
-                track.artwork_path =
-                    save_artwork(cover.data(), mime, key);
+                track.artwork_path = save_artwork_if_changed(
+                    cover.data(), mime, key, cached_hash, cached_path,
+                    result_hash);
             }
         }
     }
@@ -209,12 +358,14 @@ void extract_artwork(TagLib::File* file, Track& track, const std::string& key) {
             if (!picture_data.isEmpty()) {
                 TagLib::FLAC::Picture picture(picture_data);
                 if (!picture.data().isEmpty()) {
-                    track.artwork_path = save_artwork(
-                        picture.data(), picture.mimeType().to8Bit(true), key);
+                    track.artwork_path = save_artwork_if_changed(
+                        picture.data(), picture.mimeType().to8Bit(true), key,
+                        cached_hash, cached_path, result_hash);
                 }
             }
         }
     }
+    return result_hash;
 }
 
 }  // namespace
@@ -223,14 +374,19 @@ struct LibraryScanner::Impl {
     ScanProgress progress;
     ProgressCallback progress_cb;
     TrackFoundCallback track_cb;
+    TrackFoundWithCacheCallback track_with_cache_cb;
     ErrorCallback error_cb;
     std::atomic<bool> cancelled{false};
 
-    // Incremental scan cache: file_path -> (mtime, size).
-    // Persisted to disk to survive restarts.
+    // Incremental scan cache: file_path -> extracted metadata + last file stamp.
+    // Persisted to disk to survive restarts and avoid TagLib parsing on rescan.
     struct FileMeta {
         std::time_t mtime = 0;
         std::uintmax_t size = 0;
+        uint64_t metadata_hash = 0;
+        uint64_t artwork_hash = 0;
+        bool has_track = false;
+        Track track;
     };
     std::unordered_map<std::string, FileMeta> scan_cache_;
     std::string cache_path_;
@@ -252,43 +408,131 @@ struct LibraryScanner::Impl {
         progress_cb(progress);
     }
 
-    // Load incremental scan cache from disk.
-    void load_cache() {
-        if (cache_path_.empty()) return;
+    void notify_track_found(const Track& track, bool from_cache) {
+        if (track_with_cache_cb) {
+            track_with_cache_cb(track, from_cache);
+        } else if (track_cb) {
+            track_cb(track);
+        }
+    }
+
+    // Legacy cache format: path|mtime|size. Imported once, then rewritten in
+    // the versioned binary format on the next save.
+    void load_legacy_cache() {
         std::ifstream in(cache_path_);
         if (!in) return;
+        std::lock_guard<std::mutex> lock(cache_mutex_);
+        scan_cache_.clear();
         std::string line;
         while (std::getline(in, line)) {
             if (line.empty()) continue;
-            // Format: path|mtime|size
-            size_t pos1 = line.find('|');
+            const size_t pos1 = line.find('|');
             if (pos1 == std::string::npos) continue;
-            size_t pos2 = line.find('|', pos1 + 1);
+            const size_t pos2 = line.find('|', pos1 + 1);
             if (pos2 == std::string::npos) continue;
             std::string path = line.substr(0, pos1);
-            std::string mtime_str = line.substr(pos1 + 1, pos2 - pos1 - 1);
-            std::string size_str = line.substr(pos2 + 1);
+            const std::string mtime_str = line.substr(pos1 + 1, pos2 - pos1 - 1);
+            const std::string size_str = line.substr(pos2 + 1);
             try {
                 FileMeta meta;
                 meta.mtime = std::stoll(mtime_str);
                 meta.size = std::stoull(size_str);
-                std::lock_guard<std::mutex> lock(cache_mutex_);
-                scan_cache_[std::move(path)] = meta;
+                scan_cache_[std::move(path)] = std::move(meta);
             } catch (...) {
-                // Skip malformed lines
+                // Skip malformed lines.
             }
         }
     }
 
-    // Save incremental scan cache to disk.
+    // Load incremental scan cache from disk.
+    void load_cache() {
+        if (cache_path_.empty()) return;
+        std::ifstream in(cache_path_, std::ios::binary);
+        if (!in) return;
+
+        uint32_t magic = 0;
+        if (!read_value<uint32_t>(in, magic)) return;
+        if (magic != kCacheMagic) {
+            load_legacy_cache();
+            return;
+        }
+
+        uint32_t version = 0;
+        uint32_t count = 0;
+        if (!read_value<uint32_t>(in, version) ||
+            (version != 2 && version != kCacheVersion) ||
+            !read_value<uint32_t>(in, count) || count > kMaxCacheEntries) {
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(cache_mutex_);
+        scan_cache_.clear();
+        for (uint32_t i = 0; i < count; ++i) {
+            std::string path;
+            FileMeta meta;
+            uint8_t has_track = 0;
+            if (!read_cache_string(in, path) ||
+                !read_value<std::time_t>(in, meta.mtime) ||
+                !read_value<std::uintmax_t>(in, meta.size) ||
+                !read_value<uint64_t>(in, meta.metadata_hash)) {
+                scan_cache_.clear();
+                return;
+            }
+            if (version >= 3 &&
+                !read_value<uint64_t>(in, meta.artwork_hash)) {
+                scan_cache_.clear();
+                return;
+            }
+            if (!read_value<uint8_t>(in, has_track)) {
+                scan_cache_.clear();
+                return;
+            }
+            meta.has_track = has_track != 0;
+            if (meta.has_track && !read_track(in, meta.track)) {
+                scan_cache_.clear();
+                return;
+            }
+            scan_cache_[std::move(path)] = std::move(meta);
+        }
+    }
+
+    // Save incremental scan cache to disk with an atomic rename.
     void save_cache() {
         if (cache_path_.empty()) return;
-        std::ofstream out(cache_path_ + ".tmp");
-        if (!out) return;
+
         std::lock_guard<std::mutex> lock(cache_mutex_);
-        for (const auto& [path, meta] : scan_cache_) {
-            out << path << '|' << meta.mtime << '|' << meta.size << '\n';
+        // Drop entries for deleted files so the cache cannot grow forever.
+        for (auto it = scan_cache_.begin(); it != scan_cache_.end();) {
+            std::error_code ec;
+            if (!std::filesystem::exists(it->first, ec)) {
+                it = scan_cache_.erase(it);
+            } else {
+                ++it;
+            }
         }
+
+        std::ofstream out(cache_path_ + ".tmp", std::ios::binary | std::ios::trunc);
+        if (!out) return;
+        if (!write_value<uint32_t>(out, kCacheMagic) ||
+            !write_value<uint32_t>(out, kCacheVersion) ||
+            !write_value<uint32_t>(out,
+                                   static_cast<uint32_t>(scan_cache_.size()))) {
+            return;
+        }
+
+        for (const auto& [path, meta] : scan_cache_) {
+            const uint8_t has_track = meta.has_track ? 1 : 0;
+            if (!write_cache_string(out, path) ||
+                !write_value<std::time_t>(out, meta.mtime) ||
+                !write_value<std::uintmax_t>(out, meta.size) ||
+                !write_value<uint64_t>(out, meta.metadata_hash) ||
+                !write_value<uint64_t>(out, meta.artwork_hash) ||
+                !write_value<uint8_t>(out, has_track)) {
+                return;
+            }
+            if (meta.has_track && !write_track(out, meta.track)) return;
+        }
+
         out.close();
         if (out) {
             std::error_code ec;
@@ -316,8 +560,23 @@ struct LibraryScanner::Impl {
         return it->second.mtime == mtime && it->second.size == size;
     }
 
+    bool get_cached_track(const std::string& file_path, Track& track) {
+        std::lock_guard<std::mutex> lock(cache_mutex_);
+        auto it = scan_cache_.find(file_path);
+        if (it == scan_cache_.end() || !it->second.has_track) return false;
+        track = it->second.track;
+        return true;
+    }
+
+    uint64_t get_cached_artwork_hash(const std::string& file_path) {
+        std::lock_guard<std::mutex> lock(cache_mutex_);
+        auto it = scan_cache_.find(file_path);
+        return it == scan_cache_.end() ? 0 : it->second.artwork_hash;
+    }
+
     // Update cache entry for a file after successful processing.
-    void update_cache(const std::string& file_path) {
+    void update_cache(const std::string& file_path, const Track& track,
+                      uint64_t artwork_hash) {
         if (cache_path_.empty()) return;
         std::error_code ec;
         std::time_t mtime = std::chrono::system_clock::to_time_t(
@@ -327,8 +586,16 @@ struct LibraryScanner::Impl {
         std::uintmax_t size = std::filesystem::file_size(file_path, ec);
         if (ec) return;
 
+        FileMeta meta;
+        meta.mtime = mtime;
+        meta.size = size;
+        meta.metadata_hash = compute_metadata_hash(track);
+        meta.artwork_hash = artwork_hash;
+        meta.has_track = true;
+        meta.track = track;
+
         std::lock_guard<std::mutex> lock(cache_mutex_);
-        scan_cache_[file_path] = FileMeta{mtime, size};
+        scan_cache_[file_path] = std::move(meta);
     }
 
     void scan_recursive(const std::filesystem::path& path) {
@@ -366,9 +633,10 @@ struct LibraryScanner::Impl {
 
                 // Incremental scan: skip unchanged files.
                 if (is_file_unchanged(file_path.string())) {
-                    // File unchanged, but we still need to emit track_found
-                    // with the existing track data. Since we don't have it here,
-                    // we just count it as processed.
+                    Track cached;
+                    if (get_cached_track(file_path.string(), cached)) {
+                        notify_track_found(cached, true);
+                    }
                     progress.files_processed++;
                     emit_progress();
                     continue;
@@ -487,12 +755,21 @@ struct LibraryScanner::Impl {
             track.album != "Unknown Album"
                 ? (track.album_artist + "|" + track.album)
                 : track.file_path;
-        extract_artwork(file.file(), track, artwork_key);
 
-        if (track_cb) track_cb(track);
+        Track cached_track;
+        const bool has_cached_track = get_cached_track(file_path, cached_track);
+        const uint64_t cached_art_hash =
+            has_cached_track ? get_cached_artwork_hash(file_path) : 0;
+        const std::string cached_art_path =
+            has_cached_track ? cached_track.artwork_path : std::string{};
+
+        const uint64_t artwork_hash = extract_artwork(
+            file.file(), track, artwork_key, cached_art_hash, cached_art_path);
+
+        notify_track_found(track, false);
 
         // Update incremental scan cache on successful processing.
-        update_cache(file_path);
+        update_cache(file_path, track, artwork_hash);
     }
 
     std::string generate_id(const std::string& identity_source) {
@@ -571,6 +848,10 @@ void LibraryScanner::scan_directory(const std::string& path, bool recursive) {
             impl_->emit_progress();
             // Check incremental cache for non-recursive scan too.
             if (impl_->is_file_unchanged(it->path().string())) {
+                Track cached;
+                if (impl_->get_cached_track(it->path().string(), cached)) {
+                    impl_->notify_track_found(cached, true);
+                }
                 impl_->progress.files_processed++;
                 impl_->emit_progress();
                 continue;
@@ -605,6 +886,10 @@ void LibraryScanner::scan_file(const std::string& path) {
     impl_->progress.current_file = path;
     impl_->emit_progress();
     if (impl_->is_file_unchanged(path)) {
+        Track cached;
+        if (impl_->get_cached_track(path, cached)) {
+            impl_->notify_track_found(cached, true);
+        }
         impl_->progress.files_processed++;
         impl_->emit_progress(true);
     } else {
@@ -634,6 +919,11 @@ void LibraryScanner::set_progress_callback(ProgressCallback cb) {
 
 void LibraryScanner::set_track_found_callback(TrackFoundCallback cb) {
     impl_->track_cb = std::move(cb);
+}
+
+void LibraryScanner::set_track_found_with_cache_callback(
+    TrackFoundWithCacheCallback cb) {
+    impl_->track_with_cache_cb = std::move(cb);
 }
 
 void LibraryScanner::set_error_callback(ErrorCallback cb) {

@@ -10,6 +10,7 @@
 #include "panels/spectrum_router.hpp"
 #include "application.hpp"
 #include "ui/components/ArtworkView.hpp"
+#include "util/accessibility.hpp"
 
 #include <gtk/gtk.h>
 #include <gio/gio.h>
@@ -243,6 +244,9 @@ void PiPWindow::set_playing(bool playing) {
             playing ? "media-playback-pause-symbolic" : "media-playback-start-symbolic");
         gtk_image_set_pixel_size(GTK_IMAGE(icon), 24);
         gtk_button_set_child(GTK_BUTTON(play_pause_button_.get()), icon);
+        const char* label = playing ? "Pause" : "Play";
+        gtk_widget_set_tooltip_text(play_pause_button_.get(), label);
+        accessibility::set_label(play_pause_button_.get(), label);
     }
 }
 
@@ -385,6 +389,8 @@ void PiPWindow::setup_ui() {
     gtk_image_set_pixel_size(GTK_IMAGE(menu_icon), 20);
     gtk_menu_button_set_child(GTK_MENU_BUTTON(menu_button_.get()), menu_icon);
     gtk_widget_set_size_request(menu_button_.get(), 32, 32);
+    gtk_widget_set_tooltip_text(menu_button_.get(), "More options");
+    accessibility::set_label(menu_button_.get(), "More mini-player options");
     gtk_widget_set_visible(menu_button_.get(), TRUE);
     gtk_box_append(GTK_BOX(end_box), menu_button_.get());
 
@@ -405,6 +411,8 @@ void PiPWindow::setup_ui() {
     gtk_image_set_pixel_size(GTK_IMAGE(close_icon), 20);
     gtk_button_set_child(GTK_BUTTON(close_button_.get()), close_icon);
     gtk_widget_set_size_request(close_button_.get(), 32, 32);
+    gtk_widget_set_tooltip_text(close_button_.get(), "Close mini player");
+    accessibility::set_label(close_button_.get(), "Close mini player");
     gtk_widget_set_visible(close_button_.get(), TRUE);
     g_signal_connect(close_button_.get(), "clicked", G_CALLBACK(on_close_clicked), this);
     gtk_box_append(GTK_BOX(end_box), close_button_.get());
@@ -432,6 +440,8 @@ void PiPWindow::setup_ui() {
     gtk_image_set_pixel_size(GTK_IMAGE(prev_icon), 24);
     gtk_button_set_child(GTK_BUTTON(prev_button_.get()), prev_icon);
     gtk_widget_set_size_request(prev_button_.get(), 40, 40);
+    gtk_widget_set_tooltip_text(prev_button_.get(), "Previous track");
+    accessibility::set_label(prev_button_.get(), "Previous track");
     gtk_widget_set_visible(prev_button_.get(), TRUE);
     g_signal_connect(prev_button_.get(), "clicked", G_CALLBACK(on_prev_clicked), this);
     gtk_box_append(GTK_BOX(transport_center), prev_button_.get());
@@ -445,6 +455,8 @@ void PiPWindow::setup_ui() {
     gtk_image_set_pixel_size(GTK_IMAGE(pp_icon), 24);
     gtk_button_set_child(GTK_BUTTON(play_pause_button_.get()), pp_icon);
     gtk_widget_set_size_request(play_pause_button_.get(), 48, 48);
+    gtk_widget_set_tooltip_text(play_pause_button_.get(), "Play");
+    accessibility::set_label(play_pause_button_.get(), "Play");
     gtk_widget_set_visible(play_pause_button_.get(), TRUE);
     g_signal_connect(play_pause_button_.get(), "clicked", G_CALLBACK(on_play_pause_clicked), this);
     gtk_box_append(GTK_BOX(transport_center), play_pause_button_.get());
@@ -458,6 +470,8 @@ void PiPWindow::setup_ui() {
     gtk_image_set_pixel_size(GTK_IMAGE(next_icon), 24);
     gtk_button_set_child(GTK_BUTTON(next_button_.get()), next_icon);
     gtk_widget_set_size_request(next_button_.get(), 40, 40);
+    gtk_widget_set_tooltip_text(next_button_.get(), "Next track");
+    accessibility::set_label(next_button_.get(), "Next track");
     gtk_widget_set_visible(next_button_.get(), TRUE);
     g_signal_connect(next_button_.get(), "clicked", G_CALLBACK(on_next_clicked), this);
     gtk_box_append(GTK_BOX(transport_center), next_button_.get());
@@ -542,6 +556,7 @@ void PiPWindow::setup_ui() {
         gtk_button_set_child(GTK_BUTTON(btn), icon_w);
         gtk_widget_set_tooltip_text(btn, tooltip);
         gtk_widget_set_size_request(btn, 32, 32);
+        g_object_ref_sink(btn);  // WidgetDeleter expects an owned reference.
         return btn;
     };
 
@@ -644,19 +659,23 @@ void PiPWindow::on_menu_clicked(GtkMenuButton*, gpointer) {
 }
 
 void PiPWindow::on_drag_begin(GtkGestureDrag* gesture, double x, double y, gpointer user_data) {
-    (void)gesture;
     auto* self = static_cast<PiPWindow*>(user_data);
     self->drag_start_x_ = x;
     self->drag_start_y_ = y;
+
+    // GTK 4 delegates top-level moves to GDK; tracking screen coordinates here
+    // would be wrong on scaled or multi-monitor setups.
+    auto* device = gtk_gesture_get_device(GTK_GESTURE(gesture));
+    auto* surface = gtk_native_get_surface(GTK_NATIVE(self->window_.get()));
+    if (!device || !GDK_IS_TOPLEVEL(surface)) return;
+    const int button = static_cast<int>(
+        gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture)));
+    gdk_toplevel_begin_move(GDK_TOPLEVEL(surface), device, button, x, y,
+                            GDK_CURRENT_TIME);
 }
 
-void PiPWindow::on_drag_update(GtkGestureDrag* gesture, double x, double y, gpointer user_data) {
-    (void)gesture;
-    (void)x;
-    (void)y;
-    (void)user_data;
-    // GTK 4 does not expose automatic toplevel window moves for arbitrary
-    // surfaces; the drag gesture is retained for future surface handling.
+void PiPWindow::on_drag_update(GtkGestureDrag*, double, double, gpointer) {
+    // GDK owns the interactive move once gdk_toplevel_begin_move() starts.
 }
 
 void PiPWindow::on_progress_enter(GtkEventControllerMotion*, double, double, gpointer) {

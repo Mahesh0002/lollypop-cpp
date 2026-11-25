@@ -6,6 +6,7 @@
 
 #include "ui/components/TrackRow.hpp"
 #include "ui/components/ArtworkView.hpp"
+#include "util/accessibility.hpp"
 #include "ui/components/EqualizerIndicator.hpp"
 #include "ui/components/TrackListMetrics.hpp"
 #include "services/IPlayerService.hpp"
@@ -22,6 +23,10 @@
 namespace lollypop {
 
 std::unordered_set<TrackRow*> TrackRow::live_rows_;
+
+namespace {
+constexpr char kLiveRowKey[] = "lollypop-live-track-row";
+}  // namespace
 
 namespace {
 
@@ -239,7 +244,12 @@ TrackRow::TrackRow(MainWindow* main_window, const Track& track, int track_number
       display_track_number_(track.track_number > 0 ? track.track_number
                                                     : track_number) {
     setup_ui();
+    create_context_menu();
     live_rows_.insert(this);
+    // If a container destroys the widget before this row is deleted, the
+    // destroy notify removes the row from the registry.
+    g_object_set_data_full(G_OBJECT(widget_.get()), kLiveRowKey, this,
+                           &TrackRow::on_widget_destroyed);
 
     // Seed from the authoritative backend so rows created after playback
     // started still show the equalizer immediately.
@@ -252,7 +262,14 @@ TrackRow::TrackRow(MainWindow* main_window, const Track& track, int track_number
 }
 
 TrackRow::~TrackRow() {
+    if (widget_) {
+        g_object_set_data(G_OBJECT(widget_.get()), kLiveRowKey, nullptr);
+    }
     live_rows_.erase(this);
+}
+
+void TrackRow::on_widget_destroyed(gpointer data) {
+    live_rows_.erase(static_cast<TrackRow*>(data));
 }
 
 void TrackRow::setup_ui() {
@@ -356,18 +373,20 @@ void TrackRow::setup_ui() {
     }
 
     // Duration
-    int dur_min = track_.duration / 60;
-    int dur_sec = track_.duration % 60;
-    char dur_str[16];
-    snprintf(dur_str, sizeof(dur_str), "%d:%02d", dur_min, dur_sec);
-    duration_label_.reset(gtk_label_new(dur_str));
-    g_object_ref_sink(duration_label_.get());
-    gtk_widget_add_css_class(duration_label_.get(), "track-row-duration");
-    gtk_label_set_xalign(GTK_LABEL(duration_label_.get()), 1.0);
-    gtk_widget_set_size_request(duration_label_.get(),
-                                track_list_metrics::kDurationWidth, -1);
-    gtk_widget_set_visible(duration_label_.get(), TRUE);
-    gtk_box_append(GTK_BOX(box), duration_label_.get());
+    if (options_.show_duration) {
+        int dur_min = track_.duration / 60;
+        int dur_sec = track_.duration % 60;
+        char dur_str[16];
+        snprintf(dur_str, sizeof(dur_str), "%d:%02d", dur_min, dur_sec);
+        duration_label_.reset(gtk_label_new(dur_str));
+        g_object_ref_sink(duration_label_.get());
+        gtk_widget_add_css_class(duration_label_.get(), "track-row-duration");
+        gtk_label_set_xalign(GTK_LABEL(duration_label_.get()), 1.0);
+        gtk_widget_set_size_request(duration_label_.get(),
+                                    track_list_metrics::kDurationWidth, -1);
+        gtk_widget_set_visible(duration_label_.get(), TRUE);
+        gtk_box_append(GTK_BOX(box), duration_label_.get());
+    }
 
     // Like button
     like_button_.reset(gtk_button_new());
@@ -377,8 +396,10 @@ void TrackRow::setup_ui() {
                                 track_list_metrics::kLikeButtonSize,
                                 track_list_metrics::kLikeButtonSize);
     gtk_widget_add_css_class(like_button_.get(), "track-row-like-button");
-    gtk_widget_set_tooltip_text(like_button_.get(),
-                                liked_ ? "Unlike" : "Like");
+    const std::string like_label =
+        std::string(liked_ ? "Unlike " : "Like ") + track_.title;
+    gtk_widget_set_tooltip_text(like_button_.get(), like_label.c_str());
+    accessibility::set_label(like_button_.get(), like_label.c_str());
     GtkWidget* like_icon = gtk_image_new_from_icon_name(
         liked_ ? "starred-symbolic" : "non-starred-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(like_icon),
@@ -407,12 +428,20 @@ void TrackRow::setup_ui() {
 
     gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(widget_.get()), box);
 
+    const std::string track_label =
+        track_.title + " by " +
+        (track_.artist.empty() ? "Unknown Artist" : track_.artist);
+    accessibility::set_label(widget_.get(), track_label.c_str());
+
     g_signal_connect(widget_.get(), "activate",
                      G_CALLBACK(on_row_activated), this);
 
     // Press gesture for click feedback
     auto* click_gesture = gtk_gesture_click_new();
-    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click_gesture), 0); // All buttons
+    // Primary only: claiming secondary presses here would deny them to the
+    // right-click gesture and suppress the context menu.
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click_gesture),
+                                  GDK_BUTTON_PRIMARY);
     g_signal_connect(click_gesture, "pressed", G_CALLBACK(on_pressed), this);
     g_signal_connect(click_gesture, "released", G_CALLBACK(on_released), this);
     gtk_widget_add_controller(widget_.get(), GTK_EVENT_CONTROLLER(click_gesture));
@@ -436,8 +465,10 @@ void TrackRow::set_playing(bool playing) {
 
 void TrackRow::set_liked(bool liked) {
     liked_ = liked;
-    gtk_widget_set_tooltip_text(like_button_.get(),
-                                liked_ ? "Unlike" : "Like");
+    const std::string like_label =
+        std::string(liked_ ? "Unlike " : "Like ") + track_.title;
+    gtk_widget_set_tooltip_text(like_button_.get(), like_label.c_str());
+    accessibility::set_label(like_button_.get(), like_label.c_str());
     GtkWidget* child = gtk_button_get_child(GTK_BUTTON(like_button_.get()));
     if (GTK_IS_IMAGE(child)) {
         // Reuse existing image widget, just change the icon name
@@ -534,6 +565,21 @@ void TrackRow::create_context_menu() {
     auto* action_group = g_simple_action_group_new();
     g_action_map_add_action_entries(G_ACTION_MAP(action_group),
         (GActionEntry[]){
+            { "play", [](GSimpleAction*, GVariant*, gpointer self) {
+                auto* row = static_cast<TrackRow*>(self);
+                if (row->play_cb_) {
+                    row->play_cb_(row->track_);
+                } else if (row->main_window_) {
+                    if (auto* player = dynamic_cast<IPlayerService*>(
+                            row->main_window_->get_backend())) {
+                        player->play_track(row->track_.id);
+                    }
+                }
+            }, nullptr, nullptr, nullptr },
+            { "toggle-like", [](GSimpleAction*, GVariant*, gpointer self) {
+                auto* row = static_cast<TrackRow*>(self);
+                if (row->like_cb_) row->like_cb_(row->track_, !row->liked_);
+            }, nullptr, nullptr, nullptr },
             { "play-next", [](GSimpleAction*, GVariant*, gpointer self) {
                 auto* row = static_cast<TrackRow*>(self);
                 if (row->queue_action_cb_) row->queue_action_cb_(row->track_, "play_next");
@@ -554,18 +600,20 @@ void TrackRow::create_context_menu() {
                 auto* row = static_cast<TrackRow*>(self);
                 if (row->queue_action_cb_) row->queue_action_cb_(row->track_, "add_to_playlist");
             }, nullptr, nullptr, nullptr },
-        }, 5, this);
+        }, 7, this);
     gtk_widget_insert_action_group(widget_.get(), "track-row", G_ACTION_GROUP(action_group));
 }
 
 void TrackRow::on_context_menu(GtkGestureClick* gesture, int n_press,
                                double x, double y, gpointer user_data) {
-    (void)gesture; (void)n_press; (void)x; (void)y;
+    (void)gesture; (void)n_press;
     TrackRow* self = static_cast<TrackRow*>(user_data);
-    if (!self->queue_action_cb_) return;
+    if (!self) return;
 
-    // Create popover menu
-    GtkWidget* popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(self->create_menu_model()));
+    // The popover refs the model, so the local menu can be released here.
+    GMenu* menu = self->create_menu_model();
+    GtkWidget* popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
+    g_object_unref(menu);
     gtk_widget_set_parent(popover, self->widget_.get());
     GdkRectangle rect = {static_cast<int>(x), static_cast<int>(y), 1, 1};
     gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
@@ -575,11 +623,15 @@ void TrackRow::on_context_menu(GtkGestureClick* gesture, int n_press,
 
 GMenu* TrackRow::create_menu_model() {
     GMenu* menu = g_menu_new();
-    g_menu_append(menu, "Play Next", "track-row.play-next");
-    g_menu_append(menu, "Add to Queue", "track-row.add-to-queue");
-    g_menu_append(menu, "Remove from Queue", "track-row.remove-from-queue");
-    g_menu_append(menu, "Play Last", "track-row.play-last");
-    g_menu_append(menu, "Add to Playlist...", "track-row.add-to-playlist");
+    g_menu_append(menu, "Play", "track-row.play");
+    g_menu_append(menu, liked_ ? "Unlike" : "Like", "track-row.toggle-like");
+    if (queue_action_cb_) {
+        g_menu_append(menu, "Play Next", "track-row.play-next");
+        g_menu_append(menu, "Add to Queue", "track-row.add-to-queue");
+        g_menu_append(menu, "Remove from Queue", "track-row.remove-from-queue");
+        g_menu_append(menu, "Play Last", "track-row.play-last");
+        g_menu_append(menu, "Add to Playlist...", "track-row.add-to-playlist");
+    }
     return menu;
 }
 

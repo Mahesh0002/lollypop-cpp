@@ -117,3 +117,22 @@ target_link_libraries(test_scan_incremental PRIVATE
 )
 
 add_test(NAME scan_incremental_tests COMMAND test_scan_incremental)
+
+# Design stress harness - headless token/data coverage for the manual
+# layout, RTL, and accessibility smoke checks.
+add_executable(test_layout_stress
+    test_layout_stress.cpp
+)
+
+target_link_libraries(test_layout_stress PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+)
+
+add_test(NAME layout_stress_tests COMMAND test_layout_stress)
+
+add_test(NAME design_consistency_tests
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check_design_consistency.sh)
+
+add_test(NAME rtl_smoke_tests
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/rtl_smoke_check.sh)

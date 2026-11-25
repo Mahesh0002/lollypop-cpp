@@ -9,72 +9,64 @@
  */
 
 :root {
-    --apple-font: "Inter", "Noto Sans", sans-serif;
-
-    --apple-size-display: 34px;
-    --apple-size-title: 28px;
-    --apple-size-section: 20px;
-    --apple-size-row: 15px;
-    --apple-size-body: 13px;
-    --apple-size-caption: 11px;
-
-    --apple-weight-regular: 400;
-    --apple-weight-semibold: 600;
+    /* Typography, weights and focus come from style.css via --font-* tokens. */
 
     --apple-row-hover: rgba(255, 255, 255, 0.07);
     --apple-row-active: rgba(255, 255, 255, 0.12);
 }
 
-/* No press ripple or animated button state changes. */
+/* No press ripple; state feedback uses the canonical motion tokens. */
 button {
-    transition: none;
+    transition: background-color var(--motion-fast) var(--ease-out),
+                color var(--motion-fast) var(--ease-out),
+                opacity var(--motion-fast) var(--ease-out);
     animation: none;
 }
 
-/* Typography rhythm. */
+/* Typography rhythm — canonical tokens keep --font-scale working here. */
 .apple-display-title {
-    font-family: var(--apple-font);
-    font-size: var(--apple-size-display);
-    font-weight: var(--apple-weight-semibold);
+    font-family: var(--font-family);
+    font-size: var(--font-display);
+    font-weight: var(--font-weight-semibold);
     letter-spacing: -0.5px;
 }
 
 .apple-page-title {
-    font-family: var(--apple-font);
-    font-size: var(--apple-size-title);
-    font-weight: var(--apple-weight-semibold);
+    font-family: var(--font-family);
+    font-size: var(--font-title1);
+    font-weight: var(--font-weight-semibold);
     letter-spacing: -0.3px;
 }
 
 .apple-section-title {
-    font-family: var(--apple-font);
-    font-size: var(--apple-size-section);
-    font-weight: var(--apple-weight-semibold);
+    font-family: var(--font-family);
+    font-size: var(--font-title3);
+    font-weight: var(--font-weight-semibold);
 }
 
 .apple-row-title {
-    font-family: var(--apple-font);
-    font-size: var(--apple-size-row);
-    font-weight: var(--apple-weight-regular);
+    font-family: var(--font-family);
+    font-size: var(--font-subhead);
+    font-weight: var(--font-weight-regular);
 }
 
 .apple-body-text {
-    font-family: var(--apple-font);
-    font-size: var(--apple-size-body);
-    font-weight: var(--apple-weight-regular);
+    font-family: var(--font-family);
+    font-size: var(--font-footnote);
+    font-weight: var(--font-weight-regular);
 }
 
 .apple-caption {
-    font-family: var(--apple-font);
-    font-size: var(--apple-size-caption);
-    font-weight: var(--apple-weight-regular);
+    font-family: var(--font-family);
+    font-size: var(--font-caption2);
+    font-weight: var(--font-weight-regular);
 }
 
 /* Sidebar shell: fills the complete main-row height. */
 .apple-sidebar {
-    min-width: 220px;
+    /* Fixed 200px source list, including this separator. */
+    min-width: 200px;
     background-color: var(--bg-secondary);
-    border-right: 1px solid var(--border-subtle);
 }
 
 .apple-sidebar-grid {
@@ -98,7 +90,6 @@ button {
     border-radius: 8px;
     background-color: transparent;
     box-shadow: none;
-    outline: none;
     color: var(--text-secondary);
 }
 
@@ -121,10 +112,15 @@ button {
     background-color: var(--apple-row-active);
 }
 
+/* One canonical focus ring across base and Apple layers. */
 .apple-back-button:focus-visible,
-.apple-nav-row:focus-visible {
-    outline: 1px solid rgba(255, 255, 255, 0.45);
-    outline-offset: 1px;
+.apple-nav-row:focus-visible,
+.apple-album-tile:focus-visible,
+.apple-album-favorite:focus-visible,
+.album-card:focus-visible,
+.track-row:focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
 }
 
 /* 5px on both sides of every outline icon. */
@@ -147,9 +143,9 @@ button {
 }
 
 .apple-nav-label {
-    font-family: var(--apple-font);
-    font-size: var(--apple-size-row);
-    font-weight: var(--apple-weight-regular);
+    font-family: var(--font-family);
+    font-size: var(--font-subhead);
+    font-weight: var(--font-weight-regular);
     color: var(--text-secondary);
     min-width: 0;
 }
@@ -160,14 +156,14 @@ button {
 
 .apple-nav-row.active .apple-nav-label {
     color: var(--text-primary);
-    font-weight: var(--apple-weight-semibold);
+    font-weight: var(--font-weight-semibold);
 }
 
 /* Home page: album-first sections. */
 .home-page .section-title {
-    font-family: var(--apple-font);
-    font-size: var(--apple-size-section);
-    font-weight: var(--apple-weight-semibold);
+    font-family: var(--font-family);
+    font-size: var(--font-title3);
+    font-weight: var(--font-weight-semibold);
     letter-spacing: -0.1px;
     margin-bottom: 12px;
 }
@@ -241,7 +237,7 @@ button {
     border-top-right-radius: 0;
     border-bottom-left-radius: 12px;
     border-bottom-right-radius: 12px;
-    transition: background-color 160ms ease-out;
+    transition: background-color var(--motion-base) var(--ease-out);
 }
 
 .apple-album-tile.hover .apple-album-scrim {
@@ -255,34 +251,53 @@ button {
 }
 
 .apple-album-name {
-    font-family: var(--apple-font);
-    font-size: 13px;
-    font-weight: var(--apple-weight-semibold);
-    line-height: 16px;
+    font-family: var(--font-family);
+    /* 1.5x the original 13px footnote (and its 16px line box). */
+    font-size: var(--font-album-name);
+    font-weight: 700;
+    line-height: 24px;
     letter-spacing: -0.2px;
-    color: #ffffff;
+    color: var(--text-primary);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
 }
 
 .apple-album-artist {
-    font-family: var(--apple-font);
-    font-size: 11px;
-    font-weight: var(--apple-weight-regular);
-    line-height: 14px;
+    font-family: var(--font-family);
+    /* 1.5x the original 11px caption (and its 14px line box). */
+    font-size: var(--font-album-artist);
+    font-weight: 600;
+    line-height: 21px;
     letter-spacing: 0.7px;
     color: rgba(255, 255, 255, 0.76);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 
 .albums-page .apple-album-name {
-    font-size: 12px;
+    font-size: var(--font-caption1);
     line-height: 15px;
 }
 
 .albums-page .apple-album-artist {
-    font-size: 10px;
+    font-size: var(--font-caption2);
     line-height: 13px;
     letter-spacing: 0.6px;
+}
+
+/* Rectangular rounded play/pause control in the top-right of the scrim. */
+.apple-album-play-button {
+    min-width: 28px;
+    min-height: 28px;
+    padding: 4px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background-color: rgba(0, 0, 0, 0.55);
+    color: var(--text-primary);
+    opacity: 1;
+    transition: background-color var(--motion-fast) var(--ease-out);
+}
+
+.apple-album-play-button:hover {
+    background-color: rgba(0, 0, 0, 0.75);
 }
 
 .apple-album-favorite {
@@ -290,19 +305,39 @@ button {
     min-height: 26px;
     padding: 0;
     border: none;
-    border-radius: var(--radius-control, 8px);
+    border-radius: var(--radius-sm);
     background-color: rgba(0, 0, 0, 0.55);
-    color: #ffffff;
+    color: var(--text-primary);
     opacity: 0;
-    transition: opacity 120ms ease-out, background-color 120ms ease-out;
+    transition: opacity var(--motion-fast) var(--ease-out),
+                background-color var(--motion-fast) var(--ease-out);
 }
 
+/* Pointer, keyboard and favourited state all reveal the same control. */
 .apple-album-tile.hover .apple-album-favorite,
-.apple-album-tile.favorited .apple-album-favorite {
+.apple-album-tile:focus-within .apple-album-favorite,
+.apple-album-tile:focus-visible .apple-album-favorite,
+.apple-album-tile.favorited .apple-album-favorite,
+.apple-album-favorite:focus-visible {
     opacity: 1;
 }
 
 .apple-album-tile.favorited .apple-album-favorite {
-    color: var(--accent-color, #fa243c);
+    color: var(--accent-color);
+}
+
+/* RTL: the sidebar separator and tile metadata are the only physical edges
+   in this layer; mirror them instead of relying on inherited LTR geometry. */
+.apple-sidebar:dir(ltr) {
+    border-right: 1px solid var(--border-subtle);
+}
+
+.apple-sidebar:dir(rtl) {
+    border-left: 1px solid var(--border-subtle);
+}
+
+.apple-album-name:dir(rtl),
+.apple-album-artist:dir(rtl) {
+    text-align: right;
 }
 

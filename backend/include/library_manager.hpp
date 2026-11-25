@@ -70,6 +70,8 @@ public:
     using ScanProgressCallback = std::function<void(const ScanProgress&)>;
     using ScanFinishedCallback = std::function<void(bool success, bool cancelled)>;
     using TrackFoundCallback = std::function<void(const Track&)>;
+    using TrackFoundWithCacheCallback =
+        LibraryScanner::TrackFoundWithCacheCallback;
     using ErrorCallback = std::function<void(const std::string& file,
                                               const std::string& error)>;
 
@@ -100,6 +102,7 @@ public:
     void set_scan_progress_callback(ScanProgressCallback cb);
     void set_scan_finished_callback(ScanFinishedCallback cb);
     void set_track_found_callback(TrackFoundCallback cb);
+    void set_track_found_with_cache_callback(TrackFoundWithCacheCallback cb);
     void set_error_callback(ErrorCallback cb);
 
     // Periodic incremental scanning
@@ -140,6 +143,7 @@ private:
     ScanProgressCallback progress_cb_;
     ScanFinishedCallback finished_cb_;
     TrackFoundCallback track_cb_;
+    TrackFoundWithCacheCallback track_with_cache_cb_;
     ErrorCallback error_cb_;
 
     std::unique_ptr<PeriodicScanState> periodic_;

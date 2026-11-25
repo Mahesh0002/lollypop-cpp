@@ -20,6 +20,9 @@ class MainWindow;
 
 class AppleSidebar {
 public:
+    // Total visible width, including the 1px CSS separator.
+    static constexpr int kPanelWidth = 200;
+
     explicit AppleSidebar(MainWindow* main_window);
     ~AppleSidebar();
 

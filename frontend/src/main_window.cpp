@@ -21,10 +21,58 @@
 
 #include <adwaita.h>
 #include <gtk/gtk.h>
+#include <algorithm>
 #include <iostream>
 #include <vector>
 
 namespace lollypop {
+
+namespace {
+
+constexpr int kMiddlePanelWidth = 1700;
+constexpr int kTotalPanelWidth = AppleSidebar::kPanelWidth +
+                                 kMiddlePanelWidth +
+                                 RightNowPlaying::kPanelWidth;
+
+// Middle panel layout contract: a fixed 1700px column. Its scroller owns the
+// height, and no album tile or track row contributes to the window request.
+GtkSizeRequestMode content_slot_request_mode(GtkWidget*) {
+    return GTK_SIZE_REQUEST_HEIGHT_FOR_WIDTH;
+}
+
+void content_slot_measure(GtkWidget* widget, GtkOrientation orientation, int,
+                          int* minimum, int* natural, int* minimum_baseline,
+                          int* natural_baseline) {
+    int requested_width = kMiddlePanelWidth;
+    int requested_height = -1;
+    gtk_widget_get_size_request(widget, &requested_width, &requested_height);
+    const int width = requested_width > 0 ? requested_width : kMiddlePanelWidth;
+
+    if (orientation == GTK_ORIENTATION_HORIZONTAL) {
+        if (minimum) *minimum = width;
+        if (natural) *natural = width;
+    } else {
+        if (minimum) *minimum = 0;
+        if (natural) *natural = 0;
+    }
+    if (minimum_baseline) *minimum_baseline = -1;
+    if (natural_baseline) *natural_baseline = -1;
+}
+
+void content_slot_allocate(GtkWidget* widget, int width, int height,
+                           int baseline) {
+    if (GtkWidget* child = gtk_widget_get_first_child(widget)) {
+        gtk_widget_allocate(child, width, height, baseline, nullptr);
+    }
+}
+
+GtkLayoutManager* create_content_slot_layout() {
+    return gtk_custom_layout_new(content_slot_request_mode,
+                                 content_slot_measure,
+                                 content_slot_allocate);
+}
+
+} // namespace
 
 MainWindow::MainWindow(Application* app)
     : app_(app),
@@ -83,7 +131,7 @@ void MainWindow::setup_window() {
 
     // Clamp the initial size to the monitor so the right panel is never
     // pushed off-screen on smaller displays.
-    int initial_width = 1440;
+    int initial_width = kTotalPanelWidth;
     int initial_height = 900;
     GdkDisplay* display = gtk_widget_get_display(window_);
     GListModel* monitors = display ? gdk_display_get_monitors(display) : nullptr;
@@ -92,18 +140,16 @@ void MainWindow::setup_window() {
         monitor = GDK_MONITOR(g_list_model_get_item(monitors, 0));
     }
     if (monitor) {
-        GdkRectangle geometry{};
-        gdk_monitor_get_geometry(monitor, &geometry);
-        if (geometry.width > 964 && initial_width > geometry.width - 64) {
-            initial_width = geometry.width - 64;
-        }
-        if (geometry.height > 664 && initial_height > geometry.height - 64) {
-            initial_height = geometry.height - 64;
-        }
+        GdkRectangle area{};
+        gdk_monitor_get_geometry(monitor, &area);
+        // Reserve a frame margin so no panel is pushed off-screen.
+        initial_width = std::min(initial_width, std::max(640, area.width - 64));
+        initial_height = std::min(initial_height,
+                                  std::max(480, area.height - 64));
         g_object_unref(monitor);
     }
-    if (initial_width < 900) initial_width = 900;
-    if (initial_height < 600) initial_height = 600;
+    initial_width = std::max(initial_width, 640);
+    initial_height = std::max(initial_height, 480);
     gtk_window_set_default_size(GTK_WINDOW(window_), initial_width,
                                 initial_height);
     gtk_window_set_decorated(GTK_WINDOW(window_), TRUE);
@@ -272,27 +318,34 @@ void MainWindow::setup_layout() {
     GtkWidget* right_widget = right_now_playing_->get_widget();
     GtkWidget* bottom_widget = bottom_playback_->get_widget();
 
+    // Fixed middle column. The custom layout manager keeps library content
+    // from expanding the window beyond the 1700px budget.
+    GtkWidget* middle_slot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_layout_manager(middle_slot, create_content_slot_layout());
+    gtk_widget_set_size_request(middle_slot, kMiddlePanelWidth, -1);
+    gtk_widget_set_hexpand(middle_slot, FALSE);
+    gtk_widget_set_vexpand(middle_slot, TRUE);
+    gtk_widget_set_visible(middle_slot, TRUE);
+    gtk_box_append(GTK_BOX(middle_slot), middle_widget);
+
     // Attach to grid: 3 columns (left, middle, right), 2 rows (main, bottom)
     // Row 0: Left | Middle | Right
     // Row 1: Bottom (spans all 3 columns)
     gtk_grid_attach(GTK_GRID(content_grid_), left_widget, 0, 0, 1, 1);
-    gtk_grid_attach(GTK_GRID(content_grid_), middle_widget, 1, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(content_grid_), middle_slot, 1, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(content_grid_), right_widget, 2, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(content_grid_), bottom_widget, 0, 1, 3, 1);
 
-    // Set column expansion: middle gets most space
+    // Fixed columns: 200px source list, 1700px library, 500px now playing.
     gtk_grid_set_column_homogeneous(GTK_GRID(content_grid_), FALSE);
 
-    // Left sidebar: mode-dependent width derived from the row height in LeftSidebar
     gtk_widget_set_hexpand(left_widget, FALSE);
 
-    // Middle library: expands to fill remaining space
+    // The library fills exactly the middle slot.
     gtk_widget_set_hexpand(middle_widget, TRUE);
     gtk_widget_set_vexpand(middle_widget, TRUE);
 
-    // Right panel: fixed comfortable width; its contents expand to fill it and
-    // adapt to the panel's real allocation via RightNowPlaying's size monitor.
-    gtk_widget_set_size_request(right_widget, 340, -1);
+    // RightNowPlaying owns its 500px size request.
     gtk_widget_set_hexpand(right_widget, FALSE);
     gtk_widget_set_vexpand(right_widget, TRUE);
 

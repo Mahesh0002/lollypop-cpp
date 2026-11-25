@@ -71,12 +71,8 @@ void FavouriteAlbumsPage::setup_ui() {
 }
 
 void FavouriteAlbumsPage::refresh() {
-    GtkWidget* child = gtk_widget_get_first_child(grid_.get());
-    while (child) {
-        GtkWidget* next = gtk_widget_get_next_sibling(child);
-        gtk_flow_box_remove(GTK_FLOW_BOX(grid_.get()), child);
-        child = next;
-    }
+    // Use safe helper to avoid invalid sibling pointers after unparenting
+    safe_flow_box_remove_all(GTK_FLOW_BOX(grid_.get()));
     album_cards_.clear();
 
     std::vector<Album> albums;

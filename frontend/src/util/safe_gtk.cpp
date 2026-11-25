@@ -11,6 +11,8 @@
 
 #include <gtk/gtk.h>
 
+#include <vector>
+
 namespace lollypop {
 
 static inline bool is_valid_widget(GtkWidget* widget) {
@@ -53,8 +55,8 @@ void safe_scrolled_window_set_child(GtkScrolledWindow* scrolled, GtkWidget* chil
     if (!scrolled || !child) return;
     if (!is_valid_widget(child)) return;
     // Let GTK handle replacing the current child - it does this correctly
-    // Only unparent the new child if it already has a parent
-    if (gtk_widget_get_parent(child) != nullptr) {
+    // Only unparent the new child if it already has a parent AND is still valid
+    if (gtk_widget_get_parent(child) != nullptr && is_valid_widget(child)) {
         gtk_widget_unparent(child);
     }
     gtk_scrolled_window_set_child(scrolled, child);
@@ -64,7 +66,7 @@ void safe_stack_add_named(GtkStack* stack, GtkWidget* child, const char* name) {
     if (!stack || !child || !name) return;
     if (!is_valid_widget(child)) return;
     // Stack does NOT automatically reparent - check and unparent first
-    if (gtk_widget_get_parent(child) != nullptr) {
+    if (gtk_widget_get_parent(child) != nullptr && is_valid_widget(child)) {
         gtk_widget_unparent(child);
     }
     gtk_stack_add_named(stack, child, name);
@@ -82,11 +84,47 @@ void safe_box_remove(GtkBox* box, GtkWidget* child) {
     gtk_box_remove(box, child);
 }
 
+void safe_list_box_remove_all(GtkListBox* list_box) {
+    if (!list_box) return;
+    // Collect all children first to avoid invalid sibling pointers after unparenting
+    std::vector<GtkWidget*> children;
+    GtkWidget* child = gtk_widget_get_first_child(GTK_WIDGET(list_box));
+    while (child) {
+        if (is_valid_widget(child)) {
+            children.push_back(child);
+        }
+        child = gtk_widget_get_next_sibling(child);
+    }
+    for (GtkWidget* c : children) {
+        if (is_valid_widget(c)) {
+            gtk_list_box_remove(list_box, c);
+        }
+    }
+}
+
+void safe_flow_box_remove_all(GtkFlowBox* flow_box) {
+    if (!flow_box) return;
+    // Collect all children first to avoid invalid sibling pointers after unparenting
+    std::vector<GtkWidget*> children;
+    GtkWidget* child = gtk_widget_get_first_child(GTK_WIDGET(flow_box));
+    while (child) {
+        if (is_valid_widget(child)) {
+            children.push_back(child);
+        }
+        child = gtk_widget_get_next_sibling(child);
+    }
+    for (GtkWidget* c : children) {
+        if (is_valid_widget(c)) {
+            gtk_flow_box_remove(flow_box, c);
+        }
+    }
+}
+
 void safe_button_set_child(GtkButton* button, GtkWidget* child) {
     if (!button || !child) return;
     if (!is_valid_widget(child)) return;
     // Let GTK handle replacing the current child
-    if (gtk_widget_get_parent(child) != nullptr) {
+    if (gtk_widget_get_parent(child) != nullptr && is_valid_widget(child)) {
         gtk_widget_unparent(child);
     }
     gtk_button_set_child(button, child);
@@ -96,7 +134,7 @@ void safe_menu_button_set_child(GtkMenuButton* menu_button, GtkWidget* child) {
     if (!menu_button || !child) return;
     if (!is_valid_widget(child)) return;
     // Let GTK handle replacing the current child
-    if (gtk_widget_get_parent(child) != nullptr) {
+    if (gtk_widget_get_parent(child) != nullptr && is_valid_widget(child)) {
         gtk_widget_unparent(child);
     }
     gtk_menu_button_set_child(menu_button, child);

@@ -40,12 +40,8 @@ void ArtistsPage::setup_ui() {
 }
 
 void ArtistsPage::refresh() {
-    GtkWidget* child = gtk_widget_get_first_child(grid_.get());
-    while (child) {
-        GtkWidget* next = gtk_widget_get_next_sibling(child);
-        gtk_flow_box_remove(GTK_FLOW_BOX(grid_.get()), child);
-        child = next;
-    }
+    // Use safe helper to avoid invalid sibling pointers after unparenting
+    safe_flow_box_remove_all(GTK_FLOW_BOX(grid_.get()));
     artist_items_.clear();
 
     if (library_service_) {

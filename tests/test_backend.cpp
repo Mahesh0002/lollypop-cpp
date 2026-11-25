@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 #include "controller.hpp"
+#include "manager.hpp"
 
 using namespace lollypop;
 
@@ -42,6 +43,12 @@ TEST_F(BackendTest, VolumeControl) {
 }
 
 TEST_F(BackendTest, PlaybackModes) {
+    // Playback modes are restored from persisted preferences on a shared
+    // database, so normalize them before asserting default-off behaviour.
+    backend->set_shuffle(false);
+    backend->set_repeat(false);
+    backend->set_repeat_one(false);
+
     // Shuffle
     EXPECT_FALSE(backend->get_shuffle());
     backend->set_shuffle(true);
@@ -105,6 +112,41 @@ TEST_F(BackendTest, Callbacks) {
     EXPECT_FALSE(position_changed);
     EXPECT_FALSE(state_changed);
     EXPECT_FALSE(queue_changed);
+}
+
+TEST(StorageBatchTest, LargeLookupAndUnboundedPagination) {
+    StorageManager storage;
+    ASSERT_TRUE(storage.initialize(":memory:"));
+
+    constexpr int kCount = 1050;  // Beyond both the 999 bind limit and 500 chunking.
+    for (int i = 0; i < kCount; ++i) {
+        Track track;
+        track.id = "batch-track-" + std::to_string(i);
+        track.title = "Title " + std::to_string(i);
+        track.artist = "Artist";
+        track.file_path = "/music/" + track.id + ".mp3";
+        ASSERT_TRUE(storage.add_track(track));
+    }
+
+    std::vector<std::string> ids;
+    for (int i = kCount - 1; i >= 0; --i) {
+        ids.push_back("batch-track-" + std::to_string(i));
+    }
+    ids.push_back("missing-track");
+    ids.push_back(ids.front());  // Duplicate must be preserved.
+
+    const auto tracks = storage.get_tracks_by_ids(ids);
+    ASSERT_EQ(tracks.size(), static_cast<size_t>(kCount) + 1);
+    EXPECT_EQ(tracks.front().id, "batch-track-1049");
+    EXPECT_EQ(tracks[kCount - 1].id, "batch-track-0");
+    EXPECT_EQ(tracks.back().id, "batch-track-1049");
+
+    // Negative limit means unbounded; this library is larger than 10k's
+    // conceptual cap and must still be returned in full.
+    EXPECT_EQ(storage.get_tracks_paginated(-1, "title").size(),
+              static_cast<size_t>(kCount));
+
+    storage.shutdown();
 }
 
 int main(int argc, char** argv) {

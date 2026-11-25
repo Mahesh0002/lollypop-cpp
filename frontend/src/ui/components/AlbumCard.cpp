@@ -8,10 +8,12 @@
 
 #include "ui/components/AlbumCard.hpp"
 #include "main_window.hpp"
+#include "util/accessibility.hpp"
 
 #include <gtk/gtk.h>
 #include <gio/gio.h>
 #include <cstring>
+#include <string>
 
 namespace lollypop {
 
@@ -47,6 +49,10 @@ void AlbumCard::setup_ui() {
     g_object_ref_sink(widget_.get());
     gtk_widget_set_focusable(widget_.get(), TRUE);
     gtk_widget_add_css_class(widget_.get(), "album-card");
+    const std::string artist =
+        album_.artist.empty() ? "Unknown Artist" : album_.artist;
+    const std::string album_label = album_.title + " by " + artist;
+    accessibility::set_label(widget_.get(), album_label.c_str());
     gtk_widget_set_halign(widget_.get(), GTK_ALIGN_CENTER);
     gtk_widget_set_valign(widget_.get(), GTK_ALIGN_START);
     gtk_widget_set_size_request(widget_.get(), kArtworkSize, -1);
@@ -67,9 +73,11 @@ void AlbumCard::setup_ui() {
 
     title_label_.reset(create_meta_label(album_.title.c_str(),
                                          "album-title"));
+    g_object_ref_sink(title_label_.get());
     artist_label_.reset(create_meta_label(
         album_.artist.empty() ? "Unknown Artist" : album_.artist.c_str(),
         "album-artist"));
+    g_object_ref_sink(artist_label_.get());
     gtk_box_append(GTK_BOX(content), title_label_.get());
     gtk_box_append(GTK_BOX(content), artist_label_.get());
 
@@ -212,7 +220,7 @@ GMenu* AlbumCard::create_menu_model() {
     g_menu_append(menu, "Shuffle", "album-card.shuffle");
     g_menu_append(menu, "Add to Queue", "album-card.add-to-queue");
     g_menu_append(menu, "Add to Playlist...", "album-card.add-to-playlist");
-    g_menu_append(menu, "Favorite", "album-card.toggle-favorite");
+    g_menu_append(menu, "Favourite", "album-card.toggle-favorite");
     return menu;
 }
 

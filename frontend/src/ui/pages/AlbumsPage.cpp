@@ -141,12 +141,7 @@ void AlbumsPage::refresh() {
 
     // Detach children before repopulating. The tile objects are kept when the
     // album count is unchanged so their artwork textures can be reused.
-    GtkWidget* child = gtk_widget_get_first_child(grid_.get());
-    while (child) {
-        GtkWidget* next = gtk_widget_get_next_sibling(child);
-        gtk_flow_box_remove(GTK_FLOW_BOX(grid_.get()), child);
-        child = next;
-    }
+    safe_flow_box_remove_all(GTK_FLOW_BOX(grid_.get()));
     if (album_tiles_.size() != albums.size()) album_tiles_.clear();
 
     update_header(albums.size());
@@ -221,6 +216,13 @@ void AlbumsPage::populate(const std::vector<Album>& albums) {
                 [this](const Album& a) { on_album_played(a); });
             tile->set_click_callback(
                 [this](const Album& a) { on_album_clicked(a); });
+            tile->set_play_toggle_callback([this](const Album&) {
+                if (!main_window_) return;
+                if (auto* player = dynamic_cast<IPlayerService*>(
+                        main_window_->get_backend())) {
+                    player->toggle_play_pause();
+                }
+            });
             tile->set_favorite_query_callback([this](const Album& a) {
                 return favourite_album_ids_.count(a.id) != 0;
             });

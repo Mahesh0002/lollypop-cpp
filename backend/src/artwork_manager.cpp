@@ -22,15 +22,18 @@ ArtworkManager::~ArtworkManager() {
 }
 
 std::string ArtworkManager::make_key(const std::string& album_artist,
-                                      const std::string& album) {
-    // Stable key from album identity. Falls back to the raw strings when
-    // either is empty.
+                                      const std::string& album,
+                                      const std::string& file_path) {
+    // Stable key from album identity. Incomplete metadata falls back to the
+    // source path, then to a unique id so unknown albums never share a key.
     if (!album_artist.empty() && !album.empty()) {
-        return album_artist + "|" + album;
+        return "album|" + album_artist + "|" + album;
     }
-    if (!album.empty()) return album;
-    if (!album_artist.empty()) return album_artist;
-    return "unknown";
+    if (!album.empty()) return "album|" + album;
+    if (!album_artist.empty()) return "artist|" + album_artist;
+    if (!file_path.empty()) return "path|" + file_path;
+    static std::atomic<uint64_t> next_unknown{0};
+    return "unknown|" + std::to_string(next_unknown.fetch_add(1));
 }
 
 bool ArtworkManager::initialize(const std::string& cache_dir,
@@ -47,10 +50,25 @@ bool ArtworkManager::initialize(const std::string& cache_dir,
 }
 
 void ArtworkManager::shutdown() {
-    if (!running_) return;
-    running_ = false;
-    queue_cv_.notify_all();
-    if (worker_thread_.joinable()) worker_thread_.join();
+    if (running_.exchange(false)) {
+        queue_cv_.notify_all();
+        if (worker_thread_.joinable()) worker_thread_.join();
+    }
+
+    // Drop queued work and callbacks that may capture objects which are being
+    // torn down; no worker can be running at this point.
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        std::priority_queue<QueuedRequest> empty;
+        std::swap(queue_, empty);
+        extract_fn_ = nullptr;
+    }
+    {
+        std::lock_guard<std::mutex> lock(in_flight_mutex_);
+        in_flight_.clear();
+        pending_callbacks_.clear();
+    }
+
     if (cache_) cache_->shutdown();
 }
 

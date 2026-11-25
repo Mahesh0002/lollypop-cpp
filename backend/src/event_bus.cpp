@@ -110,8 +110,10 @@ void EventBus::deliver(const Event& event) {
 }
 
 EventBus& EventBus::instance() {
-    static EventBus bus;
-    return bus;
+    // Intentionally never destroyed: Glib's main context shuts down before
+    // function-local statics, and this object owns a Glib::Dispatcher.
+    static EventBus* bus = new EventBus();
+    return *bus;
 }
 
 }  // namespace lollypop

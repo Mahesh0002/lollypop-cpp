@@ -33,6 +33,7 @@
     --text-secondary: #a3a3ad;
     --text-tertiary: #7a7a8a;
     --text-disabled: #555565;
+    --text-on-accent: #ffffff;
 
     /* Accent — ThemeManager overrides these at runtime */
     --accent-color: #a78bfa;
@@ -51,19 +52,27 @@
     --shadow-strong: rgba(0, 0, 0, 0.50);
     --shadow-subtle: rgba(0, 0, 0, 0.20);
 
-    /* Typography scale (Apple type scale in px, scaled by GTK font size) */
+    /* Typography scale (single source for all CSS layers) */
+    --font-family: "Inter", "Noto Sans", "Liberation Sans", sans-serif;
     --font-scale: 1;
     --font-display: calc(34px * var(--font-scale));
+    --font-display-small: calc(30px * var(--font-scale));
+    --font-hero: calc(48px * var(--font-scale));
     --font-title1: calc(28px * var(--font-scale));
     --font-title2: calc(22px * var(--font-scale));
     --font-title3: calc(20px * var(--font-scale));
     --font-headline: calc(17px * var(--font-scale));
+    --font-ui-medium: calc(18px * var(--font-scale));
     --font-body: calc(17px * var(--font-scale));
     --font-callout: calc(16px * var(--font-scale));
     --font-subhead: calc(15px * var(--font-scale));
+    --font-ui-small: calc(14px * var(--font-scale));
     --font-footnote: calc(13px * var(--font-scale));
     --font-caption1: calc(12px * var(--font-scale));
     --font-caption2: calc(11px * var(--font-scale));
+    /* Scrim labels at 1.5x their base sizes. */
+    --font-album-name: calc(var(--font-footnote) * 1.5);
+    --font-album-artist: calc(var(--font-caption2) * 1.5);
 
     /* Font weights */
     --font-weight-thin: 100;
@@ -84,6 +93,12 @@
     --radius-xl: 24px;
     --radius-control: 8px;
 
+    /* Motion — short, calm transitions for state feedback only */
+    --motion-fast: 120ms;
+    --motion-base: 160ms;
+    --motion-slow: 240ms;
+    --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
     /* Translucent material tokens — NO backdrop-filter (not in GTK CSS) */
     --glass-ultra-thin-bg: rgba(255, 255, 255, 0.04);
     --glass-ultra-thin-border: rgba(255, 255, 255, 0.06);
@@ -102,8 +117,8 @@
  * ============================================================================ */
 
 * {
-    font-family: "Inter", "Noto Sans", "Liberation Sans", sans-serif;
-    font-size: 13px;
+    font-family: var(--font-family);
+    font-size: var(--font-footnote);
     color: var(--text-primary);
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
@@ -123,11 +138,11 @@ button {
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
     padding: 8px;
-    transition: background-color 150ms ease-out,
-                color 150ms ease-out,
-                border-color 150ms ease-out,
-                box-shadow 150ms ease-out,
-                transform 150ms ease-out;
+    transition: background-color var(--motion-base) var(--ease-out),
+                color var(--motion-base) var(--ease-out),
+                border-color var(--motion-base) var(--ease-out),
+                box-shadow var(--motion-base) var(--ease-out),
+                transform var(--motion-base) var(--ease-out);
     /* Apple-like deceleration curve for interactive state changes. */
     transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
 }
@@ -138,12 +153,12 @@ button:hover {
 
 button:active {
     background-color: var(--bg-active);
-    transition-duration: 50ms;
+    transition-duration: var(--motion-fast);
 }
 
-button:focus {
+button:focus-visible {
     outline: 2px solid var(--border-focus);
-    outline-offset: 1px;
+    outline-offset: 2px;
 }
 
 button:disabled {
@@ -238,6 +253,8 @@ listboxrow:selected {
     * {
         transition-duration: 1ms;
         animation-duration: 1ms;
+        transition-delay: 0ms;
+        animation-delay: 0ms;
     }
 }
 
@@ -247,7 +264,6 @@ listboxrow:selected {
 
 .sidebar {
     background-color: var(--bg-secondary);
-    border-right: 1px solid var(--border-subtle);
     min-width: 0;
 }
 
@@ -272,10 +288,10 @@ listboxrow:selected {
     padding: 0;
 }
 
-.sidebar button:focus,
 .sidebar button:focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
     box-shadow: none;
-    outline: none;
     border: none;
 }
 
@@ -320,14 +336,14 @@ listboxrow:selected {
 
 .sidebar-nav-label {
     color: var(--text-secondary);
-    font-size: 13px;
+    font-size: var(--font-footnote);
     font-weight: var(--font-weight-regular);
 }
 
-.sidebar-nav-item:focus,
-.sidebar-action-button:focus {
-    outline: 1px solid rgba(255, 255, 255, 0.35);
-    outline-offset: -2px;
+.sidebar-nav-item:focus-visible,
+.sidebar-action-button:focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
     box-shadow: none;
     border: none;
 }
@@ -393,7 +409,7 @@ listboxrow:selected {
 
 .library-page-title {
     color: var(--text-primary);
-    font-size: 22px;
+    font-size: var(--font-title2);
     font-weight: var(--font-weight-semibold);
     letter-spacing: -0.3px;
     margin-bottom: 16px;
@@ -407,7 +423,7 @@ listboxrow:selected {
 
 .page-title {
     color: var(--text-primary);
-    font-size: 30px;
+    font-size: var(--font-display-small);
     font-weight: var(--font-weight-semibold);
     letter-spacing: -0.6px;
     line-height: 1.15;
@@ -415,7 +431,7 @@ listboxrow:selected {
 
 .page-subtitle {
     color: var(--text-secondary);
-    font-size: 13px;
+    font-size: var(--font-footnote);
     font-weight: var(--font-weight-regular);
     margin-top: 4px;
 }
@@ -427,7 +443,7 @@ listboxrow:selected {
     border-radius: var(--radius-control);
     background-color: rgba(255, 255, 255, 0.06);
     color: var(--text-secondary);
-    font-size: 13px;
+    font-size: var(--font-footnote);
     font-weight: var(--font-weight-regular);
 }
 
@@ -438,7 +454,7 @@ listboxrow:selected {
 
 .library-placeholder {
     color: var(--text-tertiary);
-    font-size: 13px;
+    font-size: var(--font-footnote);
 }
 
 .middle-glass-toolbar {
@@ -454,8 +470,8 @@ listboxrow:selected {
                 0 2px 8px rgba(0, 0, 0, 0.16);
     min-height: 52px;
     padding: 0 12px;
-    transition: background-color 200ms ease-out,
-                box-shadow 200ms ease-out;
+    transition: background-color var(--motion-base) var(--ease-out),
+                box-shadow var(--motion-base) var(--ease-out);
 }
 
 @media (prefers-color-scheme: light) {
@@ -486,7 +502,7 @@ listboxrow:selected {
 
 .middle-toolbar-title {
     color: var(--text-primary);
-    font-size: 17px;
+    font-size: var(--font-body);
     font-weight: var(--font-weight-semibold);
     letter-spacing: -0.2px;
 }
@@ -499,7 +515,7 @@ listboxrow:selected {
     background-color: rgba(255, 255, 255, 0.08);
     border: 1px solid transparent;
     color: var(--text-primary);
-    font-size: 13px;
+    font-size: var(--font-footnote);
     transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -541,14 +557,13 @@ listboxrow:selected {
 
 .home-subtitle {
     color: var(--text-secondary);
-    font-size: 16px;
+    font-size: var(--font-callout);
     font-weight: var(--font-weight-regular);
-    margin-left: 4px;
 }
 
 .section-title {
     color: var(--text-primary);
-    font-size: 18px;
+    font-size: var(--font-ui-medium);
     font-weight: var(--font-weight-semibold);
     letter-spacing: -0.2px;
     margin-bottom: 16px;
@@ -556,7 +571,7 @@ listboxrow:selected {
 
 .section-view-all {
     color: var(--accent-color);
-    font-size: 13px;
+    font-size: var(--font-footnote);
     font-weight: var(--font-weight-medium);
     padding: 4px 8px;
     border-radius: var(--radius-xs);
@@ -579,10 +594,10 @@ listboxrow:selected {
     padding: 0;
     min-width: 0;
     min-height: 0;
-    transition: background-color 150ms ease-out,
-                border-color 150ms ease-out,
-                box-shadow 150ms ease-out,
-                transform 150ms ease-out;
+    transition: background-color var(--motion-base) var(--ease-out),
+                border-color var(--motion-base) var(--ease-out),
+                box-shadow var(--motion-base) var(--ease-out),
+                transform var(--motion-base) var(--ease-out);
 }
 
 .album-card:hover,
@@ -641,7 +656,7 @@ listboxrow:selected {
     opacity: 0.86;
 }
 
-.album-card:focus {
+.album-card:focus-visible {
     outline: 2px solid var(--border-focus);
     outline-offset: 2px;
 }
@@ -662,7 +677,7 @@ listboxrow:selected {
 .album-title,
 .artist-card .album-title {
     color: var(--text-primary);
-    font-size: 14px;
+    font-size: var(--font-ui-small);
     font-weight: var(--font-weight-semibold);
     letter-spacing: -0.1px;
     margin-top: 8px;
@@ -672,7 +687,7 @@ listboxrow:selected {
 .album-artist,
 .artist-card .album-artist {
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: var(--font-caption1);
     font-weight: var(--font-weight-regular);
     margin-bottom: 0;
 }
@@ -680,7 +695,7 @@ listboxrow:selected {
 .track-row {
     background-color: transparent;
     border-radius: var(--radius-sm);
-    transition: background-color 100ms ease-out;
+    transition: background-color var(--motion-fast) var(--ease-out);
 }
 
 .track-row-title,
@@ -729,14 +744,14 @@ listboxrow:selected {
 
 .detail-title {
     color: var(--text-primary);
-    font-size: 28px;
+    font-size: var(--font-title1);
     font-weight: var(--font-weight-semibold);
     letter-spacing: -0.5px;
 }
 
 .detail-meta {
     color: var(--text-secondary);
-    font-size: 13px;
+    font-size: var(--font-footnote);
     margin-top: 2px;
 }
 
@@ -760,13 +775,13 @@ listboxrow:selected {
     border-radius: var(--radius-control);
     background-color: rgba(255, 255, 255, 0.08);
     color: var(--text-primary);
-    font-size: 13px;
+    font-size: var(--font-footnote);
     font-weight: var(--font-weight-semibold);
 }
 
 .album-detail-play-button {
     background-color: var(--accent-color);
-    color: #ffffff;
+    color: var(--text-on-accent);
 }
 
 .album-detail-play-button:hover {
@@ -784,20 +799,20 @@ listboxrow:selected {
 
 .search-empty-icon {
     color: var(--text-tertiary);
-    font-size: 48px;
+    font-size: var(--font-hero);
     margin-bottom: 16px;
 }
 
 .search-empty-title {
     color: var(--text-primary);
-    font-size: 17px;
+    font-size: var(--font-body);
     font-weight: var(--font-weight-semibold);
     margin-bottom: 8px;
 }
 
 .search-empty-description {
     color: var(--text-tertiary);
-    font-size: 13px;
+    font-size: var(--font-footnote);
 }
 
 /* ============================================================================
@@ -831,14 +846,14 @@ listboxrow:selected {
 .empty-state-title,
 .error-state-title {
     color: var(--text-primary);
-    font-size: 17px;
+    font-size: var(--font-body);
     font-weight: var(--font-weight-semibold);
 }
 
 .empty-state-description,
 .error-state-description {
     color: var(--text-secondary);
-    font-size: 13px;
+    font-size: var(--font-footnote);
 }
 
 .loading-state-spinner {
@@ -847,7 +862,7 @@ listboxrow:selected {
 
 .loading-state-message {
     color: var(--text-secondary);
-    font-size: 13px;
+    font-size: var(--font-footnote);
 }
 
 .error-state-retry {
@@ -860,7 +875,6 @@ listboxrow:selected {
 
 .right-now-playing {
     background-color: var(--bg-secondary);
-    border-left: 1px solid var(--border-subtle);
     min-width: 0;
     min-height: 0;
 }
@@ -872,6 +886,24 @@ listboxrow:selected {
     background-color: transparent;
     min-width: 0;
     min-height: 0;
+}
+
+/* Fixed 500px now-playing column: reclaim space without shrinking text. */
+.right-now-playing.compact .now-playing-tab-button {
+    padding: 6px 6px;
+}
+
+.right-now-playing.compact .lyrics-row {
+    padding: 4px 8px;
+}
+
+.right-now-playing.compact .queue-undo-bar {
+    padding: 4px 6px;
+}
+
+.right-now-playing.compact .track-row-like-button {
+    min-width: 28px;
+    min-height: 28px;
 }
 
 .now-playing-artwork {
@@ -893,15 +925,17 @@ listboxrow:selected {
 
 .now-playing-title {
     color: var(--text-primary);
-    font-size: 20px;
+    font-size: var(--font-title3);
     font-weight: var(--font-weight-semibold);
     letter-spacing: -0.2px;
+    min-width: 0;
 }
 
 .now-playing-artist {
     color: var(--text-secondary);
-    font-size: 15px;
+    font-size: var(--font-subhead);
     font-weight: var(--font-weight-regular);
+    min-width: 0;
 }
 
 /* Shared wavy progress bar: bottom, right, and PiP differ only in width.
@@ -1011,7 +1045,7 @@ listboxrow:selected {
     background-color: transparent;
     border-radius: var(--radius-sm);
     padding: 8px 10px;
-    font-size: 13px;
+    font-size: var(--font-footnote);
     font-weight: var(--font-weight-medium);
     min-width: 0;
 }
@@ -1027,10 +1061,43 @@ listboxrow:selected {
     box-shadow: 0 2px 8px var(--shadow-subtle);
 }
 
+/* Queue undo: visible feedback with the same restrained motion as other controls. */
+.queue-undo-bar {
+    background-color: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 6px 8px;
+    min-width: 0;
+    min-height: 36px;
+}
+
+.queue-undo-label {
+    color: var(--text-secondary);
+    font-size: var(--font-footnote);
+    min-width: 0;
+}
+
+.queue-undo-button {
+    min-height: 32px;
+    padding: 4px 10px;
+}
+
+.queue-empty-title {
+    color: var(--text-secondary);
+    font-size: var(--font-body);
+    font-weight: var(--font-weight-medium);
+}
+
+.queue-empty-description {
+    color: var(--text-tertiary);
+    font-size: var(--font-footnote);
+    margin-top: 4px;
+}
+
 .now-playing-lyrics {
     background-color: transparent;
     color: var(--text-secondary);
-    font-size: 14px;
+    font-size: var(--font-ui-small);
 }
 
 .now-playing-lyrics .current-line {
@@ -1047,7 +1114,7 @@ listboxrow:selected {
 
 .lyrics-heading {
     color: var(--text-tertiary);
-    font-size: 11px;
+    font-size: var(--font-caption2);
     font-weight: 700;
 }
 
@@ -1073,7 +1140,7 @@ listboxrow:selected {
     background-color: transparent;
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
-    font-size: 15px;
+    font-size: var(--font-subhead);
     font-weight: var(--font-weight-medium);
     padding: 6px 12px;
     min-width: 0;
@@ -1092,7 +1159,7 @@ listboxrow:selected {
 }
 
 .lyrics-row.active .lyrics-line {
-    font-size: 18px;
+    font-size: var(--font-ui-medium);
     font-weight: var(--font-weight-bold);
     color: var(--text-primary);
 }
@@ -1109,7 +1176,7 @@ listboxrow:selected {
 
 .lyrics-message {
     color: var(--text-secondary);
-    font-size: 14px;
+    font-size: var(--font-ui-small);
     line-height: 1.6;
 }
 
@@ -1121,13 +1188,13 @@ listboxrow:selected {
 
 .queue-item-title {
     color: var(--text-primary);
-    font-size: 13px;
+    font-size: var(--font-footnote);
     font-weight: var(--font-weight-medium);
 }
 
 .queue-item-artist {
     color: var(--text-tertiary);
-    font-size: 11px;
+    font-size: var(--font-caption2);
     font-weight: var(--font-weight-regular);
 }
 
@@ -1175,13 +1242,13 @@ listboxrow:selected {
 
 .bottom-playback-title {
     color: var(--text-primary);
-    font-size: 14px;
+    font-size: var(--font-ui-small);
     font-weight: var(--font-weight-semibold);
 }
 
 .bottom-playback-artist {
     color: var(--text-tertiary);
-    font-size: 12px;
+    font-size: var(--font-caption1);
     font-weight: var(--font-weight-regular);
 }
 
@@ -1191,7 +1258,7 @@ listboxrow:selected {
     border-radius: var(--radius-control);
     padding: 0;
     color: var(--text-primary);
-    transition: background-color 100ms ease-out, transform 50ms ease-out;
+    transition: background-color var(--motion-fast) var(--ease-out), transform var(--motion-fast) var(--ease-out);
 }
 
 .bottom-playback-control-button:hover {
@@ -1203,9 +1270,9 @@ listboxrow:selected {
     transform: scale(0.92);
 }
 
-.bottom-playback-control-button:focus {
-    outline: none;
-    box-shadow: 0 0 0 2px var(--accent-color);
+.bottom-playback-control-button:focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
 }
 
 .bottom-playback-control-button:disabled {
@@ -1316,7 +1383,6 @@ scrollbar button {
 
 .pip-window {
     background-color: var(--glass-regular-bg);
-    backdrop-filter: blur(20px) saturate(180%);
     border: 1px solid var(--glass-regular-border);
     border-radius: 16px;
     box-shadow: 0 24px 64px rgba(0, 0, 0, 0.4);
@@ -1341,13 +1407,13 @@ scrollbar button {
 
 .pip-title {
     color: var(--text-primary);
-    font-size: 14px;
+    font-size: var(--font-ui-small);
     font-weight: 600;
 }
 
 .pip-subtitle {
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: var(--font-caption1);
     font-weight: 400;
 }
 
@@ -1355,7 +1421,7 @@ scrollbar button {
 .pip-close-button {
     min-width: 32px;
     min-height: 32px;
-    border-radius: 50%;
+    border-radius: var(--radius-sm);
     padding: 4px;
     color: var(--text-primary);
 }
@@ -1377,7 +1443,7 @@ scrollbar button {
 .pip-control-button {
     min-width: 40px;
     min-height: 40px;
-    border-radius: 50%;
+    border-radius: var(--radius-sm);
     padding: 8px;
     color: var(--text-primary);
 }
@@ -1387,7 +1453,7 @@ scrollbar button {
 .pip-play-pause {
     min-width: 48px;
     min-height: 48px;
-    border-radius: 50%;
+    border-radius: var(--radius-sm);
     background-color: var(--accent-color);
     color: white;
     box-shadow: 0 4px 16px var(--accent-shadow);
@@ -1404,7 +1470,7 @@ scrollbar button {
     margin: 4px 0;
 }
 .pip-time {
-    font-size: 11px;
+    font-size: var(--font-caption2);
     color: var(--text-tertiary);
     font-variant-numeric: tabular-nums;
     min-width: 40px;
@@ -1418,7 +1484,7 @@ scrollbar button {
     margin-top: 4px;
 }
 .pip-lyrics {
-    font-size: 12px;
+    font-size: var(--font-caption1);
     color: var(--text-secondary);
     font-style: italic;
 }
@@ -1432,7 +1498,7 @@ scrollbar button {
 .pip-mode-button {
     min-width: 32px;
     min-height: 32px;
-    border-radius: 50%;
+    border-radius: var(--radius-sm);
     padding: 4px;
     color: var(--text-tertiary);
 }
@@ -1447,7 +1513,7 @@ scrollbar button {
 .pip-volume-button {
     min-width: 32px;
     min-height: 32px;
-    border-radius: 50%;
+    border-radius: var(--radius-sm);
     padding: 4px;
     color: var(--text-tertiary);
 }
@@ -1541,10 +1607,10 @@ scrollbar button {
     border: 1px solid var(--glass-regular-border);
     border-radius: var(--radius-md);
     box-shadow: 0 4px 16px var(--shadow-subtle);
-    transition: background-color 200ms ease-out,
-                border-color 200ms ease-out,
-                box-shadow 200ms ease-out,
-                transform 200ms ease-out;
+    transition: background-color var(--motion-base) var(--ease-out),
+                border-color var(--motion-base) var(--ease-out),
+                box-shadow var(--motion-base) var(--ease-out),
+                transform var(--motion-base) var(--ease-out);
 }
 
 .glass-card:hover,
@@ -1576,7 +1642,6 @@ scrollbar button {
 
 .glass-sidebar {
     background-color: var(--glass-thin-bg);
-    border-right: 1px solid var(--glass-thin-border);
 }
 
 .card-elevate:hover {
@@ -1663,7 +1728,7 @@ scrollbar button {
 .genres-list row {
     border-radius: var(--radius-sm);
     margin: 2px 12px;
-    transition: background-color 150ms ease-out;
+    transition: background-color var(--motion-base) var(--ease-out);
 }
 
 .genres-list row:hover {
@@ -1692,7 +1757,7 @@ scrollbar button {
 .album-detail-content > box > button:first-child,
 .artist-detail-content > box > button:first-child {
     background-color: var(--accent-color);
-    color: #ffffff;
+    color: var(--text-on-accent);
 }
 
 .album-detail-content > box > button:first-child:hover,
@@ -1739,7 +1804,7 @@ scrollbar button {
 
 .songs-column-header {
     color: var(--text-tertiary);
-    font-size: calc(14px * var(--font-scale));
+    font-size: var(--font-ui-small);
     font-weight: var(--font-weight-semibold);
     letter-spacing: 0.5px;
 }
@@ -1762,7 +1827,7 @@ scrollbar button {
 /* Track row details. Press/selected states only: no hover feedback. */
 .track-row-duration {
     color: var(--text-tertiary);
-    font-size: calc(15px * var(--font-scale));
+    font-size: var(--font-subhead);
     font-weight: var(--font-weight-regular);
     font-feature-settings: "tnum";
     letter-spacing: -0.1px;
@@ -1778,7 +1843,7 @@ scrollbar button {
 }
 
 .track-row.playing .track-row-like-button,
-.track-row-like-button:focus {
+.track-row-like-button:focus-visible {
     opacity: 1;
 }
 
@@ -1789,7 +1854,7 @@ scrollbar button {
     border-radius: var(--radius-control);
     background-color: transparent;
     color: var(--accent-color);
-    transition: background-color 150ms ease-out, transform 150ms ease-out;
+    transition: background-color var(--motion-base) var(--ease-out), transform var(--motion-base) var(--ease-out);
 }
 
 .volume-dial.hover {
@@ -1808,7 +1873,7 @@ scrollbar button {
 
 /* Small layout finishing touches. */
 .bottom-playback-modes {
-    margin-left: 4px;
+    min-width: 0;
 }
 
 .now-playing-progress {
@@ -1825,6 +1890,9 @@ scrollbar button {
 
 .reduce-motion * {
     transition-duration: 1ms;
+    animation-duration: 1ms;
+    transition-delay: 0ms;
+    animation-delay: 0ms;
 }
 
 /* ============================================================================
@@ -1835,13 +1903,13 @@ button:focus,
 entry:focus,
 searchentry:focus,
 .middle-toolbar-search:focus,
-.middle-toolbar-button:focus,
-.bottom-playback-control-button:focus,
-.now-playing-control-button:focus,
-.now-playing-mode-button:focus,
-.pip-control-button:focus,
-.pip-volume-button:focus,
-.pip-close-button:focus {
+.middle-toolbar-button:focus-visible,
+.bottom-playback-control-button:focus-visible,
+.now-playing-control-button:focus-visible,
+.now-playing-mode-button:focus-visible,
+.pip-control-button:focus-visible,
+.pip-volume-button:focus-visible,
+.pip-close-button:focus-visible {
     outline: 2px solid var(--border-focus);
     outline-offset: 2px;
 }
@@ -1893,7 +1961,7 @@ searchentry:focus,
 
 .track-row-number {
     color: var(--text-tertiary);
-    font-size: calc(15px * var(--font-scale));
+    font-size: var(--font-subhead);
     font-weight: var(--font-weight-regular);
     font-variant-numeric: tabular-nums;
 }
@@ -1901,21 +1969,21 @@ searchentry:focus,
 /* HIG type scale: headline / subhead / footnote, semibold and normal only. */
 .track-row-title {
     color: var(--text-primary);
-    font-size: calc(20px * var(--font-scale));
+    font-size: var(--font-title3);
     font-weight: var(--font-weight-semibold);
     letter-spacing: -0.3px;
 }
 
 .track-row-artist {
     color: var(--text-secondary);
-    font-size: calc(17px * var(--font-scale));
+    font-size: var(--font-body);
     font-weight: var(--font-weight-regular);
     letter-spacing: -0.1px;
 }
 
 .track-row-album {
     color: var(--text-tertiary);
-    font-size: calc(15px * var(--font-scale));
+    font-size: var(--font-subhead);
     font-weight: var(--font-weight-regular);
     letter-spacing: -0.1px;
 }
@@ -1927,11 +1995,11 @@ searchentry:focus,
 
 .track-row:focus-visible {
     outline: 2px solid var(--border-focus);
-    outline-offset: -2px;
+    outline-offset: 2px;
 }
 
 .songs-column-header {
-    font-size: calc(14px * var(--font-scale));
+    font-size: var(--font-ui-small);
     font-weight: var(--font-weight-regular);
 }
 
@@ -1942,4 +2010,71 @@ searchentry:focus,
 
 .track-row-equalizer {
     color: var(--accent-color);
+}
+
+/* ============================================================================
+ * 12. Direction containment (RTL smoke pass)
+ *
+ * GTK CSS has no logical margin/border properties, so every physical edge is
+ * scoped to :dir(ltr) and mirrored in :dir(rtl). Text-bearing components rely
+ * on inherited direction; the RTL selectors below make the mirrored alignment
+ * explicit so scripts/rtl_smoke_check.sh can verify the covered surfaces.
+ * ============================================================================ */
+
+.sidebar:dir(ltr),
+.glass-sidebar:dir(ltr) {
+    border-right: 1px solid var(--border-subtle);
+}
+
+.sidebar:dir(rtl),
+.glass-sidebar:dir(rtl) {
+    border-left: 1px solid var(--border-subtle);
+}
+
+.glass-sidebar:dir(ltr) {
+    border-right-color: var(--glass-thin-border);
+}
+
+.glass-sidebar:dir(rtl) {
+    border-left-color: var(--glass-thin-border);
+}
+
+.right-now-playing:dir(ltr) {
+    border-left: 1px solid var(--border-subtle);
+}
+
+.right-now-playing:dir(rtl) {
+    border-right: 1px solid var(--border-subtle);
+}
+
+.home-subtitle:dir(ltr),
+.bottom-playback-modes:dir(ltr) {
+    margin-left: 4px;
+}
+
+.home-subtitle:dir(rtl),
+.bottom-playback-modes:dir(rtl) {
+    margin-right: 4px;
+}
+
+.apple-album-meta:dir(rtl),
+.album-card-content:dir(rtl),
+.track-row:dir(rtl),
+.pip-info-box:dir(rtl),
+.now-playing-progress-row:dir(rtl),
+.pip-progress-row:dir(rtl) {
+    text-align: right;
+}
+
+/* Every button is a rounded rectangle, never a pill or circle. Explicit
+ * variants are listed because GTK themes style flat/toggle buttons with
+ * their own selectors. */
+button,
+button.flat,
+button.raised,
+button.suggested-action,
+button.destructive-action,
+button:checked,
+popover button {
+    border-radius: 8px;
 }

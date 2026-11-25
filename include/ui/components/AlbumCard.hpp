@@ -47,11 +47,12 @@ private:
     struct WidgetDeleter {
         void operator()(GtkWidget* w) const {
             if (!w) return;
+            // Managed widgets are ref-sunk at construction, so a container
+            // holds a second reference while the widget is parented.
             if (gtk_widget_get_parent(w) != nullptr) {
                 gtk_widget_unparent(w);
-            } else {
-                g_object_unref(w);
             }
+            g_object_unref(w);
         }
     };
     std::unique_ptr<GtkWidget, WidgetDeleter> widget_;

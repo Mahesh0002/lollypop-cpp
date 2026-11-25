@@ -12,6 +12,7 @@
 #include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
+#include <algorithm>
 #include <iostream>
 #include <mutex>
 
@@ -200,13 +201,8 @@ void SongsPage::reload() {
     loaded_count_ = 0;
     total_count_ = 0;
 
-    // Clear existing
-    GtkWidget* child = gtk_widget_get_first_child(list_box_.get());
-    while (child) {
-        GtkWidget* next = gtk_widget_get_next_sibling(child);
-        gtk_list_box_remove(GTK_LIST_BOX(list_box_.get()), child);
-        child = next;
-    }
+    // Clear existing - use safe helper to avoid invalid sibling pointers after unparenting
+    safe_list_box_remove_all(GTK_LIST_BOX(list_box_.get()));
     track_rows_.clear();
 
     // Get sorted track IDs with genre filter
@@ -335,7 +331,18 @@ void SongsPage::set_genre_filter(const std::string& genre) {
 void SongsPage::on_track_played(const Track& track) {
     if (auto* backend = main_window_->get_backend()) {
         if (auto* player = dynamic_cast<IPlayerService*>(backend)) {
-            player->play_track(track.id);
+            // The songs list is the playback queue: seed the backend queue
+            // with the full sorted list so the right-panel queue matches it.
+            size_t index = 0;
+            {
+                std::lock_guard ids_lock(ids_mutex_);
+                auto it = std::find(sorted_ids_.begin(), sorted_ids_.end(),
+                                    track.id);
+                if (it != sorted_ids_.end()) {
+                    index = static_cast<size_t>(it - sorted_ids_.begin());
+                }
+            }
+            player->play_tracks(sorted_ids_, index);
         }
     }
 }

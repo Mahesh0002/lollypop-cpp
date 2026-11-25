@@ -31,9 +31,14 @@ bool LibraryManager::initialize(StorageManager* storage,
         return false;
     }
 
-    scanner_->set_track_found_callback([this](const Track& track) {
-        if (track_cb_) track_cb_(track);
-    });
+    scanner_->set_track_found_with_cache_callback(
+        [this](const Track& track, bool from_cache) {
+            if (track_with_cache_cb_) {
+                track_with_cache_cb_(track, from_cache);
+            } else if (track_cb_) {
+                track_cb_(track);
+            }
+        });
     scanner_->set_error_callback([this](const std::string& file,
                                          const std::string& error) {
         if (error_cb_) error_cb_(file, error);
@@ -75,6 +80,12 @@ void LibraryManager::set_scan_finished_callback(ScanFinishedCallback cb) {
 void LibraryManager::set_track_found_callback(TrackFoundCallback cb) {
     std::lock_guard<std::mutex> lock(queue_mutex_);
     track_cb_ = std::move(cb);
+}
+
+void LibraryManager::set_track_found_with_cache_callback(
+    TrackFoundWithCacheCallback cb) {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    track_with_cache_cb_ = std::move(cb);
 }
 
 void LibraryManager::set_error_callback(ErrorCallback cb) {
@@ -270,6 +281,11 @@ std::vector<std::string> LibraryManager::get_library_roots() const {
 
 void LibraryManager::start_periodic_scan_timer() {
     if (periodic_->timer_running.exchange(true)) return;
+
+    // A previously stopped timer may still be joinable.
+    if (periodic_->timer_thread.joinable()) {
+        periodic_->timer_thread.join();
+    }
 
     periodic_->timer_thread = std::thread([this] {
         std::unique_lock<std::mutex> lock(periodic_->timer_mutex);

@@ -17,6 +17,8 @@ void safe_scrolled_window_set_child(GtkScrolledWindow* scrolled, GtkWidget* chil
 void safe_stack_add_named(GtkStack* stack, GtkWidget* child, const char* name);
 void safe_stack_remove(GtkStack* stack, GtkWidget* child);
 void safe_box_remove(GtkBox* box, GtkWidget* child);
+void safe_list_box_remove_all(GtkListBox* list_box);
+void safe_flow_box_remove_all(GtkFlowBox* flow_box);
 void safe_button_set_child(GtkButton* button, GtkWidget* child);
 void safe_menu_button_set_child(GtkMenuButton* menu_button, GtkWidget* child);
 void safe_picture_set_file(GtkPicture* picture, GFile* file);

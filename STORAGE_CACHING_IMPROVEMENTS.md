@@ -25,9 +25,53 @@
 
 5. **No Smart Playlist Materialization** — Smart playlists re-evaluated on every access.
 
-5. **Album/Artist Aggregates Not Cached** — `get_tracks_by_album`, `get_tracks_by_artist` run queries every time.
+6. **Album/Artist Aggregates Not Cached** — `get_tracks_by_album`, `get_tracks_by_artist` run queries every time.
 
-6. **No Background Preloading** — UI requests data on-demand; no predictive loading.
+7. **No Background Preloading** — UI requests data on-demand; no predictive loading.
+
+---
+
+## Implementation Status (2026-11-24)
+
+- **Phase 2 — Extended scan cache: implemented.** `LibraryScanner` now persists a
+  versioned binary cache at `~/.local/share/lollypop-cpp/scan_cache.bin`. Each
+  entry stores mtime, size, a metadata hash, and the extracted `Track`. Unchanged
+  files are restored from disk and emitted through
+  `TrackFoundWithCacheCallback(track, /*from_cache=*/true)`, so TagLib parsing is
+  skipped on rescans. Legacy `path|mtime|size` cache files are imported once and
+  rewritten in the binary format.
+- **Controller wiring: implemented.** `BackendController` enables the scan cache
+  path and treats cached tracks as "ensure row exists" only, so re-emitted
+  metadata cannot overwrite enrichment (genre, year, artwork) added after the
+  original scan.
+- **In-memory read cache: implemented.** `get_all_tracks()`, `get_all_albums()`,
+  and `get_all_artists()` are cached in `BackendController` behind a shared
+  mutex. The cache is invalidated on library changes, likes, play statistics,
+  and playlist mutations.
+- **Phase 1 — Persistent metadata snapshot: implemented (pragmatic).**
+  `BackendController` writes a versioned JSON snapshot to
+  `~/.local/share/lollypop-cpp/metadata_cache.json` and loads it during
+  initialization when the fingerprint (track/album/artist counts plus library
+  roots) matches. Snapshots are saved on a deferred startup callback and after
+  successful scans.
+- **Phase 3 — Smart-playlist materialization: implemented (simple criteria
+  grammar).** `StorageManager::rebuild_smart_playlists()` parses
+  `key=value; key=value` criteria (`genre`, `artist`, `album`, `title`,
+  `liked`, `min_year`, `max_year`, `min_play_count`, `limit`) into persisted
+  `playlist_tracks`. It runs when criteria change and after scans, so reads
+  stay simple and fast.
+- **Phases 5/6 — Preloading and artwork integration: implemented.** Common read
+  models are warmed off the first-frame path, and scan cache version 3 stores
+  an artwork hash so unchanged embedded artwork files are reused instead of
+  rewritten when a file is reprocessed.
+
+### Remaining limitations
+
+- The metadata snapshot is invalidated by a coarse fingerprint and rewritten
+  wholesale; there is no incremental patching or persistent per-query cache.
+- Smart criteria use the simple `key=value` grammar above, not the full
+  original proposal.
+- Preloading is startup/scan-finish warming, not predictive UI-driven loading.
 
 ---
 

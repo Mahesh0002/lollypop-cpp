@@ -337,14 +337,37 @@ bool StorageManager::migrate_schema(int from_version, int to_version) {
     }
 
     if (from_version < 6) {
-        const char* sql = R"(
-            ALTER TABLE artists ADD COLUMN artwork_path TEXT;
-        )";
-        char* error = nullptr;
-        if (sqlite3_exec(impl_->db, sql, nullptr, nullptr, &error) != SQLITE_OK) {
-            std::cerr << "Schema migration v6 failed: " << (error ? error : "unknown") << std::endl;
-            sqlite3_free(error);
-            return false;
+        // v1 already creates artists.artwork_path. Adding it unconditionally
+        // breaks fresh databases, so only migrate older schemas that need it.
+        auto has_column = [](sqlite3* db, const char* table, const char* column) {
+            const std::string pragma = std::string("PRAGMA table_info(") + table + ");";
+            sqlite3_stmt* stmt = nullptr;
+            if (sqlite3_prepare_v2(db, pragma.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+                return false;
+            }
+            bool found = false;
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const unsigned char* name = sqlite3_column_text(stmt, 1);
+                if (name && std::string(reinterpret_cast<const char*>(name)) == column) {
+                    found = true;
+                    break;
+                }
+            }
+            sqlite3_finalize(stmt);
+            return found;
+        };
+
+        if (!has_column(impl_->db, "artists", "artwork_path")) {
+            const char* sql = R"(
+                ALTER TABLE artists ADD COLUMN artwork_path TEXT;
+            )";
+            char* error = nullptr;
+            if (sqlite3_exec(impl_->db, sql, nullptr, nullptr, &error) != SQLITE_OK) {
+                std::cerr << "Schema migration v6 failed: "
+                          << (error ? error : "unknown") << std::endl;
+                sqlite3_free(error);
+                return false;
+            }
         }
     }
 
@@ -870,24 +893,62 @@ std::vector<Track> StorageManager::get_tracks_by_ids(const std::vector<std::stri
     std::vector<Track> tracks;
     if (track_ids.empty()) return tracks;
 
-    // Use VALUES CTE with ordinal to preserve input order
-    std::string sql = "WITH input_ids(id, ord) AS (VALUES ";
-    for (size_t i = 0; i < track_ids.size(); ++i) {
-        if (i > 0) sql += ", ";
-        sql += "(?, " + std::to_string(i) + ")";
-    }
-    sql += ") SELECT " + std::string(kTrackColumnsQualified) +
-           " FROM tracks t JOIN input_ids i ON t.id = i.id ORDER BY i.ord;";
+    // Stay well below the smallest historical SQLite bind limit (999). The
+    // effective limit is queried at runtime so unusual builds are safe too.
+    const int variable_limit = sqlite3_limit(impl_->db, SQLITE_LIMIT_VARIABLE_NUMBER, -1);
+    const size_t chunk_size = static_cast<size_t>(
+        std::max(1, std::min(variable_limit, 500)));
 
-    sqlite3_stmt* stmt;
-    if (sqlite3_prepare_v2(impl_->db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
-        for (size_t i = 0; i < track_ids.size(); ++i) {
-            sqlite3_bind_text(stmt, static_cast<int>(i + 1), track_ids[i].c_str(), -1, SQLITE_TRANSIENT);
+    // Query in chunks, then reassemble in input order. Duplicate and missing
+    // IDs behave exactly as before: duplicates repeat, missing IDs are skipped.
+    std::unordered_map<std::string, Track> by_id;
+    for (size_t offset = 0; offset < track_ids.size(); offset += chunk_size) {
+        const size_t end = std::min(offset + chunk_size, track_ids.size());
+
+        std::string sql = "WITH input_ids(id, ord) AS (VALUES ";
+        for (size_t i = offset; i < end; ++i) {
+            if (i > offset) sql += ", ";
+            sql += "(?, " + std::to_string(i - offset) + ")";
         }
-        while (sqlite3_step(stmt) == SQLITE_ROW) {
-            tracks.push_back(row_to_track(stmt));
+        // kTrackColumnsQualified prefixes columns with `tracks`, so do not
+        // alias the table here.
+        sql += ") SELECT " + std::string(kTrackColumnsQualified) +
+               " FROM tracks JOIN input_ids i ON tracks.id = i.id ORDER BY i.ord;";
+
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(impl_->db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+            std::cerr << "StorageManager: get_tracks_by_ids() prepare failed for "
+                      << (end - offset) << " ids: "
+                      << sqlite3_errmsg(impl_->db) << std::endl;
+            continue;
+        }
+
+        int rc = SQLITE_OK;
+        for (size_t i = offset; i < end && rc == SQLITE_OK; ++i) {
+            rc = sqlite3_bind_text(stmt, static_cast<int>(i - offset + 1),
+                                   track_ids[i].c_str(), -1, SQLITE_TRANSIENT);
+        }
+        if (rc != SQLITE_OK) {
+            std::cerr << "StorageManager: get_tracks_by_ids() bind failed: "
+                      << sqlite3_errmsg(impl_->db) << std::endl;
+        } else {
+            while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+                Track track = row_to_track(stmt);
+                const std::string id = track.id;
+                by_id[id] = std::move(track);
+            }
+            if (rc != SQLITE_DONE) {
+                std::cerr << "StorageManager: get_tracks_by_ids() step failed: "
+                          << sqlite3_errmsg(impl_->db) << std::endl;
+            }
         }
         sqlite3_finalize(stmt);
+    }
+
+    tracks.reserve(track_ids.size());
+    for (const auto& id : track_ids) {
+        auto it = by_id.find(id);
+        if (it != by_id.end()) tracks.push_back(it->second);
     }
     return tracks;
 }
@@ -1234,7 +1295,9 @@ std::vector<Track> StorageManager::get_tracks_paginated(int limit,
          column == "year" || column == "track_number");
 
     std::vector<Track> tracks;
-    if (limit <= 0) return tracks;
+    // limit == 0 returns nothing; a negative limit maps to SQLite's LIMIT -1
+    // (unbounded), which callers use for full-library sorted ID lists.
+    if (limit == 0) return tracks;
 
     const std::string cols = kTrackColumnsQualified;
     std::string sql;
@@ -1360,6 +1423,33 @@ bool StorageManager::add_genre_edge(const std::string& parent, const std::string
     return rc == SQLITE_DONE;
 }
 
+namespace {
+
+int count_table_rows(sqlite3* db, const char* sql) {
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) return 0;
+    int count = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        count = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return count;
+}
+
+}  // namespace
+
+int StorageManager::get_track_count() const {
+    return count_table_rows(impl_->db, "SELECT COUNT(*) FROM tracks;");
+}
+
+int StorageManager::get_album_count() const {
+    return count_table_rows(impl_->db, "SELECT COUNT(*) FROM albums;");
+}
+
+int StorageManager::get_artist_count() const {
+    return count_table_rows(impl_->db, "SELECT COUNT(*) FROM artists;");
+}
+
 std::vector<std::string> StorageManager::get_library_roots() const {
     std::vector<std::string> roots;
     // First, try to get stored library roots from preferences
@@ -1444,6 +1534,10 @@ void StorageManager::close_read_only(sqlite3* ro_db) {
         impl_->read_only_connections.erase(it);
         sqlite3_close(ro_db);
     }
+}
+
+StorageManager::ReadOnlyConnection StorageManager::open_read_only_connection() {
+    return ReadOnlyConnection(this, open_read_only());
 }
 
 bool StorageManager::integrity_check() {
@@ -1706,6 +1800,161 @@ bool StorageManager::update_smart_playlist(const std::string& playlist_id, const
     int rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     return rc == SQLITE_DONE;
+}
+
+bool StorageManager::rebuild_smart_playlists() {
+    auto trim = [](std::string value) {
+        const auto first = value.find_first_not_of(" \t\r\n");
+        if (first == std::string::npos) return std::string{};
+        const auto last = value.find_last_not_of(" \t\r\n");
+        return value.substr(first, last - first + 1);
+    };
+    auto lower = [](std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(),
+                       [](unsigned char c) {
+                           return static_cast<char>(std::tolower(c));
+                       });
+        return value;
+    };
+
+    struct Rule {
+        std::string sql;
+        std::string value;
+        bool bind = true;
+    };
+
+    std::vector<std::pair<std::string, std::string>> smart_playlists;
+    sqlite3_stmt* list_stmt = nullptr;
+    if (sqlite3_prepare_v2(impl_->db,
+                           "SELECT id, smart_criteria FROM playlists "
+                           "WHERE is_smart = 1;",
+                           -1, &list_stmt, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(list_stmt) == SQLITE_ROW) {
+            smart_playlists.emplace_back(column_text(list_stmt, 0),
+                                          column_text(list_stmt, 1));
+        }
+        sqlite3_finalize(list_stmt);
+    }
+    if (smart_playlists.empty()) return true;
+
+    if (sqlite3_exec(impl_->db, "BEGIN TRANSACTION;", nullptr, nullptr,
+                     nullptr) != SQLITE_OK) {
+        return false;
+    }
+
+    bool success = true;
+    for (const auto& [playlist_id, criteria] : smart_playlists) {
+        std::vector<Rule> rules;
+        int limit = 100000;
+
+        std::stringstream criteria_stream(criteria);
+        std::string item;
+        while (std::getline(criteria_stream, item, ';')) {
+            const auto equals = item.find('=');
+            if (equals == std::string::npos) continue;
+            const std::string key = lower(trim(item.substr(0, equals)));
+            const std::string value = trim(item.substr(equals + 1));
+            if (value.empty()) continue;
+
+            if (key == "genre") {
+                rules.push_back({"tracks.genre = ?", value, true});
+            } else if (key == "artist") {
+                rules.push_back({"tracks.artist = ?", value, true});
+            } else if (key == "album") {
+                rules.push_back({"tracks.album = ?", value, true});
+            } else if (key == "title") {
+                rules.push_back({"tracks.title LIKE ?", "%" + value + "%", true});
+            } else if (key == "liked") {
+                rules.push_back({lower(value) == "true" || value == "1"
+                                     ? "tracks.liked = 1"
+                                     : "tracks.liked = 0",
+                                     {}, false});
+            } else if (key == "min_year") {
+                try {
+                    rules.push_back({"tracks.year >= ?", value, true});
+                } catch (...) {}
+            } else if (key == "max_year") {
+                rules.push_back({"tracks.year <= ?", value, true});
+            } else if (key == "min_play_count") {
+                rules.push_back({"tracks.play_count >= ?", value, true});
+            } else if (key == "limit") {
+                try {
+                    limit = std::clamp(std::stoi(value), 1, 100000);
+                } catch (...) {}
+            }
+        }
+
+        {
+            sqlite3_stmt* stmt = nullptr;
+            if (sqlite3_prepare_v2(impl_->db,
+                                   "DELETE FROM playlist_tracks WHERE playlist_id = ?;",
+                                   -1, &stmt, nullptr) == SQLITE_OK) {
+                sqlite3_bind_text(stmt, 1, playlist_id.c_str(), -1,
+                                  SQLITE_TRANSIENT);
+                if (sqlite3_step(stmt) != SQLITE_DONE) success = false;
+                sqlite3_finalize(stmt);
+            } else {
+                success = false;
+            }
+        }
+        if (!success) break;
+
+        std::string select_sql = "SELECT t.id FROM tracks t";
+        if (!rules.empty()) {
+            select_sql += " WHERE ";
+            for (size_t i = 0; i < rules.size(); ++i) {
+                if (i > 0) select_sql += " AND ";
+                select_sql += rules[i].sql;
+            }
+        }
+        select_sql += " ORDER BY t.date_added DESC LIMIT " +
+                      std::to_string(limit) + ";";
+
+        std::vector<std::string> track_ids;
+        sqlite3_stmt* select_stmt = nullptr;
+        if (sqlite3_prepare_v2(impl_->db, select_sql.c_str(), -1, &select_stmt,
+                               nullptr) == SQLITE_OK) {
+            int bind_index = 1;
+            for (const auto& rule : rules) {
+                if (!rule.bind) continue;
+                sqlite3_bind_text(select_stmt, bind_index++, rule.value.c_str(),
+                                  -1, SQLITE_TRANSIENT);
+            }
+            while (sqlite3_step(select_stmt) == SQLITE_ROW) {
+                track_ids.push_back(column_text(select_stmt, 0));
+            }
+            sqlite3_finalize(select_stmt);
+        } else {
+            success = false;
+        }
+        if (!success) break;
+
+        for (size_t position = 0; position < track_ids.size(); ++position) {
+            sqlite3_stmt* insert_stmt = nullptr;
+            if (sqlite3_prepare_v2(
+                    impl_->db,
+                    "INSERT INTO playlist_tracks (playlist_id, track_id, position) "
+                    "VALUES (?, ?, ?);",
+                    -1, &insert_stmt, nullptr) != SQLITE_OK) {
+                success = false;
+                break;
+            }
+            sqlite3_bind_text(insert_stmt, 1, playlist_id.c_str(), -1,
+                              SQLITE_TRANSIENT);
+            sqlite3_bind_text(insert_stmt, 2, track_ids[position].c_str(), -1,
+                              SQLITE_TRANSIENT);
+            sqlite3_bind_int64(insert_stmt, 3,
+                               static_cast<int64_t>(position));
+            if (sqlite3_step(insert_stmt) != SQLITE_DONE) success = false;
+            sqlite3_finalize(insert_stmt);
+            if (!success) break;
+        }
+        if (!success) break;
+    }
+
+    sqlite3_exec(impl_->db, success ? "COMMIT;" : "ROLLBACK;", nullptr,
+                 nullptr, nullptr);
+    return success;
 }
 
 void StorageManager::update_play_count(const std::string& track_id) {

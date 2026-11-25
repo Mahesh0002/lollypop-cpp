@@ -401,13 +401,15 @@ void MiddleLibrary::update_sticky_header() {
             // The header can still belong to the songs page when switching
             // back to it. GTK requires an unparented child before append.
             if (GtkWidget* previous = gtk_widget_get_parent(header)) {
-                if (GTK_IS_BOX(previous)) {
+                if (GTK_IS_WIDGET(previous) && GTK_IS_BOX(previous)) {
                     gtk_box_remove(GTK_BOX(previous), header);
-                } else {
+                } else if (GTK_IS_WIDGET(header) && gtk_widget_get_parent(header)) {
                     gtk_widget_unparent(header);
                 }
             }
-            if (child) gtk_box_remove(GTK_BOX(sticky_header_), child);
+            if (child && GTK_IS_WIDGET(child)) {
+                gtk_box_remove(GTK_BOX(sticky_header_), child);
+            }
             gtk_box_append(GTK_BOX(sticky_header_), header);
         }
         gtk_widget_set_visible(sticky_header_, TRUE);
@@ -417,7 +419,7 @@ void MiddleLibrary::update_sticky_header() {
         return;
     }
 
-    if (child) {
+    if (child && GTK_IS_WIDGET(child)) {
         gtk_box_remove(GTK_BOX(sticky_header_), child);
         if (songs) songs->reattach_header();
     }

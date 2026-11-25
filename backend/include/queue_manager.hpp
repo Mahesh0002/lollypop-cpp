@@ -42,6 +42,7 @@ public:
     void set_queue(const std::vector<std::string>& track_ids, size_t start_index = 0);
     void clear();
     bool enqueue(const std::string& track_id, bool next = false);
+    bool insert(const std::string& track_id, size_t index);
     bool remove(size_t index);
     bool move(size_t from, size_t to);
 
@@ -80,15 +81,16 @@ private:
 
     bool shuffle_ = false;
     RepeatMode repeat_mode_ = RepeatMode::None;
-    mutable std::mt19937 rng_{std::random_device{}()};
+    std::mt19937 rng_{std::random_device{}()};
 
     // Fisher–Yates shuffle permutation of indices into queue_.
     // Rebuilt lazily when shuffle is enabled and the queue mutates.
-    mutable std::vector<size_t> shuffle_order_;
-    mutable size_t shuffle_pos_ = 0;
-    mutable bool shuffle_dirty_ = true;
+    std::vector<size_t> shuffle_order_;
+    size_t shuffle_pos_ = 0;
+    bool shuffle_dirty_ = true;
 
-    void ensure_shuffle_order() const;
+    // Mutates rng_ and shuffle state; caller must hold mutex_.
+    void ensure_shuffle_order_locked();
     size_t queue_size_locked() const;
 };
 

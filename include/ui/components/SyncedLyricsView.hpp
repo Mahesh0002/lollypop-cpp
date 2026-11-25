@@ -51,6 +51,7 @@ private:
     bool first_sync_ = true;
     double follow_paused_until_ = 0.0;
     int scroll_token_ = 0;
+    bool programmatic_scroll_ = false;
     guint scroll_source_ = 0;
     guint anim_source_ = 0;
     gpointer scroll_data_ = nullptr;
@@ -59,11 +60,12 @@ private:
     struct WidgetDeleter {
         void operator()(GtkWidget* w) const {
             if (!w) return;
+            // Managed widgets are ref-sunk at construction, so a container
+            // holds a second reference while the widget is parented.
             if (gtk_widget_get_parent(w) != nullptr) {
                 gtk_widget_unparent(w);
-            } else {
-                g_object_unref(w);
             }
+            g_object_unref(w);
         }
     };
     std::unique_ptr<GtkWidget, WidgetDeleter> widget_owner_;
@@ -76,6 +78,7 @@ private:
     void schedule_top(bool animate);
     void animate_to(double target);
     void cancel_scroll();
+    void set_adjustment_value(GtkAdjustment* adj, double value);
     void update_scroll_position();
     static void on_vadjustment_changed(GtkAdjustment* adjustment, gpointer user_data);
     static gboolean on_scroll_measure(gpointer user_data);

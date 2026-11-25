@@ -88,6 +88,9 @@ public:
     bool update_smart_playlist(const std::string& playlist_id,
                                const std::string& name,
                                const std::string& criteria);
+    // Recompute persisted membership for every smart playlist. Call after a
+    // scan completes or when smart criteria change; reads stay O(1) afterwards.
+    bool rebuild_smart_playlists();
     bool delete_playlist(const std::string& playlist_id);
     bool add_track_to_playlist(const std::string& playlist_id, const std::string& track_id);
     bool remove_track_from_playlist(const std::string& playlist_id, const std::string& track_id);
@@ -128,11 +131,62 @@ public:
     int get_artist_count() const;
 
     // Read-only connections for worker threads (plan.md §16.6).
-    // open_read_only() returns a connection the caller must close with
-    // close_read_only() when finished. Allows scanner workers to read
-    // concurrently without contending with the writer connection.
+    // Prefer open_read_only_connection() so the connection is released even on
+    // early returns. The raw API remains for existing callers.
+    class ReadOnlyConnection;
     sqlite3* open_read_only();
     void close_read_only(sqlite3* ro_db);
+    ReadOnlyConnection open_read_only_connection();
+
+    // RAII owner for a read-only connection. The StorageManager must outlive
+    // this object; moving transfers ownership and closes any prior connection.
+    class ReadOnlyConnection {
+    public:
+        ReadOnlyConnection() = default;
+        ReadOnlyConnection(StorageManager* manager, sqlite3* db)
+            : manager_(manager), db_(db) {}
+        ~ReadOnlyConnection() { reset(); }
+
+        ReadOnlyConnection(const ReadOnlyConnection&) = delete;
+        ReadOnlyConnection& operator=(const ReadOnlyConnection&) = delete;
+
+        ReadOnlyConnection(ReadOnlyConnection&& other) noexcept
+            : manager_(other.manager_), db_(other.db_) {
+            other.manager_ = nullptr;
+            other.db_ = nullptr;
+        }
+
+        ReadOnlyConnection& operator=(ReadOnlyConnection&& other) noexcept {
+            if (this != &other) {
+                reset();
+                manager_ = other.manager_;
+                db_ = other.db_;
+                other.manager_ = nullptr;
+                other.db_ = nullptr;
+            }
+            return *this;
+        }
+
+        sqlite3* get() const { return db_; }
+        explicit operator bool() const { return db_ != nullptr; }
+
+        sqlite3* release() {
+            sqlite3* db = db_;
+            db_ = nullptr;
+            manager_ = nullptr;
+            return db;
+        }
+
+        void reset() {
+            if (db_ && manager_) manager_->close_read_only(db_);
+            db_ = nullptr;
+            manager_ = nullptr;
+        }
+
+    private:
+        StorageManager* manager_ = nullptr;
+        sqlite3* db_ = nullptr;
+    };
 
     // Database recovery (plan.md §16.7).
     bool integrity_check();
@@ -144,6 +198,7 @@ public:
     // sort_key must be one of: date_added, title, artist, album, duration,
     // play_count, last_played, year, track_number.
     // Optional genre_filter restricts results to tracks with the given genre.
+    // A negative limit means unbounded (SQLite LIMIT -1).
     std::vector<Track> get_tracks_paginated(int limit,
                                              const std::string& sort_key = "date_added",
                                              const std::string& last_sort_value = "",

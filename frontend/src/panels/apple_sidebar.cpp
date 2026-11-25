@@ -68,7 +68,7 @@ void AppleSidebar::setup_ui() {
     gtk_widget_add_css_class(root_, "apple-sidebar");
     gtk_widget_set_hexpand(root_, FALSE);
     gtk_widget_set_vexpand(root_, TRUE);
-    gtk_widget_set_size_request(root_, 220, -1);
+    gtk_widget_set_size_request(root_, kPanelWidth, -1);
     gtk_widget_set_visible(root_, TRUE);
 
     grid_ = gtk_grid_new();

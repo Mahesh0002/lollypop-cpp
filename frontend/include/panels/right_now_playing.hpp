@@ -31,6 +31,9 @@ class ILyricsService;
 
 class RightNowPlaying {
 public:
+    // Total visible width, including the 1px CSS separator.
+    static constexpr int kPanelWidth = 500;
+
     RightNowPlaying(MainWindow* main_window,
                     ILyricsService* lyrics_service,
                     ILibraryService* library_service);
@@ -100,12 +103,16 @@ private:
     std::unique_ptr<SyncedLyricsView> synced_lyrics_view_;
     GtkWidget* queue_view_;
     GtkWidget* lyrics_empty_state_;
+    GtkWidget* queue_undo_bar_;
+    GtkWidget* queue_undo_label_;
+    GtkWidget* queue_undo_button_;
 
     int panel_width_ = 0;
     int panel_height_ = 0;
     int last_artwork_side_ = 0;
     int last_width_ = 0;
     int last_height_ = 0;
+    bool compact_layout_ = false;
 
     bool has_lyrics_ = false;
     bool lyrics_tab_active_ = true;
@@ -113,6 +120,16 @@ private:
     std::string current_artwork_path_;
     std::string current_track_id_;
     LyricsChangedCallback lyrics_changed_callback_;
+
+    // One-step undo for the most recent queue removal.
+    std::string pending_undo_track_id_;
+    std::string pending_undo_title_;
+    size_t pending_undo_index_ = 0;
+    std::vector<std::string> queue_after_removal_;
+
+    // Queue actions are deferred one main-loop turn so a row callback is not
+    // destroyed while its own queue-changed signal rebuilds the list.
+    std::vector<guint> deferred_queue_actions_;
 
     // Retain TrackRow wrappers while their widgets are parented in the queue.
     std::vector<std::unique_ptr<TrackRow>> queue_rows_;
@@ -124,6 +141,13 @@ private:
     void create_transport_row();
     void create_tabs();
     void create_lyrics_empty_state();
+    void create_queue_undo_bar();
+    void show_queue_undo(const std::string& title,
+                         const std::string& track_id,
+                         size_t index,
+                         const std::vector<std::string>& queue_after);
+    void hide_queue_undo();
+    void schedule_queue_action(std::function<void()> action);
 
     void adapt_to_allocation(int width, int height);
     void show_active_tab();
@@ -139,6 +163,8 @@ private:
     static void on_loop_toggled(GtkToggleButton* button, gpointer user_data);
     static void on_lyrics_tab_clicked(GtkButton* button, gpointer user_data);
     static void on_queue_tab_clicked(GtkButton* button, gpointer user_data);
+    static void on_queue_undo_clicked(GtkButton* button, gpointer user_data);
+    static gboolean on_deferred_queue_action(gpointer user_data);
 };
 
 } // namespace lollypop

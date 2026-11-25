@@ -176,6 +176,7 @@ public:
 
     // Queue editing (all indices refer to the live queue).
     bool enqueue_track(const std::string& track_id, bool next = false);
+    bool insert_into_queue(const std::string& track_id, size_t index);
     bool remove_from_queue(size_t index);
     bool move_queue_item(size_t from, size_t to);
     bool play_queue_index(size_t index);
@@ -317,6 +318,14 @@ public:
                                                      const std::optional<Lyrics>&)>;
 
 private:
+    using WorkerAliveToken = std::shared_ptr<std::atomic<bool>>;
+
+    struct PendingLyricsDispatch {
+        std::string track_id;
+        std::optional<Lyrics> result;
+        LegacyLyricsCallback callback;
+    };
+
     std::unique_ptr<StorageManager> storage_;
     std::shared_ptr<AudioEngine> audio_engine_;
     std::shared_ptr<MprisManager> mpris_manager_;
@@ -355,18 +364,25 @@ private:
     std::vector<ShuffleChangedCallback> shuffle_changed_callbacks_;
     std::vector<RepeatChangedCallback> repeat_changed_callbacks_;
     std::vector<RepeatOneChangedCallback> repeat_one_changed_callbacks_;
-    LegacyLyricsCallback legacy_lyrics_callback_;
 
-    // Read-through album model. Invalidated by emit_library_changed() so page
-    // switches never re-run SQLite queries for an unchanged library.
-    std::mutex albums_cache_mutex_;
+    // Each legacy lyrics request keeps its own callback. Completed requests
+    // are queued and drained on the main loop, so concurrent requests cannot
+    // overwrite one another.
+    std::mutex pending_lyrics_mutex_;
+    std::vector<PendingLyricsDispatch> pending_lyrics_dispatches_;
+
+    // Read-through library models. Invalidated by library mutations so page
+    // switches never re-run SQLite queries for unchanged data.
+    std::mutex read_caches_mutex_;
+    bool tracks_cache_valid_ = false;
+    std::vector<Track> tracks_cache_;
     bool albums_cache_valid_ = false;
     std::vector<Album> albums_cache_;
+    bool artists_cache_valid_ = false;
+    std::vector<Artist> artists_cache_;
 
     // Lyrics result dispatcher (marshals async lyrics to GTK main thread).
     std::unique_ptr<Glib::Dispatcher> lyrics_dispatcher_;
-    std::optional<Lyrics> pending_lyrics_result_;
-    std::string pending_lyrics_track_id_;
 
     // File watcher events arrive on its own thread; queue them and hand them
     // to the GLib main loop where storage and UI callbacks are safe to touch.
@@ -394,6 +410,15 @@ private:
     std::vector<std::string> shuffle_history_;
     size_t shuffle_history_index_ = 0;
     bool restoring_playback_ = false;
+    // shutdown() can be invoked explicitly and again from the destructor.
+    bool shutdown_complete_ = false;
+
+    // All ad-hoc background workers are tracked and joined during shutdown.
+    // The token is cleared before teardown so workers can exit before their
+    // blocking network/lyrics waits complete.
+    std::mutex workers_mutex_;
+    std::vector<std::thread> background_workers_;
+    WorkerAliveToken workers_alive_ = std::make_shared<std::atomic<bool>>(true);
 
     // Current playback state - owned solely by PlaybackController (this class).
     // AudioEngine and MPRISManager callbacks must NOT write to this directly;
@@ -440,6 +465,9 @@ private:
     void dispatch_scan_updates();
     void dispatch_lyrics_result();
 
+    void spawn_background_worker(std::function<void(const WorkerAliveToken&)> work);
+    void join_background_workers();
+
     void process_file_event(const FileEvent& event);
 
     void setup_cava_callbacks();
@@ -451,12 +479,17 @@ private:
     void update_play_statistics();
     void persist_queue();
 
+    bool load_metadata_cache();
+    void save_metadata_cache();
+    void preload_common_queries();
+
     void emit_track_changed(const Track& track);
     void emit_position_changed(double position, double duration);
     void emit_playback_state_changed(bool playing);
     void emit_queue_changed();
     void emit_visualization_changed(const std::vector<float>& points);
     void emit_library_changed();
+    void invalidate_read_caches();
     void emit_shuffle_changed(bool enabled);
     void emit_repeat_changed(bool enabled);
     void emit_repeat_one_changed(bool enabled);

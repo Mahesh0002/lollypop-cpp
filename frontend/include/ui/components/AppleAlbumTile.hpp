@@ -1,8 +1,8 @@
 /**
  * Square Apple-style album tile for the Home, Albums and Favourites pages.
  *
- * The homogeneous grid supplies the width; the tile fills that width and keeps
- * its height equal to it. Artwork fills the tile exactly.
+ * The homogeneous grid supplies the cell width; the tile fills that width and
+ * keeps its height equal to it. Artwork fills the tile exactly.
  */
 
 #pragma once
@@ -29,6 +29,7 @@ public:
     using FavoriteQueryCallback = std::function<bool(const Album&)>;
     using FavoriteToggleCallback = std::function<void(const Album&)>;
     using AlbumActionCallback = std::function<void(const Album&, const char* action)>;
+    using PlayToggleCallback = std::function<void(const Album&)>;
 
     explicit AppleAlbumTile(const Album& album,
                             int tile_size = kDefaultTileSize,
@@ -52,6 +53,12 @@ public:
         album_action_cb_ = std::move(cb);
         if (album_action_cb_) create_context_menu();
     }
+    void set_play_toggle_callback(PlayToggleCallback cb) {
+        play_toggle_cb_ = std::move(cb);
+    }
+
+    /// Reflect global playback state on the tile's play/pause button.
+    void set_playing(bool playing);
 
     /// Set the favourite state directly without querying the library.
     void set_favorite(bool favorite);
@@ -72,11 +79,12 @@ private:
     struct WidgetDeleter {
         void operator()(GtkWidget* w) const {
             if (!w) return;
+            // Managed widgets are ref-sunk at construction, so a container
+            // holds a second reference while the widget is parented.
             if (gtk_widget_get_parent(w) != nullptr) {
                 gtk_widget_unparent(w);
-            } else {
-                g_object_unref(w);
             }
+            g_object_unref(w);
         }
     };
 
@@ -87,6 +95,7 @@ private:
     std::unique_ptr<GtkWidget, WidgetDeleter> meta_box_;
     std::unique_ptr<GtkWidget, WidgetDeleter> favorite_button_;
     std::unique_ptr<GtkWidget, WidgetDeleter> favorite_image_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> play_button_;
     GtkWidget* name_label_ = nullptr;    // non-owning, parented to meta_box_
     GtkWidget* artist_label_ = nullptr;  // non-owning, parented to meta_box_
 
@@ -96,6 +105,7 @@ private:
     bool show_favorite_ = false;
     bool favorite_ = false;
     bool favorite_press_active_ = false;
+    bool playing_ = false;
     bool artwork_visible_ = true;
     std::string artwork_path_applied_;
     guint fit_tick_id_ = 0;
@@ -105,6 +115,7 @@ private:
     FavoriteQueryCallback favorite_query_cb_;
     FavoriteToggleCallback favorite_toggle_cb_;
     AlbumActionCallback album_action_cb_;
+    PlayToggleCallback play_toggle_cb_;
 
     void apply_size(int width, bool force = false);
 
@@ -114,7 +125,10 @@ private:
     static void on_context_menu(GtkGestureClick* gesture, int n_press,
                                 double x, double y, gpointer user_data);
     void refresh_favorite_icon();
+    void refresh_play_icon();
     void animate_hover(bool hover);
+
+    static void on_play_clicked(GtkButton* button, gpointer user_data);
 
     static gboolean fit_to_parent(GtkWidget* widget, GdkFrameClock* clock,
                                   gpointer user_data);

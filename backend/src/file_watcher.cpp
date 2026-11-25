@@ -130,6 +130,7 @@ struct FileWatcher::Impl {
             poll_fds[1].events = POLLIN;
 
             const int ready = poll(poll_fds, 2, 200);
+            if (!running) break;  // Destructor requested shutdown.
             if (ready <= 0) {
                 // Timeout: flush any pending debounced events.
                 flush_debounce(debounce);

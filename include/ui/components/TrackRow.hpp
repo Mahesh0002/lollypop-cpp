@@ -37,6 +37,7 @@ enum class TrackColumnRole : int {
 struct TrackRowOptions {
     bool show_track_number = false;
     bool show_album = true;
+    bool show_duration = true;
     bool enable_queue_actions = false;  // For queue page: show context menu
 };
 
@@ -63,12 +64,9 @@ public:
 
     void set_play_callback(PlayCallback cb) { play_cb_ = std::move(cb); }
     void set_like_callback(LikeCallback cb) { like_cb_ = std::move(cb); }
-    void set_queue_action_callback(QueueActionCallback cb) { 
-    queue_action_cb_ = std::move(cb); 
-    if (options_.enable_queue_actions && queue_action_cb_) {
-        create_context_menu();
+    void set_queue_action_callback(QueueActionCallback cb) {
+        queue_action_cb_ = std::move(cb);
     }
-}
 
     void set_playing(bool playing);
     void set_liked(bool liked);
@@ -81,12 +79,12 @@ private:
     struct WidgetDeleter {
         void operator()(GtkWidget* w) const {
             if (!w) return;
+            // Managed widgets are ref-sunk at construction, so a container
+            // holds a second reference while the widget is parented.
             if (gtk_widget_get_parent(w) != nullptr) {
-                // GTK parents take ownership of the child's existing reference.
                 gtk_widget_unparent(w);
-            } else {
-                g_object_unref(w);
             }
+            g_object_unref(w);
         }
     };
     std::unique_ptr<GtkWidget, WidgetDeleter> widget_;
@@ -111,6 +109,7 @@ private:
     gint64 last_like_press_time_ = 0;
     gint64 last_row_play_time_ = 0;
     static std::unordered_set<TrackRow*> live_rows_;
+    static void on_widget_destroyed(gpointer data);
 
     void setup_ui();
     void create_context_menu();

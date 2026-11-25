@@ -48,6 +48,20 @@ bool QueueManager::enqueue(const std::string& track_id, bool next) {
     return true;
 }
 
+bool QueueManager::insert(const std::string& track_id, size_t index) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (track_id.empty()) return false;
+
+    const size_t target = std::min(index, queue_.size());
+    queue_.insert(queue_.begin() + static_cast<std::ptrdiff_t>(target), track_id);
+
+    if (target <= current_index_) {
+        ++current_index_;
+    }
+    shuffle_dirty_ = true;
+    return true;
+}
+
 bool QueueManager::remove(size_t index) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (index >= queue_.size()) return false;
@@ -85,7 +99,7 @@ bool QueueManager::move(size_t from, size_t to) {
     return true;
 }
 
-void QueueManager::ensure_shuffle_order() const {
+void QueueManager::ensure_shuffle_order_locked() {
     if (!shuffle_dirty_) return;
     shuffle_order_.clear();
     for (size_t i = 0; i < queue_.size(); ++i) shuffle_order_.push_back(i);
@@ -122,14 +136,14 @@ std::optional<size_t> QueueManager::next_index() {
     }
 
     if (shuffle_) {
-        ensure_shuffle_order();
+        ensure_shuffle_order_locked();
         if (shuffle_order_.empty()) return std::nullopt;
         // Advance the shuffle cursor.
         ++shuffle_pos_;
         if (shuffle_pos_ >= shuffle_order_.size()) {
             if (repeat_mode_ == RepeatMode::Playlist) {
                 // Reshuffle and wrap.
-                ensure_shuffle_order();
+                ensure_shuffle_order_locked();
                 shuffle_pos_ = 0;
                 if (!shuffle_order_.empty()) {
                     current_index_ = shuffle_order_[0];
@@ -166,7 +180,7 @@ std::optional<size_t> QueueManager::previous_index() {
     }
 
     if (shuffle_) {
-        ensure_shuffle_order();
+        ensure_shuffle_order_locked();
         if (shuffle_order_.empty()) return std::nullopt;
         // Rewind the shuffle cursor.
         if (shuffle_pos_ > 0) {
@@ -176,7 +190,7 @@ std::optional<size_t> QueueManager::previous_index() {
         }
         if (repeat_mode_ == RepeatMode::Playlist) {
             // Wrap to the end of the reshuffled order.
-            ensure_shuffle_order();
+            ensure_shuffle_order_locked();
             shuffle_pos_ = shuffle_order_.size();
             if (!shuffle_order_.empty()) {
                 --shuffle_pos_;

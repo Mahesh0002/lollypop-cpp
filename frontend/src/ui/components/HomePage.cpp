@@ -187,7 +187,9 @@ GtkWidget* HomePage::create_album_section(const std::string& title,
     // Homogeneous, expanding columns; each tile fills its cell and stays
     // square via AppleAlbumTile's fit callback.
     gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(grid), TRUE);
-    gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(grid), 3);
+    // Pin the column count so the tick-driven tile sizing cannot flip the
+    // grid between 4 and 3 columns when sections are rebuilt.
+    gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(grid), max_per_row);
     gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(grid), max_per_row);
     gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(grid), 16);
     gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(grid), 16);
@@ -232,13 +234,8 @@ void HomePage::refresh() {
 void HomePage::refresh_track_section(SectionData* data) {
     if (!data || !data->list_box) return;
 
-    // Clear existing
-    GtkWidget* child = gtk_widget_get_first_child(data->list_box);
-    while (child) {
-        GtkWidget* next = gtk_widget_get_next_sibling(child);
-        gtk_list_box_remove(GTK_LIST_BOX(data->list_box), child);
-        child = next;
-    }
+    // Clear existing - use safe helper to avoid invalid sibling pointers after unparenting
+    safe_list_box_remove_all(GTK_LIST_BOX(data->list_box));
     data->track_rows.clear();
 
     auto tracks = data->fetcher();
@@ -258,13 +255,8 @@ void HomePage::refresh_track_section(SectionData* data) {
 void HomePage::refresh_album_section(AlbumSectionData* data) {
     if (!data || !data->grid) return;
 
-    // Clear existing
-    GtkWidget* child = gtk_widget_get_first_child(data->grid);
-    while (child) {
-        GtkWidget* next = gtk_widget_get_next_sibling(child);
-        gtk_flow_box_remove(GTK_FLOW_BOX(data->grid), child);
-        child = next;
-    }
+    // Clear existing - use safe helper to avoid invalid sibling pointers after unparenting
+    safe_flow_box_remove_all(GTK_FLOW_BOX(data->grid));
     data->album_tiles.clear();
 
     auto albums = data->fetcher();
@@ -273,6 +265,13 @@ void HomePage::refresh_album_section(AlbumSectionData* data) {
         auto tile = std::make_unique<AppleAlbumTile>(albums[i], 300);
         tile->set_play_callback(data->play_cb);
         tile->set_click_callback(data->click_cb);
+        tile->set_play_toggle_callback([this](const Album&) {
+            if (!main_window_) return;
+            if (auto* player = dynamic_cast<IPlayerService*>(
+                    main_window_->get_backend())) {
+                player->toggle_play_pause();
+            }
+        });
 
         GtkWidget* w = tile->get_widget();
         safe_flow_box_append(GTK_FLOW_BOX(data->grid), w);
