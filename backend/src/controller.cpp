@@ -492,6 +492,10 @@ void BackendController::initialize_deferred_services() {
     // on a low-priority idle callback, after the first frame is on screen.
     preload_common_queries();
     save_metadata_cache();
+    // Backfill artist artwork from local folders/album covers. This is fast
+    // and offline; the explicit fetch_artist_artwork() API remains the
+    // network-backed path.
+    fetch_missing_artist_artwork();
 
     restore_saved_queue();
 }
@@ -856,6 +860,9 @@ bool BackendController::start_scan_library(const std::string& path) {
             // Refresh the read models and metadata snapshot off the UI thread.
             preload_common_queries();
             save_metadata_cache();
+            // New artists may have arrived with no artwork path; backfill from
+            // local folder/album art without making the scan wait on network.
+            fetch_missing_artist_artwork();
         }
         if (scan_dispatcher_) scan_dispatcher_->emit();
     });
@@ -1421,6 +1428,47 @@ std::string BackendController::get_artwork_path_for_artist(
     return artist.artwork_path;
 }
 
+std::string BackendController::find_local_artist_artwork(const Artist& artist) {
+    if (!artist.artwork_path.empty()) return artist.artwork_path;
+    if (!storage_ || artist.name.empty()) return "";
+
+    const std::vector<std::string> names = {
+        "artist.jpg", "artist.jpeg", "artist.png",
+        "cover.jpg", "cover.jpeg", "cover.png", "folder.jpg",
+    };
+
+    auto in_directory = [&names](const std::filesystem::path& dir) -> std::string {
+        std::error_code ec;
+        if (!std::filesystem::is_directory(dir, ec)) return "";
+        for (const auto& name : names) {
+            const auto candidate = dir / name;
+            if (std::filesystem::is_regular_file(candidate, ec)) {
+                return candidate.string();
+            }
+        }
+        return "";
+    };
+
+    // Prefer art next to the artist's tracks, then one folder level up.
+    for (const auto& track : storage_->get_tracks_by_artist(artist.name)) {
+        if (track.file_path.empty()) continue;
+        const std::filesystem::path file(track.file_path);
+        if (!file.has_parent_path()) continue;
+        if (auto found = in_directory(file.parent_path()); !found.empty()) return found;
+        if (auto found = in_directory(file.parent_path().parent_path()); !found.empty()) return found;
+    }
+
+    // Fall back to the first album cover associated with this artist.
+    for (const auto& album : storage_->get_albums_by_artist(artist.id)) {
+        if (!album.artwork_path.empty() &&
+            std::filesystem::exists(album.artwork_path)) {
+            return album.artwork_path;
+        }
+    }
+
+    return "";
+}
+
 void BackendController::fetch_artist_artwork(
     const std::string& artist_id,
     std::function<void(bool success)> callback) {
@@ -1433,6 +1481,17 @@ void BackendController::fetch_artist_artwork(
             Artist artist = storage_->get_artist(artist_id);
             if (artist.name.empty()) {
                 if (callback && alive->load()) callback(false);
+                return;
+            }
+
+            // Local folder/album art resolves instantly and works offline.
+            if (auto local = find_local_artist_artwork(artist); !local.empty()) {
+                const bool ok = storage_->update_artist_artwork(artist_id, local);
+                if (ok) {
+                    emit_library_changed();
+                    save_metadata_cache();
+                }
+                if (callback && alive->load()) callback(ok);
                 return;
             }
 
@@ -1462,8 +1521,12 @@ void BackendController::fetch_artist_artwork(
             }
 
             bool success = storage_->update_artist_artwork(artist_id, local_path);
-            if (success && artwork_manager_) {
-                artwork_manager_->invalidate(ArtworkManager::make_key("", artist.name));
+            if (success) {
+                emit_library_changed();
+                save_metadata_cache();
+                if (artwork_manager_) {
+                    artwork_manager_->invalidate(ArtworkManager::make_key("", artist.name));
+                }
             }
 
             if (callback && alive->load()) callback(success);
@@ -1474,38 +1537,25 @@ void BackendController::fetch_missing_artist_artwork() {
     spawn_background_worker([this](const WorkerAliveToken& alive) {
         if (!alive->load() || !storage_) return;
 
-        auto artists = storage_->get_all_artists();
-        for (const auto& artist : artists) {
+        bool changed = false;
+        for (const auto& artist : storage_->get_all_artists()) {
             if (!alive->load()) return;
             if (!artist.artwork_path.empty()) continue;
 
-            auto result = ArtworkProvider::fetch_artist_artwork_by_name(artist.name);
-            if (!alive->load()) return;
-            if (!result) continue;
-
-            std::string cache_dir;
-            if (const char* home = std::getenv("HOME")) {
-                cache_dir = std::string(home) + "/.local/share/lollypop-cpp/artwork";
-            } else {
-                cache_dir = "/tmp/lollypop-cpp/artwork";
-            }
-
-            std::string key = "artist_" + artist.name;
-            std::replace(key.begin(), key.end(), '/', '_');
-            std::replace(key.begin(), key.end(), ':', '_');
-
-            std::string local_path =
-                ArtworkProvider::download_artwork(result->url, cache_dir, key);
-            if (!alive->load()) return;
+            const std::string local_path = find_local_artist_artwork(artist);
             if (local_path.empty()) continue;
 
-            storage_->update_artist_artwork(artist.id, local_path);
-
-            if (!alive->load()) return;
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            if (storage_->update_artist_artwork(artist.id, local_path)) {
+                changed = true;
+            }
         }
 
-        if (alive->load()) emit_library_changed();
+        if (changed && alive->load()) {
+            // Refresh both the in-memory read model and the on-disk snapshot
+            // so a restart cannot restore stale empty artwork paths.
+            emit_library_changed();
+            save_metadata_cache();
+        }
     });
 }
 

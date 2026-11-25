@@ -16,6 +16,8 @@
 
 #include "ui/components/LibraryPage.hpp"
 #include "ui/components/AppleAlbumTile.hpp"
+#include "ui/components/EmptyState.hpp"
+#include "ui/components/ErrorState.hpp"
 #include "services/ILibraryService.hpp"
 
 namespace lollypop {
@@ -52,6 +54,9 @@ private:
 
     GtkWidget* subtitle_label_ = nullptr;
     GtkWidget* sort_button_ = nullptr;
+    GSimpleActionGroup* sort_action_group_ = nullptr;
+    std::unique_ptr<EmptyState> empty_state_;
+    std::unique_ptr<ErrorState> error_state_;
     GtkAdjustment* artwork_scroll_adjustment_ = nullptr;
     gulong artwork_scroll_value_changed_id_ = 0;
     gulong artwork_scroll_changed_id_ = 0;
@@ -65,13 +70,17 @@ private:
     void setup_ui();
     void populate(const std::vector<Album>& albums);
     void update_header(size_t album_count);
-    void cycle_sort();
+    void create_sort_menu();
+    void update_sort_action_states();
+    void set_sort_mode(SortMode mode);
+    int visible_columns() const;
     void sorted_albums(std::vector<Album>& albums) const;
     void toggle_favorite(const Album& album, AppleAlbumTile* tile);
     void connect_scroll_adjustment();
     void update_visible_artwork();
 
-    static void on_sort_clicked(GtkButton* button, gpointer user_data);
+    static void on_sort_action(GSimpleAction* action, GVariant* parameter,
+                               gpointer user_data);
     static void on_scroll_changed(GtkAdjustment* adjustment, gpointer user_data);
     void on_album_played(const Album& album);
     void on_album_clicked(const Album& album);

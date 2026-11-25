@@ -12,6 +12,7 @@
 
 #include "ui/components/LibraryPage.hpp"
 #include "ui/components/TrackRow.hpp"
+#include "ui/components/ArtworkView.hpp"
 #include "types.hpp"
 #include "services/ILibraryService.hpp"
 
@@ -43,7 +44,7 @@ private:
     std::unique_ptr<GtkWidget, WidgetDeleter> widget_;
     std::unique_ptr<GtkWidget, WidgetDeleter> scrolled_window_;
     std::unique_ptr<GtkWidget, WidgetDeleter> content_box_;
-    std::unique_ptr<GtkWidget, WidgetDeleter> artwork_image_;
+    std::unique_ptr<ArtworkView> artwork_view_;
     std::unique_ptr<GtkWidget, WidgetDeleter> name_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> track_list_box_;
 

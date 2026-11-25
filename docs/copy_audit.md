@@ -32,6 +32,7 @@ audit:
 | Queue removal previously gave no feedback about what happened or how to reverse it. | Undo bar copy: "Removed <track> from the queue", button "Undo", tooltip "Put <track> back at its original place", failure "Couldn't put the track back." | Implemented |
 | "Add to Playlist..." was reviewed as implementation-sounding. | Kept: playlist is a user concept, not backend language. | Verified |
 | Existing empty/loading/error copy was reviewed. | Kept: "No results found", "Try a different search term", "No track playing", "No lyrics available", and retry/error titles already describe user outcomes. | Verified |
+| Albums sort used a cycling "Sort: ..." button with no visible choice list. | Replaced with a "Sort by: ..." menu button and radio items; empty/error copy now says "No albums yet" and "Albums unavailable" with a Retry action. | Implemented |
 
 ## Remaining polish (not jargon)
 

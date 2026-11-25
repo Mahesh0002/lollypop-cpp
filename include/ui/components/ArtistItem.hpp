@@ -12,6 +12,7 @@
 #include <functional>
 
 #include "types.hpp"
+#include "ui/components/ArtworkView.hpp"
 
 namespace lollypop {
 
@@ -40,7 +41,7 @@ private:
         }
     };
     std::unique_ptr<GtkWidget, WidgetDeleter> widget_;
-    std::unique_ptr<GtkWidget, WidgetDeleter> artwork_image_;
+    std::unique_ptr<ArtworkView> artwork_view_;
     std::unique_ptr<GtkWidget, WidgetDeleter> name_label_;
 
     MainWindow* main_window_;

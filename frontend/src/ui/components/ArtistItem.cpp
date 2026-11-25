@@ -39,19 +39,13 @@ void ArtistItem::setup_ui() {
     gtk_widget_set_margin_start(box, 8);
     gtk_widget_set_margin_end(box, 8);
 
-    // Artwork
-    artwork_image_.reset(gtk_picture_new());
-    g_object_ref_sink(artwork_image_.get());
-    gtk_picture_set_content_fit(GTK_PICTURE(artwork_image_.get()),
-                                GTK_CONTENT_FIT_COVER);
-    gtk_widget_add_css_class(artwork_image_.get(), "artist-artwork");
-    gtk_widget_set_size_request(artwork_image_.get(), 140, 140);
-    if (!artist_.artwork_path.empty()) {
-        GFile* file = g_file_new_for_path(artist_.artwork_path.c_str());
-        gtk_picture_set_file(GTK_PICTURE(artwork_image_.get()), file);
-        g_object_unref(file);
-    }
-    gtk_box_append(GTK_BOX(box), artwork_image_.get());
+    // Artwork uses the shared view so missing art gets a fallback icon and
+    // available art is decoded through the cached thumbnail pipeline.
+    artwork_view_ = std::make_unique<ArtworkView>();
+    artwork_view_->set_preferred_size(140, 140);
+    gtk_widget_add_css_class(artwork_view_->get_widget(), "artist-artwork");
+    artwork_view_->set_artwork_path(artist_.artwork_path);
+    gtk_box_append(GTK_BOX(box), artwork_view_->get_widget());
 
     // Name
     name_label_.reset(gtk_label_new(artist_.name.c_str()));

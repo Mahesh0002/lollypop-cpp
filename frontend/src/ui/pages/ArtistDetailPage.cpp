@@ -38,17 +38,15 @@ void ArtistDetailPage::setup_ui() {
     gtk_widget_set_margin_end(content_box_.get(), 24);
     gtk_widget_set_visible(content_box_.get(), TRUE);
 
-    // Artwork
-    artwork_image_.reset(gtk_picture_new());
-    g_object_ref_sink(artwork_image_.get());
-    gtk_picture_set_content_fit(GTK_PICTURE(artwork_image_.get()),
-                                GTK_CONTENT_FIT_COVER);
-    gtk_widget_add_css_class(artwork_image_.get(), "now-playing-artwork-image");
-    gtk_widget_add_css_class(artwork_image_.get(), "detail-artwork");
-    gtk_widget_set_size_request(artwork_image_.get(), 300, 300);
-    gtk_widget_set_halign(artwork_image_.get(), GTK_ALIGN_CENTER);
-    gtk_widget_set_visible(artwork_image_.get(), TRUE);
-    safe_box_append(GTK_BOX(content_box_.get()), artwork_image_.get());
+    // Artwork uses the shared cached view, with a visible fallback when the
+    // library has no artist image yet.
+    artwork_view_ = std::make_unique<ArtworkView>();
+    artwork_view_->set_preferred_size(300, 300);
+    gtk_widget_add_css_class(artwork_view_->get_widget(), "artist-artwork");
+    gtk_widget_add_css_class(artwork_view_->get_widget(), "detail-artwork");
+    gtk_widget_set_halign(artwork_view_->get_widget(), GTK_ALIGN_CENTER);
+    gtk_widget_set_visible(artwork_view_->get_widget(), TRUE);
+    safe_box_append(GTK_BOX(content_box_.get()), artwork_view_->get_widget());
 
     // Name
     name_label_.reset(gtk_label_new(""));
@@ -90,14 +88,8 @@ void ArtistDetailPage::set_artist(const std::string& artist_id) {
 void ArtistDetailPage::populate_artist(const Artist& artist) {
     gtk_label_set_text(GTK_LABEL(name_label_.get()), artist.name.c_str());
 
-    if (artwork_image_) {
-        if (!artist.artwork_path.empty()) {
-            GFile* file = g_file_new_for_path(artist.artwork_path.c_str());
-            safe_picture_set_file(GTK_PICTURE(artwork_image_.get()), file);
-            g_object_unref(file);
-        } else {
-            safe_picture_set_file(GTK_PICTURE(artwork_image_.get()), nullptr);
-        }
+    if (artwork_view_) {
+        artwork_view_->set_artwork_path(artist.artwork_path);
     }
 
     // Load tracks - use safe helper to avoid invalid sibling pointers after unparenting

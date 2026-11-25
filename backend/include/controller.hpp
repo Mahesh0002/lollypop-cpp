@@ -452,6 +452,8 @@ private:
 
     void schedule_deferred_initialization();
     void cancel_deferred_initialization();
+    std::string find_local_artist_artwork(const Artist& artist);
+
     void initialize_deferred_services();
     void restore_saved_queue();
     static gboolean deferred_init_idle(gpointer data);
