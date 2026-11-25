@@ -14,6 +14,10 @@
 
 namespace lollypop {
 
+namespace {
+constexpr int kArtworkSize = 160;
+} // namespace
+
 PlaylistItem::PlaylistItem(MainWindow* main_window, const Playlist& playlist)
     : main_window_(main_window), playlist_(playlist) {
     setup_ui();
@@ -32,31 +36,35 @@ void PlaylistItem::setup_ui() {
     accessibility::set_label(widget_.get(), accessible_label.c_str());
     gtk_widget_set_hexpand(widget_.get(), FALSE);
     gtk_widget_set_valign(widget_.get(), GTK_ALIGN_START);
-    gtk_widget_set_size_request(widget_.get(), 160, 220);
-    // Consistent spacing on all four sides.
+    // The square artwork tile defines the card width; labels sit below.
     gtk_widget_set_margin_start(widget_.get(), 10);
     gtk_widget_set_margin_end(widget_.get(), 10);
     gtk_widget_set_margin_top(widget_.get(), 10);
     gtk_widget_set_margin_bottom(widget_.get(), 10);
 
     GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-    gtk_widget_set_margin_top(box, 8);
-    gtk_widget_set_margin_bottom(box, 8);
-    gtk_widget_set_margin_start(box, 8);
-    gtk_widget_set_margin_end(box, 8);
 
-    // Artwork (placeholder)
-    artwork_image_.reset(gtk_picture_new());
-    g_object_ref_sink(artwork_image_.get());
-    gtk_picture_set_content_fit(GTK_PICTURE(artwork_image_.get()),
-                                GTK_CONTENT_FIT_COVER);
-    gtk_widget_add_css_class(artwork_image_.get(), "album-artwork");
-    gtk_widget_set_size_request(artwork_image_.get(), 140, 140);
-    // Keep the placeholder square inside the wider card instead of letting
-    // the vertical box stretch it.
-    gtk_widget_set_hexpand(artwork_image_.get(), FALSE);
-    gtk_widget_set_halign(artwork_image_.get(), GTK_ALIGN_CENTER);
-    gtk_box_append(GTK_BOX(box), artwork_image_.get());
+    // One square tile; ArtworkView supplies the shared fallback when a
+    // playlist has no cover art yet.
+    GtkWidget* tile = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_add_css_class(tile, "card-artwork-tile");
+    gtk_widget_set_size_request(tile, kArtworkSize, kArtworkSize);
+    gtk_widget_set_overflow(tile, GTK_OVERFLOW_HIDDEN);
+    gtk_widget_set_halign(tile, GTK_ALIGN_CENTER);
+    gtk_widget_set_hexpand(tile, FALSE);
+    gtk_widget_set_visible(tile, TRUE);
+
+    artwork_view_ = std::make_unique<ArtworkView>();
+    artwork_view_->set_preferred_size(kArtworkSize, kArtworkSize);
+    gtk_widget_add_css_class(artwork_view_->get_widget(), "album-artwork");
+    artwork_view_->set_artwork_path("");
+    GtkWidget* artwork = artwork_view_->get_widget();
+    gtk_widget_set_hexpand(artwork, TRUE);
+    gtk_widget_set_vexpand(artwork, TRUE);
+    gtk_widget_set_halign(artwork, GTK_ALIGN_FILL);
+    gtk_widget_set_valign(artwork, GTK_ALIGN_FILL);
+    gtk_box_append(GTK_BOX(tile), artwork);
+    gtk_box_append(GTK_BOX(box), tile);
 
     // Name
     name_label_.reset(gtk_label_new(playlist_.name.c_str()));
@@ -66,6 +74,8 @@ void PlaylistItem::setup_ui() {
     gtk_label_set_ellipsize(GTK_LABEL(name_label_.get()),
                             PANGO_ELLIPSIZE_END);
     gtk_label_set_width_chars(GTK_LABEL(name_label_.get()), 14);
+    gtk_label_set_max_width_chars(GTK_LABEL(name_label_.get()), 18);
+    gtk_widget_set_halign(name_label_.get(), GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(box), name_label_.get());
 
     // Track count

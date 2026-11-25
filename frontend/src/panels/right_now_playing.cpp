@@ -214,17 +214,16 @@ void RightNowPlaying::create_artwork_section() {
     gtk_widget_set_visible(artwork_box_, TRUE);
 
     artwork_view_ = std::make_unique<ArtworkView>();
-    // Leave slack for borders and text reflow. The allocation tick resizes
-    // this with the panel, but the artwork never becomes the width driver.
+    // The allocation tick sizes this square from the available pane width.
     artwork_view_->set_preferred_size(280, 280);
     artwork_view_->set_corner_radius(12.0);
 
     GtkWidget* artwork = artwork_view_->get_widget();
-    // Keep the requested square allocation and center it inside the pane;
-    // expanding the widget itself would widen it into a rectangle.
-    gtk_widget_set_hexpand(artwork, FALSE);
-    gtk_widget_set_halign(artwork, GTK_ALIGN_CENTER);
-    gtk_widget_set_valign(artwork, GTK_ALIGN_CENTER);
+    // The tile is width-driven; the artwork fills it on both axes.
+    gtk_widget_set_hexpand(artwork, TRUE);
+    gtk_widget_set_vexpand(artwork, TRUE);
+    gtk_widget_set_halign(artwork, GTK_ALIGN_FILL);
+    gtk_widget_set_valign(artwork, GTK_ALIGN_FILL);
     safe_box_append(GTK_BOX(artwork_box_), artwork);
 
     safe_box_append(GTK_BOX(content_box_), artwork_box_);
@@ -588,24 +587,17 @@ void RightNowPlaying::adapt_to_allocation(int width, int height) {
     // the panel's minimum-width driver and the panel grows.
     const bool compact = width < kCompactPanelWidth;
     const int horizontal_chrome = compact ? 32 : 44;
-    const int available_width = std::max(120, width - horizontal_chrome);
-    const int usable_height = std::max(180, height - 48);
-
-    int side = available_width;
-    if (height < 480) {
-        side = std::min(available_width, 120);
-    } else if (height < 620) {
-        side = std::min(available_width, 180);
-    } else {
-        side = std::min(available_width,
-                        std::max(180, std::min(usable_height / 2, 420)));
-    }
-    side = std::max(72, side);
+    const int side = std::max(120, width - horizontal_chrome);
 
     if (artwork_view_ && std::abs(side - last_artwork_side_) >= 8) {
         artwork_view_->set_preferred_size(side, side);
         artwork_view_->set_corner_radius(static_cast<double>(side) / 24.0);
         last_artwork_side_ = side;
+        GtkWidget* artwork = artwork_view_->get_widget();
+        gtk_widget_set_hexpand(artwork, TRUE);
+        gtk_widget_set_vexpand(artwork, TRUE);
+        gtk_widget_set_halign(artwork, GTK_ALIGN_FILL);
+        gtk_widget_set_valign(artwork, GTK_ALIGN_FILL);
     }
 
     const int horizontal_margin = compact ? 8 : 12;

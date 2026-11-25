@@ -14,6 +14,10 @@
 
 namespace lollypop {
 
+namespace {
+constexpr int kArtworkSize = 160;
+} // namespace
+
 ArtistItem::ArtistItem(MainWindow* main_window, const Artist& artist)
     : main_window_(main_window), artist_(artist) {
     setup_ui();
@@ -33,30 +37,34 @@ void ArtistItem::setup_ui() {
     accessibility::set_label(widget_.get(), accessible_label.c_str());
     gtk_widget_set_hexpand(widget_.get(), FALSE);
     gtk_widget_set_valign(widget_.get(), GTK_ALIGN_START);
-    gtk_widget_set_size_request(widget_.get(), 160, 220);
-    // Consistent spacing on all four sides.
+    // The square artwork tile defines the card width; the label sits below.
     gtk_widget_set_margin_start(widget_.get(), 10);
     gtk_widget_set_margin_end(widget_.get(), 10);
     gtk_widget_set_margin_top(widget_.get(), 10);
     gtk_widget_set_margin_bottom(widget_.get(), 10);
 
     GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-    gtk_widget_set_margin_top(box, 8);
-    gtk_widget_set_margin_bottom(box, 8);
-    gtk_widget_set_margin_start(box, 8);
-    gtk_widget_set_margin_end(box, 8);
 
-    // Artwork uses the shared view so missing art gets a fallback icon and
-    // available art is decoded through the cached thumbnail pipeline.
+    // One square tile with the artwork filling it edge to edge.
+    GtkWidget* tile = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_add_css_class(tile, "card-artwork-tile");
+    gtk_widget_set_size_request(tile, kArtworkSize, kArtworkSize);
+    gtk_widget_set_overflow(tile, GTK_OVERFLOW_HIDDEN);
+    gtk_widget_set_halign(tile, GTK_ALIGN_CENTER);
+    gtk_widget_set_hexpand(tile, FALSE);
+    gtk_widget_set_visible(tile, TRUE);
+
     artwork_view_ = std::make_unique<ArtworkView>();
-    artwork_view_->set_preferred_size(140, 140);
+    artwork_view_->set_preferred_size(kArtworkSize, kArtworkSize);
     gtk_widget_add_css_class(artwork_view_->get_widget(), "artist-artwork");
-    // The card is wider than the artwork request. Center the square instead
-    // of letting the vertical box stretch it to the card's inner width.
-    gtk_widget_set_hexpand(artwork_view_->get_widget(), FALSE);
-    gtk_widget_set_halign(artwork_view_->get_widget(), GTK_ALIGN_CENTER);
     artwork_view_->set_artwork_path(artist_.artwork_path);
-    gtk_box_append(GTK_BOX(box), artwork_view_->get_widget());
+    GtkWidget* artwork = artwork_view_->get_widget();
+    gtk_widget_set_hexpand(artwork, TRUE);
+    gtk_widget_set_vexpand(artwork, TRUE);
+    gtk_widget_set_halign(artwork, GTK_ALIGN_FILL);
+    gtk_widget_set_valign(artwork, GTK_ALIGN_FILL);
+    gtk_box_append(GTK_BOX(tile), artwork);
+    gtk_box_append(GTK_BOX(box), tile);
 
     // Name
     name_label_.reset(gtk_label_new(artist_.name.c_str()));
@@ -66,6 +74,8 @@ void ArtistItem::setup_ui() {
     gtk_label_set_ellipsize(GTK_LABEL(name_label_.get()),
                             PANGO_ELLIPSIZE_END);
     gtk_label_set_width_chars(GTK_LABEL(name_label_.get()), 14);
+    gtk_label_set_max_width_chars(GTK_LABEL(name_label_.get()), 18);
+    gtk_widget_set_halign(name_label_.get(), GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(box), name_label_.get());
 
     gtk_button_set_child(GTK_BUTTON(widget_.get()), box);

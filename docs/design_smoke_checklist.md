@@ -78,8 +78,8 @@ Enable the desktop "reduce animation" setting and restart the app.
 - [ ] Generate the stress data with `scripts/stress_test.sh` or use the harness fixtures in `tests/test_layout_stress.cpp`.
 - [ ] 240-character track/artist/album names ellipsize without widening the right panel.
 - [ ] Missing artwork shows the fallback tile/row artwork without blank gaps.
-- [ ] Artist, playlist, and right-pane artwork frames stay square at every panel width.
-- [ ] Cover art crops to fill square frames; no artwork appears stretched into a rectangle.
+- [ ] Artist, playlist, and right-pane artwork tiles are width-driven squares at every panel width.
+- [ ] Artwork fills each square tile edge to edge; cover art crops rather than stretches.
 - [ ] A 1000-track queue remains scrollable and responsive; row actions still work.
 - [ ] Removing a queue row shows Undo; Undo restores the exact original index.
 - [ ] Stale Undo hides itself when the queue changes; failure disables Undo with clear copy.
