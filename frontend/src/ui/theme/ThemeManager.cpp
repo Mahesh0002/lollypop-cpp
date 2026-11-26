@@ -118,27 +118,27 @@ flowboxchild button {
    accent colour. */
 .album-detail-action-button,
 .favourite-music-action-button {
-    background-color: var(--detail-action-bg) !important;
-    background-image: none !important;
-    border-radius: 6px !important;
-    min-height: 36px !important;
-    padding: 0 18px !important;
-    color: var(--detail-action-on) !important;
+    background-color: var(--detail-action-bg);
+    background-image: none;
+    border-radius: 6px;
+    min-height: 36px;
+    padding: 0 18px;
+    color: var(--detail-action-on);
 }
 
 .album-detail-action-button:hover,
 .favourite-music-action-button:hover {
-    background-color: var(--detail-action-hover) !important;
+    background-color: var(--detail-action-hover);
 }
 
 .album-detail-action-button:active,
 .favourite-music-action-button:active {
-    background-color: var(--detail-action-active) !important;
+    background-color: var(--detail-action-active);
 }
 
 .album-detail-play-button,
 .favourite-music-play-button {
-    font-weight: 700 !important;
+    font-weight: 700;
 }
 
 .favourite-music-menu-button {
