@@ -5,6 +5,7 @@
 #include "panels/fullscreen_player.hpp"
 
 #include "main_window.hpp"
+#include "panels/progress_wave.hpp"
 #include "services/IPlayerService.hpp"
 #include "services/ILibraryService.hpp"
 #include "services/ILyricsService.hpp"
@@ -60,12 +61,22 @@ GtkWidget* create_menu_icon_button(const char* icon_name,
     return button;
 }
 
-std::string format_time(double seconds) {
-    if (!std::isfinite(seconds) || seconds < 0.0) return "--:--";
-    const int total = static_cast<int>(seconds);
-    char buffer[16];
-    std::snprintf(buffer, sizeof(buffer), "%d:%02d", total / 60, total % 60);
-    return std::string(buffer);
+GtkWidget* create_icon_toggle_button(const char* icon_name,
+                                     int pixel_size,
+                                     const char* tooltip,
+                                     const char* accessible_label) {
+    GtkWidget* button = gtk_toggle_button_new();
+    gtk_button_set_has_frame(GTK_BUTTON(button), FALSE);
+    gtk_widget_add_css_class(button, "fullscreen-control-button");
+    gtk_widget_add_css_class(button, "fullscreen-mode-button");
+    gtk_widget_set_size_request(button, 44, 44);
+    gtk_widget_set_tooltip_text(button, tooltip);
+    accessibility::set_label(button, accessible_label);
+
+    GtkWidget* icon = gtk_image_new_from_icon_name(icon_name);
+    gtk_image_set_pixel_size(GTK_IMAGE(icon), pixel_size);
+    safe_button_set_child(GTK_BUTTON(button), icon);
+    return button;
 }
 
 } // namespace
@@ -82,16 +93,12 @@ FullscreenPlayer::FullscreenPlayer(MainWindow* main_window,
       subtitle_label_(nullptr),
       play_button_(nullptr),
       play_icon_(nullptr),
-      elapsed_label_(nullptr),
-      remaining_label_(nullptr),
-      seek_scale_(nullptr),
       volume_scale_(nullptr),
-      shuffle_check_(nullptr),
-      repeat_check_(nullptr),
-      loop_check_(nullptr),
+      shuffle_button_(nullptr),
+      repeat_button_(nullptr),
+      loop_button_(nullptr),
       lyrics_toggle_(nullptr),
       lyrics_revealer_(nullptr),
-      seek_adjustment_(nullptr),
       volume_adjustment_(nullptr) {
     setup_ui();
     gtk_widget_add_tick_callback(root_, on_allocation_tick, this, nullptr);
@@ -110,9 +117,9 @@ void FullscreenPlayer::setup_ui() {
 
     create_top_bar();
 
-    center_box_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 20);
+    center_box_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_widget_add_css_class(center_box_, "fullscreen-player-center");
-    gtk_widget_set_size_request(center_box_, 520, -1);
+    gtk_widget_set_size_request(center_box_, 790, -1);
     gtk_widget_set_hexpand(center_box_, TRUE);
     gtk_widget_set_vexpand(center_box_, TRUE);
     gtk_widget_set_halign(center_box_, GTK_ALIGN_CENTER);
@@ -124,6 +131,7 @@ void FullscreenPlayer::setup_ui() {
     create_track_info();
     create_progress();
     create_controls();
+    create_volume();
     create_lyrics();
 }
 
@@ -154,8 +162,8 @@ void FullscreenPlayer::create_top_bar() {
 
 void FullscreenPlayer::create_artwork() {
     artwork_view_ = std::make_unique<ArtworkView>();
-    artwork_view_->set_preferred_size(360, 360);
-    artwork_view_->set_corner_radius(16.0);
+    artwork_view_->set_preferred_size(750, 750);
+    artwork_view_->set_corner_radius(26.0);
 
     GtkWidget* artwork = artwork_view_->get_widget();
     gtk_widget_add_css_class(artwork, "fullscreen-artwork");
@@ -204,55 +212,105 @@ void FullscreenPlayer::create_track_info() {
 }
 
 void FullscreenPlayer::create_progress() {
-    GtkWidget* row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    GtkWidget* row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
     gtk_widget_add_css_class(row, "fullscreen-progress-row");
     gtk_widget_set_hexpand(row, TRUE);
     gtk_widget_set_halign(row, GTK_ALIGN_FILL);
     gtk_widget_set_valign(row, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(row, TRUE);
 
-    elapsed_label_ = gtk_label_new("0:00");
-    gtk_widget_add_css_class(elapsed_label_, "fullscreen-time");
-    gtk_widget_set_size_request(elapsed_label_, 48, -1);
-    gtk_label_set_xalign(GTK_LABEL(elapsed_label_), 1.0);
-    gtk_widget_set_halign(elapsed_label_, GTK_ALIGN_END);
-    gtk_widget_set_visible(elapsed_label_, TRUE);
+    GtkWidget* prev_button = create_icon_button(
+        "media-skip-backward-symbolic", 22, "Previous track", "Previous track");
+    g_signal_connect(prev_button, "clicked", G_CALLBACK(on_prev_clicked), this);
+    safe_box_append(GTK_BOX(row), prev_button);
 
-    seek_adjustment_ = gtk_adjustment_new(0.0, 0.0, 1.0, 0.005, 0.1, 0.0);
-    seek_scale_ = gtk_scale_new(GTK_ORIENTATION_HORIZONTAL,
-                                GTK_ADJUSTMENT(seek_adjustment_));
-    gtk_widget_add_css_class(seek_scale_, "fullscreen-seek");
-    gtk_scale_set_draw_value(GTK_SCALE(seek_scale_), FALSE);
-    gtk_widget_set_hexpand(seek_scale_, TRUE);
-    gtk_widget_set_halign(seek_scale_, GTK_ALIGN_FILL);
-    gtk_widget_set_valign(seek_scale_, GTK_ALIGN_CENTER);
-    gtk_widget_set_visible(seek_scale_, TRUE);
-    accessibility::set_label(seek_scale_, "Seek through track");
-    g_signal_connect(seek_adjustment_, "value-changed",
-                     G_CALLBACK(on_seek_value_changed), this);
+    progress_wave_ = std::make_unique<ProgressWave>();
+    progress_wave_->set_wave_frequency(18.0);
+    GtkWidget* progress = progress_wave_->get_widget();
+    gtk_widget_add_css_class(progress, "fullscreen-progress");
+    gtk_widget_set_hexpand(progress, TRUE);
+    gtk_widget_set_halign(progress, GTK_ALIGN_FILL);
+    gtk_widget_set_valign(progress, GTK_ALIGN_CENTER);
+    gtk_widget_set_visible(progress, TRUE);
+    progress_wave_->set_seek_callback([this](double seconds) {
+        if (!main_window_) return;
+        if (IPlayerService* backend = main_window_->get_backend()) {
+            backend->seek(seconds);
+        }
+    });
+    safe_box_append(GTK_BOX(row), progress);
 
-    remaining_label_ = gtk_label_new("-0:00");
-    gtk_widget_add_css_class(remaining_label_, "fullscreen-time");
-    gtk_widget_set_size_request(remaining_label_, 48, -1);
-    gtk_label_set_xalign(GTK_LABEL(remaining_label_), 0.0);
-    gtk_widget_set_halign(remaining_label_, GTK_ALIGN_START);
-    gtk_widget_set_visible(remaining_label_, TRUE);
+    GtkWidget* next_button = create_icon_button(
+        "media-skip-forward-symbolic", 22, "Next track", "Next track");
+    g_signal_connect(next_button, "clicked", G_CALLBACK(on_next_clicked), this);
+    safe_box_append(GTK_BOX(row), next_button);
 
-    safe_box_append(GTK_BOX(row), elapsed_label_);
-    safe_box_append(GTK_BOX(row), seek_scale_);
-    safe_box_append(GTK_BOX(row), remaining_label_);
+    play_button_ = gtk_button_new();
+    gtk_button_set_has_frame(GTK_BUTTON(play_button_), FALSE);
+    gtk_widget_add_css_class(play_button_, "fullscreen-play-button");
+    gtk_widget_set_size_request(play_button_, 56, 56);
+    gtk_widget_set_tooltip_text(play_button_, "Play");
+    accessibility::set_label(play_button_, "Start playback");
+    play_icon_ = gtk_image_new_from_icon_name("media-playback-start-symbolic");
+    gtk_image_set_pixel_size(GTK_IMAGE(play_icon_), 26);
+    safe_button_set_child(GTK_BUTTON(play_button_), play_icon_);
+    g_signal_connect(play_button_, "clicked", G_CALLBACK(on_play_clicked), this);
+    safe_box_append(GTK_BOX(row), play_button_);
+
+    lyrics_toggle_ = gtk_toggle_button_new();
+    gtk_button_set_has_frame(GTK_BUTTON(lyrics_toggle_), FALSE);
+    gtk_widget_add_css_class(lyrics_toggle_, "fullscreen-control-button");
+    gtk_widget_set_size_request(lyrics_toggle_, 44, 44);
+    gtk_widget_set_tooltip_text(lyrics_toggle_, "Lyrics");
+    accessibility::set_label(lyrics_toggle_, "Show lyrics");
+    GtkWidget* lyrics_icon = gtk_image_new_from_icon_name("text-x-generic-symbolic");
+    gtk_image_set_pixel_size(GTK_IMAGE(lyrics_icon), 20);
+    safe_button_set_child(GTK_BUTTON(lyrics_toggle_), lyrics_icon);
+    g_signal_connect(lyrics_toggle_, "toggled",
+                     G_CALLBACK(on_lyrics_toggled), this);
+    safe_box_append(GTK_BOX(row), lyrics_toggle_);
+
     safe_box_append(GTK_BOX(center_box_), row);
 }
 
 void FullscreenPlayer::create_controls() {
-    GtkWidget* row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 14);
+    GtkWidget* row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_add_css_class(row, "fullscreen-controls");
+    gtk_box_set_homogeneous(GTK_BOX(row), TRUE);
     gtk_widget_set_hexpand(row, TRUE);
     gtk_widget_set_halign(row, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(row, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(row, TRUE);
 
-    // Volume popover.
+    shuffle_button_ = create_icon_toggle_button(
+        "media-playlist-shuffle-symbolic", 18, "Shuffle", "Shuffle");
+    g_signal_connect(shuffle_button_, "toggled",
+                     G_CALLBACK(on_shuffle_toggled), this);
+    safe_box_append(GTK_BOX(row), shuffle_button_);
+
+    repeat_button_ = create_icon_toggle_button(
+        "media-playlist-repeat-symbolic", 18, "Repeat all", "Repeat all");
+    g_signal_connect(repeat_button_, "toggled",
+                     G_CALLBACK(on_repeat_toggled), this);
+    safe_box_append(GTK_BOX(row), repeat_button_);
+
+    loop_button_ = create_icon_toggle_button(
+        "media-playlist-repeat-song-symbolic", 18, "Repeat one", "Repeat one");
+    g_signal_connect(loop_button_, "toggled",
+                     G_CALLBACK(on_loop_toggled), this);
+    safe_box_append(GTK_BOX(row), loop_button_);
+
+    safe_box_append(GTK_BOX(center_box_), row);
+}
+
+void FullscreenPlayer::create_volume() {
+    GtkWidget* row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class(row, "fullscreen-volume-row");
+    gtk_widget_set_hexpand(row, TRUE);
+    gtk_widget_set_halign(row, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(row, GTK_ALIGN_CENTER);
+    gtk_widget_set_visible(row, TRUE);
+
     GtkWidget* volume_button = create_menu_icon_button(
         "audio-volume-high-symbolic", 20, "Volume", "Volume");
     GtkWidget* volume_popover = gtk_popover_new();
@@ -278,72 +336,6 @@ void FullscreenPlayer::create_controls() {
     gtk_popover_set_child(GTK_POPOVER(volume_popover), volume_box);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(volume_button), volume_popover);
     safe_box_append(GTK_BOX(row), volume_button);
-
-    // More options (playback modes).
-    GtkWidget* more_button = create_menu_icon_button(
-        "open-menu-symbolic", 18, "Playback options", "Playback options");
-    GtkWidget* more_popover = gtk_popover_new();
-    GtkWidget* modes_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-    gtk_widget_set_margin_start(modes_box, 10);
-    gtk_widget_set_margin_end(modes_box, 10);
-    gtk_widget_set_margin_top(modes_box, 10);
-    gtk_widget_set_margin_bottom(modes_box, 10);
-    gtk_widget_set_visible(modes_box, TRUE);
-
-    shuffle_check_ = gtk_check_button_new_with_label("Shuffle");
-    repeat_check_ = gtk_check_button_new_with_label("Repeat all");
-    loop_check_ = gtk_check_button_new_with_label("Repeat one");
-    gtk_widget_set_visible(shuffle_check_, TRUE);
-    gtk_widget_set_visible(repeat_check_, TRUE);
-    gtk_widget_set_visible(loop_check_, TRUE);
-    g_signal_connect(shuffle_check_, "toggled",
-                     G_CALLBACK(on_shuffle_toggled), this);
-    g_signal_connect(repeat_check_, "toggled",
-                     G_CALLBACK(on_repeat_toggled), this);
-    g_signal_connect(loop_check_, "toggled",
-                     G_CALLBACK(on_loop_toggled), this);
-    safe_box_append(GTK_BOX(modes_box), shuffle_check_);
-    safe_box_append(GTK_BOX(modes_box), repeat_check_);
-    safe_box_append(GTK_BOX(modes_box), loop_check_);
-    gtk_popover_set_child(GTK_POPOVER(more_popover), modes_box);
-    gtk_menu_button_set_popover(GTK_MENU_BUTTON(more_button), more_popover);
-    safe_box_append(GTK_BOX(row), more_button);
-
-    GtkWidget* prev_button = create_icon_button(
-        "media-skip-backward-symbolic", 22, "Previous track", "Previous track");
-    g_signal_connect(prev_button, "clicked", G_CALLBACK(on_prev_clicked), this);
-    safe_box_append(GTK_BOX(row), prev_button);
-
-    play_button_ = gtk_button_new();
-    gtk_button_set_has_frame(GTK_BUTTON(play_button_), FALSE);
-    gtk_widget_add_css_class(play_button_, "fullscreen-play-button");
-    gtk_widget_set_size_request(play_button_, 56, 56);
-    gtk_widget_set_tooltip_text(play_button_, "Play");
-    accessibility::set_label(play_button_, "Start playback");
-    play_icon_ = gtk_image_new_from_icon_name("media-playback-start-symbolic");
-    gtk_image_set_pixel_size(GTK_IMAGE(play_icon_), 26);
-    safe_button_set_child(GTK_BUTTON(play_button_), play_icon_);
-    g_signal_connect(play_button_, "clicked", G_CALLBACK(on_play_clicked), this);
-    safe_box_append(GTK_BOX(row), play_button_);
-
-    GtkWidget* next_button = create_icon_button(
-        "media-skip-forward-symbolic", 22, "Next track", "Next track");
-    g_signal_connect(next_button, "clicked", G_CALLBACK(on_next_clicked), this);
-    safe_box_append(GTK_BOX(row), next_button);
-
-    lyrics_toggle_ = gtk_toggle_button_new();
-    gtk_button_set_has_frame(GTK_BUTTON(lyrics_toggle_), FALSE);
-    gtk_widget_add_css_class(lyrics_toggle_, "fullscreen-control-button");
-    gtk_widget_set_size_request(lyrics_toggle_, 44, 44);
-    gtk_widget_set_tooltip_text(lyrics_toggle_, "Lyrics");
-    accessibility::set_label(lyrics_toggle_, "Show lyrics");
-    GtkWidget* lyrics_icon = gtk_image_new_from_icon_name("text-x-generic-symbolic");
-    gtk_image_set_pixel_size(GTK_IMAGE(lyrics_icon), 20);
-    safe_button_set_child(GTK_BUTTON(lyrics_toggle_), lyrics_icon);
-    g_signal_connect(lyrics_toggle_, "toggled",
-                     G_CALLBACK(on_lyrics_toggled), this);
-    safe_box_append(GTK_BOX(row), lyrics_toggle_);
-
     safe_box_append(GTK_BOX(center_box_), row);
 }
 
@@ -430,24 +422,18 @@ void FullscreenPlayer::update_playback_position(double position,
     current_position_ = position;
     current_duration_ = duration;
 
-    if (elapsed_label_) {
-        gtk_label_set_text(GTK_LABEL(elapsed_label_),
-                           format_time(position).c_str());
-    }
-    if (remaining_label_) {
-        const std::string remaining = duration > 0.0
-            ? "-" + format_time(std::max(0.0, duration - position))
-            : "--:--";
-        gtk_label_set_text(GTK_LABEL(remaining_label_), remaining.c_str());
-    }
-
-    if (seek_adjustment_) {
-        updating_controls_ = true;
-        const double fraction = duration > 0.0
+    if (progress_wave_) {
+        bool can_seek = false;
+        if (main_window_) {
+            if (IPlayerService* backend = main_window_->get_backend()) {
+                can_seek = backend->can_seek();
+            }
+        }
+        progress_wave_->set_can_seek(can_seek);
+        progress_wave_->set_duration(duration);
+        progress_wave_->set_progress(duration > 0.0
             ? std::clamp(position / duration, 0.0, 1.0)
-            : 0.0;
-        gtk_adjustment_set_value(seek_adjustment_, fraction);
-        updating_controls_ = false;
+            : 0.0);
     }
 
     if (lyrics_view_) {
@@ -459,6 +445,7 @@ void FullscreenPlayer::update_playback_position(double position,
 void FullscreenPlayer::set_playing(bool playing) {
     playing_ = playing;
     apply_playback_icon();
+    if (progress_wave_) progress_wave_->set_playing(playing);
 }
 
 void FullscreenPlayer::apply_playback_icon() {
@@ -484,23 +471,23 @@ void FullscreenPlayer::set_volume(double volume) {
 }
 
 void FullscreenPlayer::set_shuffle(bool enabled) {
-    if (!shuffle_check_) return;
+    if (!shuffle_button_) return;
     updating_controls_ = true;
-    gtk_check_button_set_active(GTK_CHECK_BUTTON(shuffle_check_), enabled);
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(shuffle_button_), enabled);
     updating_controls_ = false;
 }
 
 void FullscreenPlayer::set_repeat(bool enabled) {
-    if (!repeat_check_) return;
+    if (!repeat_button_) return;
     updating_controls_ = true;
-    gtk_check_button_set_active(GTK_CHECK_BUTTON(repeat_check_), enabled);
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(repeat_button_), enabled);
     updating_controls_ = false;
 }
 
 void FullscreenPlayer::set_repeat_one(bool enabled) {
-    if (!loop_check_) return;
+    if (!loop_button_) return;
     updating_controls_ = true;
-    gtk_check_button_set_active(GTK_CHECK_BUTTON(loop_check_), enabled);
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(loop_button_), enabled);
     updating_controls_ = false;
 }
 
@@ -549,15 +536,17 @@ gboolean FullscreenPlayer::on_allocation_tick(GtkWidget* widget, GdkFrameClock*,
     self->last_width_ = width;
     self->last_height_ = height;
 
-    const int center_width = std::clamp(width - 48, 280, 520);
+    const int center_width = std::clamp(width - 48, 360, 790);
     if (self->center_box_) {
         gtk_widget_set_size_request(self->center_box_, center_width, -1);
     }
 
-    // Reserve vertical room for metadata, progress and controls so artwork
-    // never pushes the transport buttons off a short fullscreen window.
-    int side = std::min(center_width - 8, height - 300);
-    side = std::clamp(side, 200, 460);
+    // Reserve vertical room for metadata, transport, modes, volume and (when
+    // revealed) lyrics. Artwork reaches its 750px target on tall windows and
+    // scales down gracefully on shorter ones.
+    const int reserved = self->lyrics_visible_ ? 500 : 300;
+    int side = std::min(center_width - 8, height - reserved);
+    side = std::clamp(side, 200, 750);
     if (self->artwork_view_ && std::abs(side - self->last_artwork_side_) >= 8) {
         self->artwork_view_->set_preferred_size(side, side);
         self->artwork_view_->set_corner_radius(
@@ -597,17 +586,6 @@ void FullscreenPlayer::on_next_clicked(GtkButton*, gpointer user_data) {
     }
 }
 
-void FullscreenPlayer::on_seek_value_changed(GtkAdjustment* adjustment,
-                                             gpointer user_data) {
-    auto* self = static_cast<FullscreenPlayer*>(user_data);
-    if (self->updating_controls_ || self->current_duration_ <= 0.0) return;
-    if (!self->main_window_) return;
-    if (IPlayerService* backend = self->main_window_->get_backend()) {
-        backend->seek(gtk_adjustment_get_value(adjustment) *
-                      self->current_duration_);
-    }
-}
-
 void FullscreenPlayer::on_volume_value_changed(GtkAdjustment* adjustment,
                                                gpointer user_data) {
     auto* self = static_cast<FullscreenPlayer*>(user_data);
@@ -617,30 +595,30 @@ void FullscreenPlayer::on_volume_value_changed(GtkAdjustment* adjustment,
     }
 }
 
-void FullscreenPlayer::on_shuffle_toggled(GtkCheckButton* button,
+void FullscreenPlayer::on_shuffle_toggled(GtkToggleButton* button,
                                           gpointer user_data) {
     auto* self = static_cast<FullscreenPlayer*>(user_data);
     if (self->updating_controls_ || !self->main_window_) return;
     if (IPlayerService* backend = self->main_window_->get_backend()) {
-        backend->set_shuffle(gtk_check_button_get_active(button));
+        backend->set_shuffle(gtk_toggle_button_get_active(button));
     }
 }
 
-void FullscreenPlayer::on_repeat_toggled(GtkCheckButton* button,
+void FullscreenPlayer::on_repeat_toggled(GtkToggleButton* button,
                                          gpointer user_data) {
     auto* self = static_cast<FullscreenPlayer*>(user_data);
     if (self->updating_controls_ || !self->main_window_) return;
     if (IPlayerService* backend = self->main_window_->get_backend()) {
-        backend->set_repeat(gtk_check_button_get_active(button));
+        backend->set_repeat(gtk_toggle_button_get_active(button));
     }
 }
 
-void FullscreenPlayer::on_loop_toggled(GtkCheckButton* button,
+void FullscreenPlayer::on_loop_toggled(GtkToggleButton* button,
                                        gpointer user_data) {
     auto* self = static_cast<FullscreenPlayer*>(user_data);
     if (self->updating_controls_ || !self->main_window_) return;
     if (IPlayerService* backend = self->main_window_->get_backend()) {
-        backend->set_repeat_one(gtk_check_button_get_active(button));
+        backend->set_repeat_one(gtk_toggle_button_get_active(button));
     }
 }
 
@@ -648,9 +626,12 @@ void FullscreenPlayer::on_lyrics_toggled(GtkToggleButton* button,
                                          gpointer user_data) {
     auto* self = static_cast<FullscreenPlayer*>(user_data);
     const bool visible = gtk_toggle_button_get_active(button);
+    self->lyrics_visible_ = visible;
+    self->last_height_ = 0;
     if (self->lyrics_revealer_) {
         gtk_revealer_set_reveal_child(GTK_REVEALER(self->lyrics_revealer_),
                                       visible);
+        gtk_widget_queue_resize(self->root_);
     }
     gtk_widget_set_tooltip_text(GTK_WIDGET(button),
                                 visible ? "Hide lyrics" : "Lyrics");
