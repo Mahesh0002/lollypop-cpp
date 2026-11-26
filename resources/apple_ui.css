@@ -361,6 +361,11 @@ button {
     min-height: 44px;
 }
 
+.fullscreen-content {
+    min-width: 0;
+    min-height: 0;
+}
+
 .fullscreen-player-center {
     padding-bottom: 12px;
 }
@@ -478,8 +483,16 @@ button {
     box-shadow: none;
 }
 
+.fullscreen-lyrics {
+    min-width: 0;
+    min-height: 0;
+    margin-top: 56px;
+    margin-bottom: 12px;
+}
+
 .fullscreen-lyrics-frame {
     border: none;
+    border-radius: 16px;
     background-color: rgba(255, 255, 255, 0.04);
     color: var(--fs-text);
 }
@@ -488,5 +501,44 @@ button {
 .fullscreen-lyrics-frame viewport {
     background-color: transparent;
     color: var(--fs-text);
+}
+
+/* Same synced karaoke rows as the right panel, scaled for fullscreen. */
+.fullscreen-player .synced-lyrics-view,
+.fullscreen-player .lyrics-scroller,
+.fullscreen-player .lyrics-list,
+.fullscreen-player .lyrics-row,
+.fullscreen-player .lyrics-line {
+    background-color: transparent;
+    color: var(--fs-text);
+}
+
+.fullscreen-player .lyrics-heading {
+    color: var(--fs-secondary);
+    font-size: 12px;
+}
+
+.fullscreen-player .lyrics-row {
+    padding: 10px 16px;
+    font-size: 21px;
+}
+
+.fullscreen-player .lyrics-row.past,
+.fullscreen-player .lyrics-row.future {
+    color: var(--fs-secondary);
+}
+
+.fullscreen-player .lyrics-row.active {
+    color: var(--fs-text);
+}
+
+.fullscreen-player .lyrics-row.active .lyrics-line {
+    color: var(--fs-text);
+    font-size: 25px;
+}
+
+.fullscreen-player .lyrics-message {
+    color: var(--fs-secondary);
+    font-size: 18px;
 }
 

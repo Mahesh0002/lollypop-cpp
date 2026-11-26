@@ -3,12 +3,11 @@
  *
  * Immersive, full-window playback surface:
  *   [close]
- *        large square artwork
- *        title / artist — album
+ *        large square artwork        synced lyrics panel
+ *        title / artist — album      (slides in from the right)
  *   [prev] [wavy progress] [next]
  *   [shuffle] [repeat all] [repeat one] [play/pause] [lyrics]
- *          [volume] [inline volume slider]
- *        collapsible synced lyrics
+ *        player shifts left with a 100px gap beside the lyrics
  *
  * All state is observed from IPlayerService through MainWindow; mutations go
  * back through the same interface so the shell/MPRIS remains the authority.
@@ -63,6 +62,7 @@ private:
     ILibraryService* library_service_;
 
     GtkWidget* root_;
+    GtkWidget* content_box_;
     GtkWidget* center_box_;
     GtkWidget* title_label_;
     GtkWidget* subtitle_label_;
@@ -92,6 +92,11 @@ private:
     bool updating_controls_ = false;
     bool playing_ = false;
     bool lyrics_visible_ = false;
+    double lyrics_reveal_ = 0.0;
+    double lyrics_reveal_from_ = 0.0;
+    double lyrics_reveal_target_ = 0.0;
+    gint64 lyrics_anim_start_ = 0;
+    guint lyrics_anim_source_ = 0;
     int last_width_ = 0;
     int last_height_ = 0;
     int last_artwork_side_ = 0;
@@ -109,6 +114,9 @@ private:
 
     static gboolean on_allocation_tick(GtkWidget* widget, GdkFrameClock* clock,
                                        gpointer user_data);
+    static gboolean on_lyrics_animation_tick(GtkWidget* widget,
+                                             GdkFrameClock* clock,
+                                             gpointer user_data);
     static void on_close_clicked(GtkButton* button, gpointer user_data);
     static void on_play_clicked(GtkButton* button, gpointer user_data);
     static void on_prev_clicked(GtkButton* button, gpointer user_data);
