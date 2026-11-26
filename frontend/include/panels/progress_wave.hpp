@@ -4,7 +4,7 @@
  * One Cairo progress strip used by the bottom bar, the right Now Playing
  * panel, and the PiP window. The look follows the Quickshell "Wavy" slider:
  * a rounded unplayed track, a sine wave clipped to the played fraction, and a
- * thin pill handle at the play position. A fully transparent GtkScale sits on
+ * slim vertical stopper at the play position. A fully transparent GtkScale sits on
  * top so pointer/keyboard seeking and accessibility keep working while the
  * wave remains the only visible progress element.
  *
@@ -38,6 +38,14 @@ public:
     void set_progress(double fraction);
     void set_playing(bool playing);
     void set_can_seek(bool can_seek);
+
+    /// Optional accent override. When unset, the Cairo draw reads the live
+    /// --accent-color from the widget's CSS `color` (the runtime ramp).
+    void set_accent_color(double r, double g, double b, double a = 1.0);
+
+    /// Optional scheme override. When unset, AdwStyleManager is consulted so
+    /// the strip follows the same switch as the rest of the window.
+    void set_scheme(bool dark);
     void set_seek_callback(SeekCallback callback);
 
     // Decorative sine-wave density. The right panel/PiP use the default; the
@@ -57,9 +65,10 @@ private:
     static constexpr double kTrackHeight = 4.0;
     static constexpr double kTrackRadius = 2.0;
     static constexpr double kEdgePadding = 4.0;
-    static constexpr double kHandleHeight = 24.0;
-    static constexpr double kHandleWidth = 3.0;
-    static constexpr double kHandlePressedWidth = 1.5;
+    static constexpr double kHandleHeight = 20.0;
+    static constexpr double kHandleWidth = 4.0;
+    static constexpr double kHandlePressedWidth = 3.0;
+    static constexpr double kHandleRadius = 1.0;
 
     GtkWidget* overlay_ = nullptr;
     GtkWidget* wave_area_ = nullptr;
@@ -79,6 +88,11 @@ private:
     bool playing_ = false;
     bool seeking_ = false;
     bool updating_ = false;
+    bool has_accent_override_ = false;
+    bool has_scheme_override_ = false;
+    bool dark_ = true;
+    double accent_r_ = 0.545, accent_g_ = 0.424, accent_b_ = 1.0,
+           accent_a_ = 1.0;
 
     void start_animation();
     void stop_animation();

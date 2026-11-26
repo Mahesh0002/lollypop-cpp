@@ -21,6 +21,7 @@
 
 #include <adwaita.h>
 #include <gtk/gtk.h>
+#include <gdk/gdkkeysyms.h>
 #include <algorithm>
 #include <iostream>
 #include <vector>
@@ -265,18 +266,13 @@ void MainWindow::setup_toolbar() {
                      }),
                      this);
 
-    GtkWidget* fullscreen = gtk_button_new_with_label("Fullscreen");
+    GtkWidget* fullscreen = gtk_button_new_with_label("Fullscreen player");
     gtk_button_set_has_frame(GTK_BUTTON(fullscreen), FALSE);
     gtk_widget_set_halign(fullscreen, GTK_ALIGN_START);
     g_signal_connect(fullscreen, "clicked",
                      G_CALLBACK(+[](GtkButton*, gpointer user_data) {
                          auto* self = static_cast<MainWindow*>(user_data);
-                         if (!self->window_) return;
-                         if (gtk_window_is_fullscreen(GTK_WINDOW(self->window_))) {
-                             gtk_window_unfullscreen(GTK_WINDOW(self->window_));
-                         } else {
-                             gtk_window_fullscreen(GTK_WINDOW(self->window_));
-                         }
+                         self->toggle_fullscreen_player();
                      }),
                      this);
 
@@ -301,6 +297,8 @@ void MainWindow::setup_layout() {
     left_sidebar_ = std::make_unique<AppleSidebar>(this);
     right_now_playing_ = std::make_unique<RightNowPlaying>(this, lyrics_service, library_service);
     bottom_playback_ = std::make_unique<BottomPlayback>(this);
+    fullscreen_player_ = std::make_unique<FullscreenPlayer>(
+        this, lyrics_service, library_service);
 
     // Connect MiddleLibrary page changes to LeftSidebar for active state sync
     middle_library_->set_page_change_callback([this](const std::string& page_id) {
@@ -311,6 +309,11 @@ void MainWindow::setup_layout() {
 
     // Setup toolbar after panels are created
     setup_toolbar();
+
+    // Immersive player lives as a sibling of the normal four-panel layout.
+    // It is revealed on demand and never participates in the grid allocation.
+    gtk_stack_add_named(GTK_STACK(content_stack_),
+                        fullscreen_player_->get_widget(), "fullscreen");
 
     // Get panel widgets
     GtkWidget* left_widget = left_sidebar_->get_widget();
@@ -372,6 +375,11 @@ void MainWindow::setup_css() {
 
 void MainWindow::connect_signals() {
     g_signal_connect(window_, "close-request", G_CALLBACK(on_window_close), this);
+
+    GtkEventController* key_controller = gtk_event_controller_key_new();
+    g_signal_connect(key_controller, "key-pressed",
+                     G_CALLBACK(on_key_pressed), this);
+    gtk_widget_add_controller(window_, key_controller);
 }
 
 void MainWindow::connect_backend() {
@@ -384,8 +392,14 @@ void MainWindow::connect_backend() {
                                             track.artwork_path);
         right_now_playing_->update_track_info(track.title, track.artist,
                                               track.artwork_path);
+        fullscreen_player_->update_track_info(track.title, track.artist,
+                                              track.album, track.artwork_path);
+        // Keep a detail page's hero artwork as the palette source instead of
+        // letting the newly playing track overwrite its tint.
+        if (middle_library_) middle_library_->update_palette_for_active_page();
         // Auto-request lyrics for new track
         right_now_playing_->request_lyrics_for_track(track.id);
+        fullscreen_player_->request_lyrics_for_track(track.id);
     });
     backend->add_track_changed_callback([backend](const Track& track) {
         TrackRow::update_playing_state(track.id, backend->is_playing());
@@ -396,15 +410,28 @@ void MainWindow::connect_backend() {
                                                    double duration) {
         bottom_playback_->update_playback_position(position, duration);
         right_now_playing_->update_playback_position(position, duration);
+        fullscreen_player_->update_playback_position(position, duration);
     });
 
     // Playback state changed → update both panels
     backend->add_playback_state_changed_callback([this](bool playing) {
         bottom_playback_->set_playing(playing);
         right_now_playing_->set_playing(playing);
+        fullscreen_player_->set_playing(playing);
     });
     backend->add_playback_state_changed_callback([backend](bool playing) {
         TrackRow::update_playing_state(backend->get_current_track().id, playing);
+    });
+
+    // Playback modes → keep the fullscreen options menu in sync.
+    backend->add_shuffle_changed_callback([this](bool enabled) {
+        fullscreen_player_->set_shuffle(enabled);
+    });
+    backend->add_repeat_changed_callback([this](bool enabled) {
+        fullscreen_player_->set_repeat(enabled);
+    });
+    backend->add_repeat_one_changed_callback([this](bool enabled) {
+        fullscreen_player_->set_repeat_one(enabled);
     });
 
     // Queue changed → update RightNowPlaying queue view
@@ -423,11 +450,21 @@ void MainWindow::connect_backend() {
         right_now_playing_->update_track_info(current_track.title,
                                               current_track.artist,
                                               current_track.artwork_path);
+        fullscreen_player_->update_track_info(current_track.title,
+                                              current_track.artist,
+                                              current_track.album,
+                                              current_track.artwork_path);
+        if (middle_library_) middle_library_->update_palette_for_active_page();
         right_now_playing_->request_lyrics_for_track(current_track.id);
+        fullscreen_player_->request_lyrics_for_track(current_track.id);
     }
 
+    fullscreen_player_->update_playback_position(backend->get_position(),
+                                                 backend->get_duration());
+    fullscreen_player_->set_volume(backend->get_volume());
     bottom_playback_->set_playing(backend->is_playing());
     right_now_playing_->set_playing(backend->is_playing());
+    fullscreen_player_->set_playing(backend->is_playing());
     TrackRow::update_playing_state(backend->get_current_track().id,
                                    backend->is_playing());
     right_now_playing_->set_queue(backend->get_queue());
@@ -476,6 +513,55 @@ void MainWindow::present() {
     if (window_) {
         gtk_window_present(GTK_WINDOW(window_));
     }
+}
+
+void MainWindow::show_fullscreen_player() {
+    if (!fullscreen_player_ || !content_stack_ || fullscreen_player_visible_) {
+        return;
+    }
+    fullscreen_player_visible_ = true;
+    was_fullscreen_before_player_ =
+        window_ && gtk_window_is_fullscreen(GTK_WINDOW(window_));
+    if (window_ && !was_fullscreen_before_player_) {
+        gtk_window_fullscreen(GTK_WINDOW(window_));
+    }
+    if (toolbar_view_) {
+        adw_toolbar_view_set_reveal_top_bars(ADW_TOOLBAR_VIEW(toolbar_view_),
+                                             FALSE);
+    }
+    fullscreen_player_->sync_from_backend();
+    gtk_stack_set_visible_child_name(GTK_STACK(content_stack_), "fullscreen");
+}
+
+void MainWindow::hide_fullscreen_player() {
+    if (!fullscreen_player_visible_) return;
+    fullscreen_player_visible_ = false;
+    gtk_stack_set_visible_child_name(GTK_STACK(content_stack_), "content");
+    if (toolbar_view_) {
+        adw_toolbar_view_set_reveal_top_bars(ADW_TOOLBAR_VIEW(toolbar_view_),
+                                             TRUE);
+    }
+    if (window_ && !was_fullscreen_before_player_) {
+        gtk_window_unfullscreen(GTK_WINDOW(window_));
+    }
+}
+
+void MainWindow::toggle_fullscreen_player() {
+    if (fullscreen_player_visible_) {
+        hide_fullscreen_player();
+    } else {
+        show_fullscreen_player();
+    }
+}
+
+gboolean MainWindow::on_key_pressed(GtkEventControllerKey*, guint keyval,
+                                    guint, GdkModifierType, gpointer user_data) {
+    auto* self = static_cast<MainWindow*>(user_data);
+    if (keyval == GDK_KEY_Escape && self->fullscreen_player_visible_) {
+        self->hide_fullscreen_player();
+        return TRUE;
+    }
+    return FALSE;
 }
 
 gboolean MainWindow::on_window_close(GtkWindow* window, gpointer user_data) {

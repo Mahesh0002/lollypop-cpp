@@ -36,6 +36,10 @@ public:
     // after a background scan or file-watcher change.
     void refresh_active_page();
 
+    /// Recompute the artwork-derived palette for the active page. Called when
+    /// the playing track changes so a detail page keeps its own hero tint.
+    void update_palette_for_active_page();
+
     // Detail page navigation
     void open_album_detail(const std::string& album_id);
     void open_artist_detail(const std::string& artist_id);

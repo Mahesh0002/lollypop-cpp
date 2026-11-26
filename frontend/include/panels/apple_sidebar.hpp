@@ -45,15 +45,21 @@ private:
     GtkWidget* root_ = nullptr;
     GtkWidget* grid_ = nullptr;
     GtkWidget* back_button_ = nullptr;
+    GtkWidget* appearance_button_ = nullptr;
+    GtkWidget* accent_hex_label_ = nullptr;
+    std::vector<GtkWidget*> accent_swatches_;
     std::vector<NavItem> items_;
     std::string active_id_;
 
     void setup_ui();
     void create_rows();
+    void create_appearance_row(int row);
+    void refresh_accent_swatches();
     void update_active_state();
 
     static void on_back_clicked(GtkButton* button, gpointer user_data);
     static void on_nav_clicked(GtkButton* button, gpointer user_data);
+    static void on_accent_swatch_clicked(GtkButton* button, gpointer user_data);
 };
 
 } // namespace lollypop

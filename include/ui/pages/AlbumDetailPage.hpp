@@ -41,6 +41,9 @@ public:
     GtkWidget* get_widget() const override { return host_.get_widget(); }
     void refresh() override;
     std::string get_page_id() const override { return "album_detail"; }
+    std::string palette_artwork_path() const override {
+        return current_album_.artwork_path;
+    }
 
     /// Set the album to display.
     void set_album(const std::string& album_id);

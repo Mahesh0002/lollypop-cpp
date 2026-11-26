@@ -38,6 +38,19 @@ void WaveformWidget::set_progress(double progress) {
     gtk_widget_queue_draw(drawing_area_);
 }
 
+void WaveformWidget::set_accent_color(double r, double g, double b, double a) {
+    accent_r_ = std::clamp(r, 0.0, 1.0);
+    accent_g_ = std::clamp(g, 0.0, 1.0);
+    accent_b_ = std::clamp(b, 0.0, 1.0);
+    accent_a_ = std::clamp(a, 0.0, 1.0);
+    gtk_widget_queue_draw(drawing_area_);
+}
+
+void WaveformWidget::set_scheme(bool dark) {
+    dark_ = dark;
+    gtk_widget_queue_draw(drawing_area_);
+}
+
 void WaveformWidget::set_playing(bool playing) {
     if (playing_ == playing) return;
     playing_ = playing;
@@ -73,7 +86,12 @@ gboolean WaveformWidget::animation_tick(gpointer user_data) {
 void WaveformWidget::draw_callback(GtkDrawingArea* area, cairo_t* cr,
                                    int width, int height, gpointer user_data) {
     WaveformWidget* self = static_cast<WaveformWidget*>(user_data);
-    cairo_set_source_rgba(cr, 0.2, 0.2, 0.2, 0.3);
+    // Chrome follows the scheme; only the played bars carry accent.
+    if (self->dark_) {
+        cairo_set_source_rgba(cr, 0.11, 0.11, 0.14, 0.60);
+    } else {
+        cairo_set_source_rgba(cr, 0.96, 0.96, 0.97, 0.80);
+    }
     cairo_rectangle(cr, 0, 0, width, height);
     cairo_fill(cr);
 
@@ -90,9 +108,11 @@ void WaveformWidget::draw_callback(GtkDrawingArea* area, cairo_t* cr,
             double y = (height - bar_height) / 2;
 
             if (i < self->progress_ * bar_count) {
-                cairo_set_source_rgb(cr, 0.2, 0.7, 1.0);
+                cairo_set_source_rgba(cr, self->accent_r_, self->accent_g_,
+                                      self->accent_b_, self->accent_a_);
             } else {
-                cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.3);
+                const double ink = self->dark_ ? 1.0 : 0.0;
+                cairo_set_source_rgba(cr, ink, ink, ink, 0.30);
             }
             cairo_rectangle(cr, x, y, bar_width, bar_height);
             cairo_fill(cr);
@@ -109,9 +129,11 @@ void WaveformWidget::draw_callback(GtkDrawingArea* area, cairo_t* cr,
             double y = (height - bar_height) / 2;
 
             if (static_cast<double>(i) / bar_count < self->progress_) {
-                cairo_set_source_rgb(cr, 0.2, 0.7, 1.0);
+                cairo_set_source_rgba(cr, self->accent_r_, self->accent_g_,
+                                      self->accent_b_, self->accent_a_);
             } else {
-                cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.35);
+                const double ink = self->dark_ ? 1.0 : 0.0;
+                cairo_set_source_rgba(cr, ink, ink, ink, 0.35);
             }
             cairo_rectangle(cr, x, y, bar_width, bar_height);
             cairo_fill(cr);
@@ -120,7 +142,8 @@ void WaveformWidget::draw_callback(GtkDrawingArea* area, cairo_t* cr,
 
     // Progress indicator line
     double progress_x = self->progress_ * width;
-    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+    const double ink = self->dark_ ? 1.0 : 0.0;
+    cairo_set_source_rgba(cr, ink, ink, ink, 0.85);
     cairo_set_line_width(cr, 2);
     cairo_move_to(cr, progress_x, 0);
     cairo_line_to(cr, progress_x, height);

@@ -14,6 +14,7 @@
 #include "panels/middle_library.hpp"
 #include "panels/right_now_playing.hpp"
 #include "panels/bottom_playback.hpp"
+#include "panels/fullscreen_player.hpp"
 #include "services/MockLibraryService.hpp"
 #include "services/MockLyricsService.hpp"
 
@@ -32,6 +33,14 @@ public:
 
     void present();
     GtkWindow* get_window() const { return GTK_WINDOW(window_); }
+
+    // Immersive fullscreen Now Playing surface.
+    void toggle_fullscreen_player();
+    void show_fullscreen_player();
+    void hide_fullscreen_player();
+    bool is_fullscreen_player_visible() const {
+        return fullscreen_player_visible_;
+    }
 
     // Panel accessors
     AppleSidebar* get_left_sidebar() const { return left_sidebar_.get(); }
@@ -69,6 +78,7 @@ private:
     std::unique_ptr<MiddleLibrary> middle_library_;
     std::unique_ptr<RightNowPlaying> right_now_playing_;
     std::unique_ptr<BottomPlayback> bottom_playback_;
+    std::unique_ptr<FullscreenPlayer> fullscreen_player_;
 
     // Library service (mock for Phase 4, real implementation in Phase 10)
     std::unique_ptr<MockLibraryService> library_service_;
@@ -85,8 +95,14 @@ private:
     void disconnect_backend();
     void schedule_library_refresh();
 
+    bool fullscreen_player_visible_ = false;
+    bool was_fullscreen_before_player_ = false;
+
     // Callbacks
     static gboolean on_window_close(GtkWindow* window, gpointer user_data);
+    static gboolean on_key_pressed(GtkEventControllerKey* controller,
+                                   guint keyval, guint keycode,
+                                   GdkModifierType state, gpointer user_data);
 };
 
 } // namespace lollypop

@@ -934,6 +934,13 @@ void LibraryScanner::set_incremental_cache_path(const std::string& cache_path) {
     impl_->cache_path_ = cache_path;
 }
 
+std::optional<Track> LibraryScanner::get_cached_track(
+    const std::string& file_path) {
+    Track track;
+    if (!impl_->get_cached_track(file_path, track)) return std::nullopt;
+    return track;
+}
+
 bool LibraryScanner::is_audio_file(const std::string& path) {
     std::string ext = lower_ext(path);
     return std::find(audio_extensions().begin(), audio_extensions().end(), ext) != audio_extensions().end();

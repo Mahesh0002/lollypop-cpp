@@ -11,6 +11,7 @@
 #include <memory>
 #include <string>
 
+#include "ui/theme/AccentColorManager.hpp"
 #include "ui/theme/ThemeManager.hpp"
 
 namespace lollypop {
@@ -39,6 +40,17 @@ public:
     ThemeManager* get_theme_manager() const { return theme_manager_.get(); }
     PiPWindow* get_pip_window() const { return pip_window_.get(); }
 
+    // Accent palette (docs/THEME_AND_COLOR_PLAN.md §5.1). Selection persists
+    // in the user config directory and is re-applied before the first frame.
+    std::size_t accent_preset_count() const { return accent_manager_.count(); }
+    std::size_t accent_preset_index() const {
+        return accent_manager_.selected_index();
+    }
+    const AccentColor& accent_preset(std::size_t index) const {
+        return accent_manager_.get(index);
+    }
+    void set_accent_preset(std::size_t index);
+
     // Show/hide the Picture-in-Picture window
     void show_pip();
     void hide_pip();
@@ -62,8 +74,10 @@ private:
     std::unique_ptr<BackendController> backend_;
     std::unique_ptr<ThemeManager> theme_manager_;
     std::unique_ptr<PiPWindow> pip_window_;
+    AccentColorManager accent_manager_;
 
     void init_artwork_cache();
+    void apply_accent_seed();
 
     // Static callbacks for GTK
     static void on_activate_static(AdwApplication* app, gpointer user_data);

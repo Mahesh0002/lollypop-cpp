@@ -35,7 +35,7 @@ std::string lowercase(std::string value) {
     return value;
 }
 
-constexpr int kTileSize = 150;
+constexpr int kTileSize = 300;
 constexpr int kRowGap = 20;
 constexpr int kColumnGap = 12;
 constexpr int kMinColumns = 3;
@@ -144,9 +144,9 @@ void AlbumsPage::setup_ui() {
     grid_.reset(gtk_flow_box_new());
     g_object_ref_sink(grid_.get());
     gtk_widget_add_css_class(grid_.get(), "albums-grid");
-    // Six homogeneous, expanding columns; tiles fill their cells and stay
-    // square via AppleAlbumTile's fit callback.
-    gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(grid_.get()), TRUE);
+    // Fixed 300x300 tiles; let the grid cell match the artwork instead of
+    // stretching it to an equal column width.
+    gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(grid_.get()), FALSE);
     gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(grid_.get()), kMinColumns);
     gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(grid_.get()), kMaxColumns);
     gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(grid_.get()), kRowGap);

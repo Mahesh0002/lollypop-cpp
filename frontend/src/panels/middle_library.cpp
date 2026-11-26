@@ -23,6 +23,8 @@
 #include "ui/pages/ArtistDetailPage.hpp"
 #include "ui/pages/SearchResultsPage.hpp"
 #include "ui/components/HomePage.hpp"
+#include "ui/theme/ThemeManager.hpp"
+#include "services/IPlayerService.hpp"
 #include "util/safe_gtk.hpp"
 #include "ui/components/TrackListMetrics.hpp"
 
@@ -310,6 +312,7 @@ void MiddleLibrary::navigate_to_page(const std::string& page_id,
     active_page_id_ = page_id;
     update_sticky_header();
     gtk_stack_set_visible_child_name(GTK_STACK(stack_), page_id.c_str());
+    update_palette_for_active_page();
 
     if (page_change_cb_) page_change_cb_(page_id);
 
@@ -373,6 +376,7 @@ void MiddleLibrary::apply_history_entry(const HistoryEntry& entry,
 
     active_page_id_ = entry.page_id;
     gtk_stack_set_visible_child_name(GTK_STACK(stack_), entry.page_id.c_str());
+    update_palette_for_active_page();
 
     if (page_change_cb_) page_change_cb_(entry.page_id);
 
@@ -432,6 +436,23 @@ void MiddleLibrary::refresh_active_page() {
     if (auto it = pages_.find(active_page_id_); it != pages_.end()) {
         it->second->refresh();
     }
+    update_palette_for_active_page();
+}
+
+void MiddleLibrary::update_palette_for_active_page() {
+    auto* theme = main_window_ ? main_window_->get_theme_manager() : nullptr;
+    if (!theme) return;
+
+    std::string artwork_path;
+    if (auto it = pages_.find(active_page_id_); it != pages_.end()) {
+        artwork_path = it->second->palette_artwork_path();
+    }
+    if (artwork_path.empty()) {
+        if (auto* backend = main_window_ ? main_window_->get_backend() : nullptr) {
+            artwork_path = backend->get_current_track().artwork_path;
+        }
+    }
+    theme->set_artwork_tint_from_path(artwork_path);
 }
 
 void MiddleLibrary::open_album_detail(const std::string& album_id) {

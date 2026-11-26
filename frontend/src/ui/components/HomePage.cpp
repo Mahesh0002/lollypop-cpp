@@ -60,7 +60,7 @@ void HomePage::setup_ui() {
     main_box_.reset(gtk_box_new(GTK_ORIENTATION_VERTICAL, 24));
     g_object_ref_sink(main_box_.get());
     gtk_widget_add_css_class(main_box_.get(), "home-page");
-    gtk_widget_set_margin_top(main_box_.get(), 0);
+    gtk_widget_set_margin_top(main_box_.get(), 50);
     gtk_widget_set_margin_bottom(main_box_.get(), 24);
     gtk_widget_set_margin_start(main_box_.get(), 24);
     gtk_widget_set_margin_end(main_box_.get(), 24);

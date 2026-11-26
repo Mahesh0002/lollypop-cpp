@@ -33,6 +33,17 @@ public:
     virtual Artist get_artist(const std::string& artist_id) = 0;
     virtual std::vector<Track> get_tracks_by_artist(const std::string& artist_name) = 0;
 
+    // Enrich an artist with facts from a public metadata source. Results are
+    // delivered on the GTK main context. Implementations that have no provider
+    // may leave the callback uncalled; the UI falls back to library facts.
+    using ArtistInfoCallback = std::function<void(const std::string& artist_name,
+                                                  const ArtistInfo& info)>;
+    virtual void request_artist_info(const std::string& artist_name,
+                                     ArtistInfoCallback callback) {
+        (void)artist_name;
+        (void)callback;
+    }
+
     // --- Playlists ---
     virtual std::vector<Playlist> get_all_playlists() = 0;
     virtual Playlist get_playlist(const std::string& playlist_id) = 0;

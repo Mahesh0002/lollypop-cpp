@@ -57,6 +57,20 @@ installed) or switch the session language to Arabic/Hebrew and restart.
 - [ ] PiP title/subtitle, transport buttons, and progress/time rows mirror correctly.
 - [ ] No leftover LTR-only `margin-left` or `border-right` edges are visible.
 
+## 2b. Colour and schemes
+
+Run `scripts/check_theme_contrast.py` first; it verifies the token contract.
+
+- [ ] Dark scheme: surfaces step app → sidebar → panel → elevated → raised without looking gray-on-gray.
+- [ ] Light scheme (system appearance or `GTK_THEME` light variant): no white toolbar on a dark app, no unreadable text.
+- [ ] Each of the nine accent presets (Appearance row → Accent colour) updates icons, focus ring, playing row, progress wave, toggled tabs, and filled buttons.
+- [ ] No stale purple remains after selecting Blue, Green, or Red.
+- [ ] Filled accent controls use dark ink on light accents and white ink on dark accents.
+- [ ] Destructive hover (PiP close) shows the error tint instead of an undefined background.
+- [ ] Artwork tint appears only on the right panel, bottom bar wash, and detail hero; near-black/near-white covers fall back cleanly.
+- [ ] High contrast mode keeps token-defined text and glass values.
+- [ ] Reduced motion still collapses transitions (section 4).
+
 ## 3. Focus and keyboard
 
 - [ ] Tab reaches sidebar rows, album tiles, artist tiles, playlist cards, favourite buttons, track rows, transport controls, and the queue Undo button.
@@ -81,6 +95,8 @@ Enable the desktop "reduce animation" setting and restart the app.
 - [ ] Missing artwork shows the fallback tile/row artwork without blank gaps.
 - [ ] Artist tiles, playlist tiles, and right-pane artwork are width-driven squares at every panel width.
 - [ ] Artists page uses the Albums page header spacing, sort menu, grid rhythm, and overlay scrim treatment.
+- [ ] Artist detail shows About, facts, related albums, and genre chips below the songs list; biography falls back to library copy when Wikipedia is unavailable.
+- [ ] Related album cards open album detail and genre chips open the filtered Songs page with focus rings and accessible names intact.
 - [ ] Artwork fills each square tile edge to edge; cover art crops rather than stretches.
 - [ ] A 1000-track queue remains scrollable and responsive; row actions still work.
 - [ ] Removing a queue row shows Undo; Undo restores the exact original index.

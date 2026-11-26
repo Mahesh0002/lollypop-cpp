@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 #include "controller.hpp"
+#include "external_providers.hpp"
 #include "manager.hpp"
 
 using namespace lollypop;
@@ -22,6 +23,25 @@ protected:
         backend.reset();
     }
 };
+
+TEST(ArtistInfoProviderTest, ParsesWikipediaSummary) {
+    const auto result = ArtistInfoProvider::parse_biography(
+        R"({"type":"standard","title":"Example Artist","description":"musician","extract":"Example Artist is a musician known for testing."})");
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result->title, "Example Artist");
+    EXPECT_EQ(result->description, "musician");
+    EXPECT_EQ(result->extract,
+              "Example Artist is a musician known for testing.");
+}
+
+TEST(ArtistInfoProviderTest, RejectsDisambiguationAndEmptyExtract) {
+    EXPECT_FALSE(ArtistInfoProvider::parse_biography(
+                     R"({"type":"disambiguation","extract":"May refer to:"})")
+                     .has_value());
+    EXPECT_FALSE(
+        ArtistInfoProvider::parse_biography(R"({"type":"standard"})")
+            .has_value());
+}
 
 TEST_F(BackendTest, Initialize) {
     EXPECT_FALSE(backend->is_playing());

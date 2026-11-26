@@ -5,6 +5,7 @@
 #include "panels/progress_wave.hpp"
 
 #include <gtk/gtk.h>
+#include <libadwaita-1/adwaita.h>
 
 #include <algorithm>
 #include <cmath>
@@ -143,6 +144,21 @@ void ProgressWave::set_playing(bool playing) {
     }
 }
 
+void ProgressWave::set_accent_color(double r, double g, double b, double a) {
+    accent_r_ = std::clamp(r, 0.0, 1.0);
+    accent_g_ = std::clamp(g, 0.0, 1.0);
+    accent_b_ = std::clamp(b, 0.0, 1.0);
+    accent_a_ = std::clamp(a, 0.0, 1.0);
+    has_accent_override_ = true;
+    if (wave_area_) gtk_widget_queue_draw(wave_area_);
+}
+
+void ProgressWave::set_scheme(bool dark) {
+    dark_ = dark;
+    has_scheme_override_ = true;
+    if (wave_area_) gtk_widget_queue_draw(wave_area_);
+}
+
 void ProgressWave::set_can_seek(bool can_seek) {
     if (scale_) {
         gtk_widget_set_visible(scale_, can_seek);
@@ -214,7 +230,7 @@ void ProgressWave::on_draw(GtkDrawingArea* area, cairo_t* cr, int width,
     if (!self || width <= 0 || height <= 0) return;
 
     // Quickshell "Wavy" layout: inset track, wave across the played fraction
-    // only, and a pill handle that narrows while pressed.
+    // only, and a slim vertical stopper with tiny rounded corners.
     const double track_left = kEdgePadding;
     const double track_right = std::max(track_left, width - kEdgePadding);
     const double track_length = std::max(1.0, track_right - track_left);
@@ -230,8 +246,12 @@ void ProgressWave::on_draw(GtkDrawingArea* area, cairo_t* cr, int width,
     // so custom drawing follows ThemeManager accent changes without plumbing.
     GdkRGBA accent;
     gtk_widget_get_color(GTK_WIDGET(area), &accent);
-    const double accent_r = accent.red, accent_g = accent.green,
-                 accent_b = accent.blue;
+    const double accent_r =
+        self->has_accent_override_ ? self->accent_r_ : accent.red;
+    const double accent_g =
+        self->has_accent_override_ ? self->accent_g_ : accent.green;
+    const double accent_b =
+        self->has_accent_override_ ? self->accent_b_ : accent.blue;
 
     auto wave_y = [&](double x) {
         double local_amplitude = amplitude;
@@ -254,7 +274,16 @@ void ProgressWave::on_draw(GtkDrawingArea* area, cairo_t* cr, int width,
     // 1. Rounded unplayed track.
     rounded_rect(cr, track_left, center_y - kTrackHeight / 2.0,
                  track_length, kTrackHeight, kTrackRadius);
-    cairo_set_source_rgba(cr, 0.58, 0.54, 0.70, 0.28);
+    // Track follows the scheme; the played wave stays accent-only.
+    const bool dark =
+        self->has_scheme_override_
+            ? self->dark_
+            : adw_style_manager_get_dark(adw_style_manager_get_default());
+    if (dark) {
+        cairo_set_source_rgba(cr, 0.56, 0.55, 0.62, 0.28);
+    } else {
+        cairo_set_source_rgba(cr, 0.47, 0.47, 0.50, 0.24);
+    }
     cairo_fill(cr);
 
     // 2. Wavy fill, clipped to the played fraction. The stroke is inset by
@@ -284,12 +313,12 @@ void ProgressWave::on_draw(GtkDrawingArea* area, cairo_t* cr, int width,
         cairo_restore(cr);
     }
 
-    // 3. Thin pill handle at the play position (narrows while dragging).
+    // 3. Slim vertical stopper at the play position (narrows while dragging).
     const double handle_width =
         self->seeking_ ? kHandlePressedWidth : kHandleWidth;
     rounded_rect(cr, played_end - handle_width / 2.0,
                  center_y - kHandleHeight / 2.0, handle_width, kHandleHeight,
-                 handle_width / 2.0);
+                 kHandleRadius);
     cairo_set_source_rgba(cr, accent_r, accent_g, accent_b, 1.0);
     cairo_fill(cr);
 }

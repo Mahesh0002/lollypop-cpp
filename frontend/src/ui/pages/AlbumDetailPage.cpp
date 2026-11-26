@@ -28,8 +28,8 @@ namespace lollypop {
 
 namespace {
 
-constexpr int kDetailArtworkSize = 240;
-constexpr int kDetailHeaderHeight = 240;
+constexpr int kDetailArtworkSize = 500;
+constexpr int kDetailHeaderHeight = 500;
 
 } // namespace
 
@@ -60,7 +60,7 @@ void AlbumDetailPage::setup_ui() {
     g_object_ref_sink(content_box_.get());
     gtk_widget_add_css_class(content_box_.get(), "album-detail-content");
     gtk_widget_set_vexpand(content_box_.get(), FALSE);
-    gtk_widget_set_margin_top(content_box_.get(), 24);
+    gtk_widget_set_margin_top(content_box_.get(), 50);
     gtk_widget_set_margin_bottom(content_box_.get(), 24);
     gtk_widget_set_margin_start(content_box_.get(), 24);
     gtk_widget_set_margin_end(content_box_.get(), 24);
@@ -68,7 +68,7 @@ void AlbumDetailPage::setup_ui() {
 
     // ========================================================================
     // Component 1: artwork + data
-    //   - 240x240 artwork on the left
+    //   - 500x500 artwork on the left
     //   - album title (semi-bold), artist (normal), meta (year • tracks)
     //     centered vertically to the right of the artwork
     // ========================================================================

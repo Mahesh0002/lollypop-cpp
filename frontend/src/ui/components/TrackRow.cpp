@@ -396,6 +396,7 @@ void TrackRow::setup_ui() {
                                 track_list_metrics::kLikeButtonSize,
                                 track_list_metrics::kLikeButtonSize);
     gtk_widget_add_css_class(like_button_.get(), "track-row-like-button");
+    if (liked_) gtk_widget_add_css_class(like_button_.get(), "liked");
     const std::string like_label =
         std::string(liked_ ? "Unlike " : "Like ") + track_.title;
     gtk_widget_set_tooltip_text(like_button_.get(), like_label.c_str());
@@ -453,6 +454,12 @@ void TrackRow::update_playing_state(const std::string& track_id, bool playing) {
     }
 }
 
+void TrackRow::update_liked_state(const std::string& track_id, bool liked) {
+    for (TrackRow* row : live_rows_) {
+        if (row && row->track_.id == track_id) row->set_liked(liked);
+    }
+}
+
 void TrackRow::set_playing(bool playing) {
     playing_ = playing;
     if (equalizer_) equalizer_->set_playing(playing);
@@ -465,6 +472,11 @@ void TrackRow::set_playing(bool playing) {
 
 void TrackRow::set_liked(bool liked) {
     liked_ = liked;
+    if (liked_) {
+        gtk_widget_add_css_class(like_button_.get(), "liked");
+    } else {
+        gtk_widget_remove_css_class(like_button_.get(), "liked");
+    }
     const std::string like_label =
         std::string(liked_ ? "Unlike " : "Like ") + track_.title;
     gtk_widget_set_tooltip_text(like_button_.get(), like_label.c_str());
@@ -488,7 +500,11 @@ void TrackRow::set_liked(bool liked) {
 void TrackRow::on_like_clicked(GtkButton* button, gpointer user_data) {
     (void)button;
     TrackRow* self = static_cast<TrackRow*>(user_data);
-    if (self->like_cb_) self->like_cb_(self->track_, !self->liked_);
+    const bool liked = !self->liked_;
+    // Flip the star immediately; the deferred library-changed refresh will
+    // rebuild any page whose contents depend on the like state.
+    update_liked_state(self->track_.id, liked);
+    if (self->like_cb_) self->like_cb_(self->track_, liked);
 }
 
 void TrackRow::on_like_pressed(GtkGestureClick* gesture, int n_press,
@@ -578,7 +594,9 @@ void TrackRow::create_context_menu() {
             }, nullptr, nullptr, nullptr },
             { "toggle-like", [](GSimpleAction*, GVariant*, gpointer self) {
                 auto* row = static_cast<TrackRow*>(self);
-                if (row->like_cb_) row->like_cb_(row->track_, !row->liked_);
+                const bool liked = !row->liked_;
+                update_liked_state(row->track_.id, liked);
+                if (row->like_cb_) row->like_cb_(row->track_, liked);
             }, nullptr, nullptr, nullptr },
             { "play-next", [](GSimpleAction*, GVariant*, gpointer self) {
                 auto* row = static_cast<TrackRow*>(self);

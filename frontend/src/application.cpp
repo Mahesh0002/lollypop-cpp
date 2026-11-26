@@ -14,9 +14,54 @@
 #include "ui/theme/ThemeManager.hpp"
 
 #include <gtk/gtk.h>
+#include <glib/gstdio.h>
 #include <iostream>
 
 namespace lollypop {
+
+namespace {
+
+// The project does not ship a GSettings schema, so the accent preset lives in
+// a small XDG key file. It can move to GSettings without touching callers.
+constexpr const char* kThemeConfigDir = "lollypop-cpp";
+constexpr const char* kThemeConfigFile = "theme.ini";
+constexpr const char* kThemeConfigGroup = "appearance";
+constexpr const char* kThemeAccentKey = "accent";
+
+std::string theme_config_path() {
+    return std::string(g_get_user_config_dir()) + "/" + kThemeConfigDir + "/" +
+           kThemeConfigFile;
+}
+
+std::size_t load_accent_preset() {
+    GKeyFile* key_file = g_key_file_new();
+    std::size_t index = 0;
+    GError* error = nullptr;
+    const std::string path = theme_config_path();
+    if (g_key_file_load_from_file(key_file, path.c_str(), G_KEY_FILE_NONE,
+                                  &error)) {
+        const int stored = g_key_file_get_integer(
+            key_file, kThemeConfigGroup, kThemeAccentKey, nullptr);
+        if (stored >= 0) index = static_cast<std::size_t>(stored);
+    }
+    g_clear_error(&error);
+    g_key_file_unref(key_file);
+    return index;
+}
+
+void save_accent_preset(std::size_t index) {
+    const std::string dir =
+        std::string(g_get_user_config_dir()) + "/" + kThemeConfigDir;
+    g_mkdir_with_parents(dir.c_str(), 0700);
+    GKeyFile* key_file = g_key_file_new();
+    g_key_file_set_integer(key_file, kThemeConfigGroup, kThemeAccentKey,
+                           static_cast<int>(index));
+    const std::string path = theme_config_path();
+    g_key_file_save_to_file(key_file, path.c_str(), nullptr);
+    g_key_file_unref(key_file);
+}
+
+} // namespace
 
 std::unique_ptr<Application> Application::create(const std::string& application_id) {
     return std::unique_ptr<Application>(new Application(application_id));
@@ -155,9 +200,26 @@ void Application::on_startup() {
     // the app must look identical regardless of CWD or install location.
     theme_manager_->load_stylesheet("/com/mahesh/lollypop/style.css");
 
-    // Apply development default accent color
-    auto accent_r = 0.65, accent_g = 0.45, accent_b = 1.0;
-    theme_manager_->set_accent_color(accent_r, accent_g, accent_b);
+    // Restore the persisted preset and seed the accent before the first
+    // frame. The seed depends on the scheme, so re-apply whenever Adw flips.
+    accent_manager_.select(load_accent_preset());
+    theme_manager_->set_scheme_changed_callback([this](bool) {
+        apply_accent_seed();
+    });
+    apply_accent_seed();
+}
+
+void Application::apply_accent_seed() {
+    if (!theme_manager_) return;
+    const std::string hex = accent_manager_.seed(theme_manager_->is_dark());
+    const design_tokens::Rgb seed = design_tokens::rgb_from_hex(hex);
+    theme_manager_->set_accent_color(seed.r, seed.g, seed.b);
+}
+
+void Application::set_accent_preset(std::size_t index) {
+    if (!accent_manager_.select(index)) return;
+    save_accent_preset(index);
+    apply_accent_seed();
 }
 
 void Application::on_shutdown() {

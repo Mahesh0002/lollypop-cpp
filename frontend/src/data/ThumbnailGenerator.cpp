@@ -7,11 +7,43 @@
 #include <gdk/gdk.h>
 #include <gtk/gtk.h>
 #include <glib.h>
+#include <unistd.h>
 #include <algorithm>
+#include <cstdio>
+#include <filesystem>
 #include <iostream>
+#include <string>
 #include <utility>
 
 namespace lollypop {
+
+namespace {
+
+// Deterministic on-disk name for a source image + size bucket. Kept separate
+// from the in-memory cache key so a changed artwork path never reuses a stale
+// thumbnail.
+std::string thumbnail_cache_path(const std::string& cache_dir,
+                                 const std::string& source_path, int bucket) {
+    const std::string composite =
+        source_path + ":" + std::to_string(bucket);
+    uint64_t hash = 1469598103934665603ULL;  // FNV-1a
+    for (char ch : composite) {
+        const auto c = static_cast<unsigned char>(ch);
+        hash ^= c;
+        hash *= 1099511628211ULL;
+    }
+    char name[64];
+    std::snprintf(name, sizeof(name), "%016llx_%d.png",
+                  static_cast<unsigned long long>(hash), bucket);
+    return (std::filesystem::path(cache_dir) / name).string();
+}
+
+std::filesystem::file_time_type safe_mtime(const std::string& path) {
+    std::error_code ec;
+    return std::filesystem::last_write_time(path, ec);
+}
+
+}  // namespace
 
 struct IdleCallbackData {
     GdkTexture* texture = nullptr;
@@ -50,6 +82,10 @@ bool ThumbnailGenerator::initialize(const std::string& cache_dir,
                                      ArtworkCache* cache) {
     cache_ = cache;
     cache_dir_ = cache_dir;
+    if (!cache_dir_.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(cache_dir_, ec);
+    }
     running_ = true;
     worker_ = std::make_unique<std::thread>(&ThumbnailGenerator::worker_loop, this);
     return true;
@@ -101,7 +137,32 @@ void ThumbnailGenerator::queue_job(
 
 GdkTexture* ThumbnailGenerator::generate_thumbnail(
     const std::string& source_path, int bucket) const {
-    if (!g_file_test(source_path.c_str(), G_FILE_TEST_EXISTS)) return nullptr;
+    if (source_path.empty() ||
+        !g_file_test(source_path.c_str(), G_FILE_TEST_EXISTS)) {
+        return nullptr;
+    }
+
+    const std::string cache_path =
+        cache_dir_.empty() ? std::string{}
+                           : thumbnail_cache_path(cache_dir_, source_path, bucket);
+
+    // Reuse a persisted thumbnail when it is at least as new as the source.
+    if (!cache_path.empty() &&
+        g_file_test(cache_path.c_str(), G_FILE_TEST_EXISTS)) {
+        const auto cached_mtime = safe_mtime(cache_path);
+        const auto source_mtime = safe_mtime(source_path);
+        if (cached_mtime >= source_mtime) {
+            GError* error = nullptr;
+            GdkPixbuf* cached = gdk_pixbuf_new_from_file(cache_path.c_str(), &error);
+            if (error) {
+                g_error_free(error);
+            } else if (cached) {
+                GdkTexture* texture = gdk_texture_new_for_pixbuf(cached);
+                g_object_unref(cached);
+                return texture;
+            }
+        }
+    }
 
     GError* error = nullptr;
     GdkPixbuf* source = gdk_pixbuf_new_from_file(source_path.c_str(), &error);
@@ -126,6 +187,26 @@ GdkTexture* ThumbnailGenerator::generate_thumbnail(
                             ? static_cast<GdkPixbuf*>(g_object_ref(square))
                             : gdk_pixbuf_scale_simple(square, target, target,
                                                       GDK_INTERP_BILINEAR);
+
+    // Write the resized image atomically so a concurrent reader never sees a
+    // partially written PNG. The worker is single-threaded; the PID keeps
+    // separate application instances from clobbering each other's temp file.
+    if (!cache_path.empty() && scaled) {
+        const std::string temp_path =
+            cache_path + ".tmp-" + std::to_string(static_cast<long>(getpid()));
+        GError* save_error = nullptr;
+        if (gdk_pixbuf_save(scaled, temp_path.c_str(), "png", &save_error,
+                            nullptr)) {
+            std::error_code ec;
+            std::filesystem::rename(temp_path, cache_path, ec);
+            if (ec) std::filesystem::remove(temp_path, ec);
+        } else {
+            if (save_error) g_error_free(save_error);
+            std::error_code ec;
+            std::filesystem::remove(temp_path, ec);
+        }
+    }
+
     GdkTexture* texture = gdk_texture_new_for_pixbuf(scaled);
 
     g_object_unref(scaled);

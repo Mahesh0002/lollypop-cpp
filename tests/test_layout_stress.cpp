@@ -42,7 +42,7 @@ std::vector<StressTrack> make_stress_tracks(int count) {
 
 std::string css_for_scale(double scale) {
     return lollypop::design_tokens::build_css(
-        scale, "rgba(167, 139, 250, 1)", "rgba(167, 139, 250, 0.15)");
+        scale, lollypop::design_tokens::rgb_from_hex("#8B6CFF"), true);
 }
 
 } // namespace
@@ -79,8 +79,28 @@ TEST(LayoutStressTest, GeneratesCanonicalTokensAtTextScales) {
         EXPECT_NE(css.find("--motion-fast: 120ms;"), std::string::npos);
         EXPECT_NE(css.find("--ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);"),
                   std::string::npos);
-        EXPECT_NE(css.find("--text-on-accent: #ffffff;"), std::string::npos);
+        EXPECT_NE(css.find("--accent-on: #0B0B10;"), std::string::npos);
+        EXPECT_NE(css.find("--text-on-accent: #0B0B10;"), std::string::npos);
     }
+}
+
+TEST(LayoutStressTest, AccentRampDerivesInkAndSchemeTokens) {
+    using namespace lollypop::design_tokens;
+    const Rgb violet = rgb_from_hex("#8B6CFF");
+    const std::string dark = build_css(1.0, violet, true);
+    EXPECT_NE(dark.find("--accent-hover:"), std::string::npos);
+    EXPECT_NE(dark.find("--accent-softer:"), std::string::npos);
+    EXPECT_NE(dark.find("--accent-border:"), std::string::npos);
+    EXPECT_NE(dark.find("--accent-shadow-strong:"), std::string::npos);
+    EXPECT_NE(dark.find("--surface-app: #0B0B10;"), std::string::npos);
+    EXPECT_GT(contrast_ratio(violet, kInkDark), 4.5);
+
+    const std::string light = build_css(1.0, violet, false);
+    EXPECT_NE(light.find("--surface-app: #F5F5F7;"), std::string::npos);
+    EXPECT_NE(light.find("--text-primary: #1D1D1F;"), std::string::npos);
+
+    const std::string yellow = build_css(1.0, rgb_from_hex("#FFD60A"), true);
+    EXPECT_NE(yellow.find("--accent-on: #0B0B10;"), std::string::npos);
 }
 
 TEST(LayoutStressTest, LargestTokenStillFitsFixedPanelBudgetAtTwoHundredPercent) {

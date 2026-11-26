@@ -8,6 +8,7 @@ set(FRONTEND_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/main_window.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/panels/apple_sidebar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/panels/bottom_playback.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/panels/fullscreen_player.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/panels/left_sidebar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/panels/middle_library.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/panels/pip_window.cpp
@@ -96,6 +97,7 @@ set(FRONTEND_HEADERS
     ${CMAKE_SOURCE_DIR}/include/ui/theme/design_tokens.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/panels/apple_sidebar.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/panels/bottom_playback.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/panels/fullscreen_player.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/panels/left_sidebar.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/panels/middle_library.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/panels/pip_window.hpp

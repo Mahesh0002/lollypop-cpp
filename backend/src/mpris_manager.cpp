@@ -155,6 +155,13 @@ struct MprisManager::Impl {
 
     Glib::RefPtr<Gio::DBus::Connection> bus;
     std::vector<PlayerEntry> players;
+    // Players discovered on the bus but not yet fully materialised. Proxy
+    // creation is asynchronous so an unresponsive player cannot block GTK's
+    // main loop during startup.
+    std::vector<std::string> wanted_players_;
+    std::vector<std::string> pending_players_;
+    uint64_t player_load_generation_{0};
+    bool shutting_down_{false};
 
     std::string active_name;
     std::string manual_name;
@@ -350,58 +357,149 @@ struct MprisManager::Impl {
             -1);
     }
 
-    bool add_player(const std::string& name) {
-        try {
-            auto base = Gio::DBus::Proxy::create_sync(
-                bus, name, kObjectPath, kRootInterface,
-                Glib::RefPtr<Gio::DBus::InterfaceInfo>(),
-                Gio::DBus::ProxyFlags::DO_NOT_AUTO_START);
-            auto player = Gio::DBus::Proxy::create_sync(
-                bus, name, kObjectPath, kPlayerInterface,
-                Glib::RefPtr<Gio::DBus::InterfaceInfo>(),
-                Gio::DBus::ProxyFlags::DO_NOT_AUTO_START);
-            auto properties = Gio::DBus::Proxy::create_sync(
-                bus, name, kObjectPath, kPropertiesInterface,
-                Glib::RefPtr<Gio::DBus::InterfaceInfo>(),
-                Gio::DBus::ProxyFlags::DO_NOT_AUTO_START);
-
-            if (!player || !properties) return false;
-
-            PlayerEntry entry;
-            entry.info.dbus_name = name;
-            // Root proxy provides Identity and DesktopEntry.
-            entry.info.identity = cached_string(base, "Identity");
-            entry.info.desktop_entry = cached_string(base, "DesktopEntry");
-            entry.base = base;
-            entry.player = player;
-            entry.properties = properties;
-
-            read_props(entry);
-
-            entry.properties_conn = player->signal_properties_changed().connect(
-                [this, name](
-                    const Gio::DBus::Proxy::MapChangedProperties& changed,
-                    const std::vector<Glib::ustring>& invalidated) {
-                    on_properties_changed(name, changed, invalidated);
-                });
-
-            entry.seeked_conn = player->signal_signal().connect(
-                [this, name](const Glib::ustring&, const Glib::ustring& signal_name,
-                             const Glib::VariantContainerBase& parameters) {
-                    on_player_signal(name, signal_name, parameters);
-                });
-
-            std::cout << "MprisManager: Added player "
-                      << (entry.info.identity.empty() ? name : entry.info.identity)
-                      << " (" << name << ")" << std::endl;
-
-            players.push_back(std::move(entry));
-            return true;
-        } catch (const Glib::Error& error) {
-            std::cerr << "MprisManager: Failed to connect to " << name << ": "
-                      << error.what() << std::endl;
-            return false;
+    void add_player_async(const std::string& name) {
+        if (!bus || shutting_down_ || name.empty() || find(name) ||
+            std::find(pending_players_.begin(), pending_players_.end(), name) !=
+                pending_players_.end() ||
+            std::find(wanted_players_.begin(), wanted_players_.end(), name) ==
+                wanted_players_.end()) {
+            return;
         }
+
+        pending_players_.push_back(name);
+        const uint64_t gen = player_load_generation_;
+        auto valid = [this, name, gen]() {
+            return !shutting_down_ && bus && gen == player_load_generation_ &&
+                   std::find(wanted_players_.begin(), wanted_players_.end(),
+                             name) != wanted_players_.end();
+        };
+        auto forget = [this, name]() {
+            pending_players_.erase(
+                std::remove(pending_players_.begin(), pending_players_.end(),
+                            name),
+                pending_players_.end());
+        };
+        const auto flags = Gio::DBus::ProxyFlags::DO_NOT_AUTO_START;
+        using ReadySlot = sigc::slot<void(const Glib::RefPtr<Gio::AsyncResult>&)>;
+
+        auto on_root = [this, name, valid, forget, flags](const Glib::RefPtr<
+                           Gio::AsyncResult>& result) {
+            if (!valid()) {
+                forget();
+                return;
+            }
+            Glib::RefPtr<Gio::DBus::Proxy> base;
+            try {
+                base = Gio::DBus::Proxy::create_finish(result);
+            } catch (const Glib::Error& error) {
+                std::cerr << "MprisManager: Failed to connect to " << name
+                          << ": " << error.what() << std::endl;
+                forget();
+                return;
+            }
+            if (!valid() || !base) {
+                forget();
+                return;
+            }
+
+            auto on_player = [this, name, valid, forget, flags, base](
+                                 const Glib::RefPtr<Gio::AsyncResult>& result) {
+                if (!valid()) {
+                    forget();
+                    return;
+                }
+                Glib::RefPtr<Gio::DBus::Proxy> player;
+                try {
+                    player = Gio::DBus::Proxy::create_finish(result);
+                } catch (const Glib::Error& error) {
+                    std::cerr << "MprisManager: Failed to connect to " << name
+                              << ": " << error.what() << std::endl;
+                    forget();
+                    return;
+                }
+                if (!valid() || !player) {
+                    forget();
+                    return;
+                }
+
+                auto on_properties =
+                    [this, name, valid, forget, base, player](
+                        const Glib::RefPtr<Gio::AsyncResult>& result) {
+                        if (!valid()) {
+                            forget();
+                            return;
+                        }
+                        Glib::RefPtr<Gio::DBus::Proxy> properties;
+                        try {
+                            properties = Gio::DBus::Proxy::create_finish(result);
+                        } catch (const Glib::Error& error) {
+                            std::cerr << "MprisManager: Failed to connect to "
+                                      << name << ": " << error.what()
+                                      << std::endl;
+                            forget();
+                            return;
+                        }
+                        if (!valid() || !properties || find(name)) {
+                            forget();
+                            return;
+                        }
+
+                        PlayerEntry entry;
+                        entry.info.dbus_name = name;
+                        // Root proxy provides Identity and DesktopEntry.
+                        entry.info.identity = cached_string(base, "Identity");
+                        entry.info.desktop_entry =
+                            cached_string(base, "DesktopEntry");
+                        entry.base = base;
+                        entry.player = player;
+                        entry.properties = properties;
+
+                        read_props(entry);
+
+                        entry.properties_conn =
+                            player->signal_properties_changed().connect(
+                                [this, name](const Gio::DBus::Proxy::
+                                                 MapChangedProperties& changed,
+                                             const std::vector<Glib::ustring>&
+                                                 invalidated) {
+                                    on_properties_changed(name, changed,
+                                                          invalidated);
+                                });
+
+                        entry.seeked_conn = player->signal_signal().connect(
+                            [this, name](
+                                const Glib::ustring&,
+                                const Glib::ustring& signal_name,
+                                const Glib::VariantContainerBase& parameters) {
+                                on_player_signal(name, signal_name, parameters);
+                            });
+
+                        std::cout << "MprisManager: Added player "
+                                  << (entry.info.identity.empty()
+                                          ? name
+                                          : entry.info.identity)
+                                  << " (" << name << ")" << std::endl;
+
+                        forget();
+                        players.push_back(std::move(entry));
+                        if (player_list_cb) player_list_cb();
+                        update_active_selection();
+                    };
+
+                Gio::DBus::Proxy::create(
+                    bus, name, kObjectPath, kPropertiesInterface,
+                    ReadySlot(on_properties),
+                    Glib::RefPtr<Gio::DBus::InterfaceInfo>(), flags);
+            };
+
+            Gio::DBus::Proxy::create(
+                bus, name, kObjectPath, kPlayerInterface, ReadySlot(on_player),
+                Glib::RefPtr<Gio::DBus::InterfaceInfo>(), flags);
+        };
+
+        Gio::DBus::Proxy::create(
+            bus, name, kObjectPath, kRootInterface, ReadySlot(on_root),
+            Glib::RefPtr<Gio::DBus::InterfaceInfo>(), flags);
     }
 
     void refresh_players() {
@@ -437,6 +535,13 @@ struct MprisManager::Impl {
     void apply_player_list(const std::vector<std::string>& names) {
         bool changed = false;
 
+        wanted_players_.clear();
+        for (const auto& name : names) {
+            if (name.starts_with(kMprisPrefix) && !is_filtered(name, names)) {
+                wanted_players_.push_back(name);
+            }
+        }
+
         // Drop players that vanished or are now considered duplicates.
         for (auto it = players.begin(); it != players.end();) {
             const std::string& name = it->info.dbus_name;
@@ -457,13 +562,13 @@ struct MprisManager::Impl {
             }
         }
 
-        // Add newly appeared players.
-        for (const auto& name : names) {
-            if (!name.starts_with(kMprisPrefix) || find(name) ||
-                is_filtered(name, names)) {
+        // Add newly appeared players asynchronously so an unresponsive MPRIS
+        // service cannot block the GTK main loop during startup.
+        for (const auto& name : wanted_players_) {
+            if (find(name) || is_filtered(name, names)) {
                 continue;
             }
-            if (add_player(name)) changed = true;
+            add_player_async(name);
         }
 
         if (changed && player_list_cb) {
@@ -696,6 +801,11 @@ MprisManager::~MprisManager() {
 bool MprisManager::initialize() {
     if (impl_->bus) return true;
 
+    impl_->shutting_down_ = false;
+    ++impl_->player_load_generation_;
+    impl_->wanted_players_.clear();
+    impl_->pending_players_.clear();
+
     Gio::init();
 
     try {
@@ -722,6 +832,11 @@ bool MprisManager::initialize() {
 }
 
 void MprisManager::shutdown() {
+    impl_->shutting_down_ = true;
+    ++impl_->player_load_generation_;
+    impl_->wanted_players_.clear();
+    impl_->pending_players_.clear();
+
     if (impl_->position_timer) {
         g_source_remove(impl_->position_timer);
         impl_->position_timer = 0;

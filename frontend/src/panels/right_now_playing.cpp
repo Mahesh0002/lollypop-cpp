@@ -25,13 +25,11 @@
 #include <cstring>
 #include <map>
 #include <memory>
-#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace lollypop {
-
 namespace {
 
 GtkWidget* create_icon_button(const char* icon_name,
@@ -80,6 +78,7 @@ struct DeferredQueueAction {
 };
 
 constexpr int kCompactPanelWidth = 320;
+constexpr int kModeButtonInset = 10;
 // The LTR border-left / RTL border-right adds 1px outside the measured width.
 constexpr int kPanelBorder = 1;
 
@@ -314,7 +313,8 @@ void RightNowPlaying::create_progress_section() {
 
 void RightNowPlaying::create_transport_row() {
     // Three mode buttons; playback is driven by track activation / media keys.
-    transport_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    transport_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_box_set_homogeneous(GTK_BOX(transport_box_), TRUE);
     gtk_widget_add_css_class(transport_box_, "now-playing-main-controls");
     gtk_widget_set_hexpand(transport_box_, TRUE);
     gtk_widget_set_halign(transport_box_, GTK_ALIGN_CENTER);
@@ -614,9 +614,22 @@ void RightNowPlaying::adapt_to_allocation(int width, int height) {
     gtk_label_set_max_width_chars(GTK_LABEL(track_title_label_), label_chars);
     gtk_label_set_max_width_chars(GTK_LABEL(track_artist_label_), label_chars);
 
-    // Tighten control spacing so the transport row keeps its full width.
+    // Tighten progress spacing so the transport row keeps its full width.
     gtk_box_set_spacing(GTK_BOX(progress_box_), compact ? 6 : 8);
-    gtk_box_set_spacing(GTK_BOX(transport_box_), compact ? 8 : 12);
+
+    // Each mode control owns one equal third of the row. A small inset on both
+    // sides leaves the visible button narrower than its allocated column.
+    gtk_box_set_homogeneous(GTK_BOX(transport_box_), TRUE);
+    gtk_box_set_spacing(GTK_BOX(transport_box_), 0);
+    const int content_width = std::max(0, width - 2 * horizontal_margin);
+    const int mode_button_width =
+        std::max(24, content_width / 3 - 2 * kModeButtonInset);
+    for (GtkWidget* button : {shuffle_button_, repeat_button_, loop_button_}) {
+        if (!button) continue;
+        gtk_widget_set_margin_start(button, kModeButtonInset);
+        gtk_widget_set_margin_end(button, kModeButtonInset);
+        gtk_widget_set_size_request(button, mode_button_width, -1);
+    }
 
     if (compact != compact_layout_) {
         compact_layout_ = compact;
@@ -637,6 +650,14 @@ void RightNowPlaying::update_track_info(const std::string& title,
     current_artwork_path_ = artwork_path;
     if (artwork_view_) {
         artwork_view_->set_artwork_path(current_artwork_path_);
+    }
+
+    // Publish the artwork colour as --tint-* so the panel, bottom bar and
+    // detail hero share one content-derived palette.
+    if (main_window_) {
+        if (ThemeManager* theme = main_window_->get_theme_manager()) {
+            theme->set_artwork_tint_from_path(current_artwork_path_);
+        }
     }
 }
 

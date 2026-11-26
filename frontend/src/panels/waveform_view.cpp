@@ -68,6 +68,11 @@ void WaveformView::set_model(const VisualizerModel* model) {
     gtk_widget_queue_draw(widget_.get());
 }
 
+void WaveformView::set_scheme(bool dark) {
+    dark_ = dark;
+    gtk_widget_queue_draw(widget_.get());
+}
+
 void WaveformView::set_accent_color(double r, double g, double b, double a) {
     accent_r_ = std::clamp(r, 0.0, 1.0);
     accent_g_ = std::clamp(g, 0.0, 1.0);
@@ -180,8 +185,12 @@ void WaveformView::draw_callback(GtkDrawingArea* area, cairo_t* cr, int width,
 }
 
 void WaveformView::render(cairo_t* cr, int width, int height) {
-    // ── Background: flat dark surface ──
-    cairo_set_source_rgb(cr, 0.12, 0.12, 0.16);
+    // ── Background: scheme surface ──
+    if (dark_) {
+        cairo_set_source_rgb(cr, 0.086, 0.086, 0.122);   // --surface-panel
+    } else {
+        cairo_set_source_rgb(cr, 0.96, 0.96, 0.97);      // --surface-app
+    }
     cairo_rectangle(cr, 0, 0, width, height);
     cairo_fill(cr);
 
@@ -190,7 +199,11 @@ void WaveformView::render(cairo_t* cr, int width, int height) {
     float playhead_x = static_cast<float>(progress_ * width);
 
     // ── Track line: empty portion (full width, dim) ──
-    cairo_set_source_rgba(cr, 0.3, 0.3, 0.35, 0.4);
+    if (dark_) {
+        cairo_set_source_rgba(cr, 0.56, 0.55, 0.62, 0.40);
+    } else {
+        cairo_set_source_rgba(cr, 0.47, 0.47, 0.50, 0.30);
+    }
     cairo_set_line_width(cr, track_height);
     cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
     cairo_move_to(cr, 0, mid_y);
@@ -286,7 +299,8 @@ void WaveformView::render(cairo_t* cr, int width, int height) {
 
     // ── Progress playhead line ──
     if (progress_ > 0.0) {
-        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.8);
+        const double ink = dark_ ? 1.0 : 0.0;
+        cairo_set_source_rgba(cr, ink, ink, ink, 0.8);
         cairo_set_line_width(cr, 2.0);
         cairo_move_to(cr, playhead_x, 0);
         cairo_line_to(cr, playhead_x, height);

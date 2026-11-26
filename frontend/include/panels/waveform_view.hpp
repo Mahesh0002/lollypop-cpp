@@ -53,6 +53,9 @@ public:
     /// Set the accent color for the waveform (RGBA, 0-1).
     void set_accent_color(double r, double g, double b, double a = 1.0);
 
+    /// Switch neutral chrome between dark and light surfaces.
+    void set_scheme(bool dark);
+
     /// Set playback progress (0.0 - 1.0) for the playhead.
     void set_progress(double progress);
 
@@ -77,6 +80,7 @@ private:
     double accent_r_ = 0.4, accent_g_ = 0.7, accent_b_ = 1.0, accent_a_ = 1.0;
     double progress_ = 0.0;
     bool playing_ = false;
+    bool dark_ = true;
     int smoothing_window_ = 2;
     int preferred_width_ = 200;
     int preferred_height_ = 40;

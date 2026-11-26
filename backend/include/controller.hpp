@@ -161,13 +161,21 @@ public:
     std::string get_embedded_plain_lyrics(const std::string& track_id) override;
     std::vector<std::string> get_lyrics_providers() override;
 
+    // Artist information - ILibraryService interface
+    void request_artist_info(const std::string& artist_name,
+                             ILibraryService::ArtistInfoCallback callback) override;
+
     // Artist artwork
     void fetch_artist_artwork(const std::string& artist_id,
                                std::function<void(bool success)> callback);
     void fetch_missing_artist_artwork();
 
-    // One-time iTunes artwork refresh. Re-fetches album artwork at 600px and
-    // applies it to the album plus all of its tracks.
+    // Local-first metadata pipeline. Rebuilds artwork, tags and sidecar lyrics
+    // from the files under the Music folder, backing up any previously
+    // downloaded artwork for reference. Runs after a library scan; no network.
+    void apply_local_metadata_pipeline();
+
+    // Explicit, user-triggered iTunes fallback. No longer called at startup.
     void refresh_album_artwork_from_itunes(bool force = false);
 
     // Lyrics batch operations
@@ -457,7 +465,8 @@ private:
 
     void schedule_deferred_initialization();
     void cancel_deferred_initialization();
-    std::string find_local_artist_artwork(const Artist& artist);
+    std::string find_local_artist_artwork(const Artist& artist,
+                                          bool ignore_stored = false);
 
     void initialize_deferred_services();
     void restore_saved_queue();

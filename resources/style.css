@@ -20,32 +20,126 @@
  * ============================================================================ */
 
 :root {
-    /* Surfaces */
-    --bg-primary: #111116;
-    --bg-secondary: #1a1a22;
-    --bg-tertiary: #22222c;
-    --bg-hover: #2a2a36;
-    --bg-active: #333340;
-    --bg-selected: #3a3a4a;
+    /* ---- Layer 1: primitive ramp (violet-tinted neutrals, ~6% chroma) ---- */
+    --n-950: #0B0B10;
+    --n-900: #111118;
+    --n-850: #16161F;
+    --n-800: #1C1C27;
+    --n-750: #232331;
+    --n-700: #2A2A38;
+    --n-600: #3A3A4C;
+    --n-100: #F5F5F7;
+    --n-300: #B8B6C6;
+    --n-400: #8E8B9E;
+    --n-500: #6A6778;
+    --n-550: #5A5768;
 
-    /* Text */
-    --text-primary: #f5f5f7;
-    --text-secondary: #a3a3ad;
-    --text-tertiary: #7a7a8a;
-    --text-disabled: #555565;
-    --text-on-accent: #ffffff;
+    /* ---- Layer 2: semantic roles (dark fallback; ThemeManager re-emits) ---- */
+    --surface-app: var(--n-950);
+    --surface-sidebar: var(--n-900);
+    --surface-panel: var(--n-850);
+    --surface-elevated: var(--n-800);
+    --surface-raised: var(--n-750);
+    --surface-hover: rgba(255, 255, 255, 0.06);
+    --surface-active: rgba(255, 255, 255, 0.10);
+    --surface-selected: rgba(139, 108, 255, 0.12);
 
-    /* Accent — ThemeManager overrides these at runtime */
-    --accent-color: #a78bfa;
-    --accent-hover: #8b5cf6;
-    --accent-soft: rgba(167, 139, 250, 0.18);
-    --accent-bg: rgba(167, 139, 250, 0.18);
-    --accent-active: #7c3aed;
-    --accent-shadow: rgba(167, 139, 250, 0.28);
-    --accent-shadow-strong: rgba(167, 139, 250, 0.42);
+    --text-primary: var(--n-100);
+    --text-secondary: var(--n-300);
+    --text-tertiary: var(--n-400);
+    --text-quaternary: var(--n-500);
+    --text-disabled: var(--n-550);
+
+    --border-subtle: var(--n-700);
+    --border-strong: var(--n-600);
+
+    /* Legacy aliases retained for existing component selectors. They resolve
+     * against the semantic roles, so both schemes flip without a rewrite. */
+    --bg-primary: var(--surface-app);
+    --bg-secondary: var(--surface-panel);
+    --bg-tertiary: var(--surface-raised);
+    --bg-hover: var(--surface-hover);
+    --bg-active: var(--surface-active);
+    --bg-selected: var(--surface-selected);
+
+    /* Accent: one seed, nine derived tokens (§5.1). ThemeManager overrides. */
+    --accent-color: #8B6CFF;
+    --accent-hover: #AB95FF;
+    --accent-active: #6339FF;
+    --accent-soft: rgba(139, 108, 255, 0.14);
+    --accent-softer: rgba(139, 108, 255, 0.07);
+    --accent-bg: rgba(139, 108, 255, 0.14);
+    --accent-border: rgba(139, 108, 255, 0.35);
+    --accent-shadow: rgba(139, 108, 255, 0.28);
+    --accent-shadow-strong: rgba(139, 108, 255, 0.42);
+    --accent-on: #0B0B10;
+    --text-on-accent: var(--accent-on);
+
+    /* Detail-page filled controls: overwritten by ThemeManager from the
+       artwork tint when available, otherwise the accent ramp above. */
+    --detail-action-bg: var(--accent-color);
+    --detail-action-hover: var(--accent-hover);
+    --detail-action-active: var(--accent-active);
+    --detail-action-on: var(--accent-on);
+
+    /* Apple system accent presets (§5.1). Swatches read these primitives. */
+    --preset-violet: #8B6CFF;
+    --preset-blue: #0A84FF;
+    --preset-teal: #64D2FF;
+    --preset-green: #32D74B;
+    --preset-yellow: #FFD60A;
+    --preset-orange: #FF9F0A;
+    --preset-red: #FF453A;
+    --preset-pink: #FF375F;
+    --preset-indigo: #6E6CFF;
+
+    /* Status (§5.3) */
+    --success: #32D74B;
+    --success-soft: rgba(50, 215, 75, 0.14);
+    --warning: #FFD60A;
+    --warning-soft: rgba(255, 214, 10, 0.14);
+    --error: #FF453A;
+    --error-soft: rgba(255, 69, 58, 0.14);
+    --info: #64D2FF;
+    --info-soft: rgba(100, 210, 255, 0.14);
+    --destructive-bg: var(--error-soft);
+
+    /* Opacity ramp (§4.3): white in dark mode, black in light mode. */
+    --overlay-2: rgba(255, 255, 255, 0.02);
+    --overlay-4: rgba(255, 255, 255, 0.04);
+    --overlay-6: rgba(255, 255, 255, 0.06);
+    --overlay-8: rgba(255, 255, 255, 0.08);
+    --overlay-10: rgba(255, 255, 255, 0.10);
+    --overlay-12: rgba(255, 255, 255, 0.12);
+    --overlay-16: rgba(255, 255, 255, 0.16);
+    --overlay-72: rgba(255, 255, 255, 0.72);
+    --overlay-82: rgba(255, 255, 255, 0.82);
+    --overlay-92: rgba(255, 255, 255, 0.92);
+    --overlay-hairline: rgba(255, 255, 255, 0.10);
+
+    /* Shadow ramp. */
+    --shadow-6: rgba(0, 0, 0, 0.06);
+    --shadow-8: rgba(0, 0, 0, 0.08);
+    --shadow-10: rgba(0, 0, 0, 0.10);
+    --shadow-16: rgba(0, 0, 0, 0.16);
+    --shadow-20: rgba(0, 0, 0, 0.20);
+    --shadow-24: rgba(0, 0, 0, 0.24);
+    --shadow-28: rgba(0, 0, 0, 0.28);
+    --shadow-38: rgba(0, 0, 0, 0.38);
+    --shadow-40: rgba(0, 0, 0, 0.40);
+    --shadow-50: rgba(0, 0, 0, 0.50);
+
+    /* Artwork scrims and derived tint (§7). Fallback means "no tint". */
+    --scrim-bg: rgba(0, 0, 0, 0.34);
+    --scrim-strong: rgba(0, 0, 0, 0.55);
+    --scrim-text: #FFFFFF;
+    --scrim-border: rgba(255, 255, 255, 0.16);
+    --tint-color: var(--surface-panel);
+    --tint-strong: transparent;
+    --tint-soft: transparent;
+    --toolbar-bg: rgba(24, 24, 31, 0.88);
 
     /* Borders and focus */
-    --border-subtle: #2a2a36;
     --border-focus: var(--accent-color);
 
     /* Shadows */
@@ -99,9 +193,10 @@
     --motion-slow: 240ms;
     --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
 
-    /* Translucent material tokens — NO backdrop-filter (not in GTK CSS) */
-    --glass-ultra-thin-bg: rgba(255, 255, 255, 0.04);
-    --glass-ultra-thin-border: rgba(255, 255, 255, 0.06);
+    /* Translucent material tokens — NO backdrop-filter (not in GTK CSS).
+     * ThemeManager re-emits these per scheme from the same ramp. */
+    --glass-ultra-thin-bg: var(--overlay-4);
+    --glass-ultra-thin-border: var(--overlay-6);
     --glass-thin-bg: rgba(255, 255, 255, 0.06);
     --glass-thin-border: rgba(255, 255, 255, 0.08);
     --glass-regular-bg: rgba(255, 255, 255, 0.08);
@@ -124,7 +219,7 @@
 }
 
 window {
-    background-color: var(--bg-primary);
+    background-color: var(--surface-app);
     color: var(--text-primary);
 }
 
@@ -167,10 +262,41 @@ button:disabled {
     opacity: 0.55;
 }
 
+/* Accent is a state signal: filled primary controls use the derived ink. */
+button.suggested-action {
+    background-color: var(--accent-color);
+    color: var(--accent-on);
+    box-shadow: 0 2px 10px var(--accent-shadow);
+}
+
+button.suggested-action:hover {
+    background-color: var(--accent-hover);
+}
+
+button.suggested-action:active {
+    background-color: var(--accent-active);
+    box-shadow: 0 0 0 3px var(--accent-shadow-strong);
+}
+
+/* Destructive state was previously undefined (plan A5/A9). */
+button.destructive-action {
+    color: var(--error);
+    background-color: var(--error-soft);
+}
+
+button.destructive-action:hover {
+    background-color: var(--destructive-bg);
+}
+
+button.destructive-action:active {
+    background-color: var(--error-soft);
+    box-shadow: 0 0 0 3px var(--error-soft);
+}
+
 entry,
 searchentry {
     color: var(--text-primary);
-    background-color: var(--bg-secondary);
+    background-color: var(--surface-panel);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-control);
     padding: 8px 16px;
@@ -178,7 +304,7 @@ searchentry {
 
 entry:focus,
 searchentry:focus {
-    border-color: var(--border-focus);
+    border-color: var(--accent-border);
     box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
@@ -194,7 +320,7 @@ separator {
 
 popover {
     color: var(--text-primary);
-    background-color: var(--bg-secondary);
+    background-color: var(--surface-raised);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
     box-shadow: 0 8px 32px var(--shadow-strong);
@@ -207,6 +333,20 @@ popover button {
 
 popover button:hover {
     background-color: var(--bg-hover);
+}
+
+window.dialog,
+dialog {
+    background-color: var(--surface-elevated);
+    border: 1px solid var(--border-subtle);
+}
+
+tooltip {
+    background-color: var(--surface-raised);
+    color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
 }
 
 listbox {
@@ -263,7 +403,7 @@ listboxrow:selected {
  * ============================================================================ */
 
 .sidebar {
-    background-color: var(--bg-secondary);
+    background-color: var(--surface-sidebar);
     min-width: 0;
 }
 
@@ -363,13 +503,47 @@ listboxrow:selected {
     color: var(--text-primary);
 }
 
+.accent-swatch {
+    min-width: 28px;
+    min-height: 28px;
+    padding: 0;
+    border-radius: var(--radius-sm);
+    border: 2px solid transparent;
+    box-shadow: 0 0 0 1px var(--overlay-hairline);
+}
+
+.accent-swatch.selected {
+    border-color: var(--text-primary);
+}
+
+.accent-swatch-0 { background-color: var(--preset-violet); }
+.accent-swatch-1 { background-color: var(--preset-blue); }
+.accent-swatch-2 { background-color: var(--preset-teal); }
+.accent-swatch-3 { background-color: var(--preset-green); }
+.accent-swatch-4 { background-color: var(--preset-yellow); }
+.accent-swatch-5 { background-color: var(--preset-orange); }
+.accent-swatch-6 { background-color: var(--preset-red); }
+.accent-swatch-7 { background-color: var(--preset-pink); }
+.accent-swatch-8 { background-color: var(--preset-indigo); }
+
+.accent-popover-title {
+    color: var(--text-primary);
+    font-size: var(--font-subhead);
+    font-weight: var(--font-weight-semibold);
+}
+
+.accent-popover-hex {
+    color: var(--text-tertiary);
+    font-size: var(--font-caption1);
+}
+
 /* ============================================================================
  * 5. Middle Library & Floating Glass Toolbar
  * ============================================================================ */
 
 .middle-library,
 .middle-library-overlay {
-    background-color: var(--bg-primary);
+    background-color: var(--surface-app);
 }
 
 .library-header,
@@ -388,7 +562,7 @@ listboxrow:selected {
 .middle-toolbar-button {
     min-width: 40px;
     min-height: 40px;
-    border-radius: 10px;
+    border-radius: var(--radius-sm);
     padding: 8px;
 }
 
@@ -442,14 +616,14 @@ listboxrow:selected {
     padding: 0 12px;
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-control);
-    background-color: rgba(255, 255, 255, 0.06);
+    background-color: var(--overlay-6);
     color: var(--text-secondary);
     font-size: var(--font-footnote);
     font-weight: var(--font-weight-regular);
 }
 
 .page-sort-button:hover {
-    background-color: rgba(255, 255, 255, 0.11);
+    background-color: var(--overlay-12);
     color: var(--text-primary);
 }
 
@@ -459,47 +633,28 @@ listboxrow:selected {
 }
 
 .middle-glass-toolbar {
-    background-color: rgba(24, 24, 31, 0.88);
+    background-color: var(--toolbar-bg);
     background-image: linear-gradient(
         180deg,
-        rgba(255, 255, 255, 0.10),
-        rgba(255, 255, 255, 0.04)
+        var(--overlay-10),
+        var(--overlay-4)
     );
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid var(--overlay-12);
     border-radius: var(--radius-lg);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.24),
-                0 2px 8px rgba(0, 0, 0, 0.16);
+    box-shadow: 0 8px 32px var(--shadow-24),
+                0 2px 8px var(--shadow-16);
     min-height: 52px;
     padding: 0 12px;
     transition: background-color var(--motion-base) var(--ease-out),
                 box-shadow var(--motion-base) var(--ease-out);
 }
 
-@media (prefers-color-scheme: light) {
-    .middle-glass-toolbar {
-        background-color: rgba(255, 255, 255, 0.72);
-        background-image: linear-gradient(
-            180deg,
-            rgba(255, 255, 255, 0.80),
-            rgba(255, 255, 255, 0.60)
-        );
-        border: 1px solid rgba(0, 0, 0, 0.08);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.10),
-                    0 2px 8px rgba(0, 0, 0, 0.06);
-    }
-}
 
 .middle-glass-toolbar:hover {
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28),
-                0 4px 12px rgba(0, 0, 0, 0.20);
+    box-shadow: 0 12px 40px var(--shadow-28),
+                0 4px 12px var(--shadow-20);
 }
 
-@media (prefers-color-scheme: light) {
-    .middle-glass-toolbar:hover {
-        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.14),
-                    0 4px 12px rgba(0, 0, 0, 0.08);
-    }
-}
 
 .middle-toolbar-title {
     color: var(--text-primary);
@@ -511,32 +666,22 @@ listboxrow:selected {
 .middle-toolbar-search {
     min-width: 0;
     min-height: 36px;
-    border-radius: 10px;
+    border-radius: var(--radius-sm);
     padding: 0 12px 0 40px;
-    background-color: rgba(255, 255, 255, 0.08);
+    background-color: var(--overlay-8);
     border: 1px solid transparent;
     color: var(--text-primary);
     font-size: var(--font-footnote);
     transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-@media (prefers-color-scheme: light) {
-    .middle-toolbar-search {
-        background-color: rgba(0, 0, 0, 0.05);
-    }
-}
 
 .middle-toolbar-search:focus {
-    background-color: rgba(255, 255, 255, 0.12);
+    background-color: var(--overlay-12);
     border-color: var(--accent-color);
     box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
-@media (prefers-color-scheme: light) {
-    .middle-toolbar-search:focus {
-        background-color: rgba(0, 0, 0, 0.08);
-    }
-}
 
 .middle-toolbar-search:disabled {
     opacity: 0.5;
@@ -589,7 +734,7 @@ listboxrow:selected {
 
 .album-card,
 .artist-card {
-    background-color: var(--bg-secondary);
+    background-color: transparent;
     border: 1px solid transparent;
     border-radius: var(--radius-md);
     padding: 0;
@@ -606,7 +751,7 @@ listboxrow:selected {
     background-color: var(--bg-hover);
     border-color: var(--border-subtle);
     transform: scale(1.02);
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.20);
+    box-shadow: 0 8px 28px var(--shadow-20);
 }
 
 .album-card:active,
@@ -648,7 +793,7 @@ listboxrow:selected {
 }
 
 .album-card:hover .album-artwork {
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+    box-shadow: 0 8px 24px var(--shadow-28);
 }
 
 .album-card:active,
@@ -721,7 +866,7 @@ listboxrow:selected {
 }
 
 .track-row.playing {
-    background-color: var(--accent-soft);
+    background-color: var(--accent-softer);
 }
 
 /* ============================================================================
@@ -729,12 +874,8 @@ listboxrow:selected {
  * ============================================================================ */
 
 .detail-hero {
-    background-color: var(--bg-secondary);
-    background-image: linear-gradient(
-        180deg,
-        rgba(0, 0, 0, 0.32),
-        rgba(0, 0, 0, 0.00)
-    );
+    background-color: var(--surface-panel);
+    background-image: linear-gradient(180deg, var(--tint-strong), transparent);
     border-radius: var(--radius-xl);
     padding: 32px;
     margin-bottom: 24px;
@@ -742,9 +883,9 @@ listboxrow:selected {
 
 .detail-artwork {
     border-radius: 12px;
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
-    min-width: 240px;
-    min-height: 240px;
+    box-shadow: 0 10px 28px var(--shadow-38);
+    min-width: 500px;
+    min-height: 500px;
 }
 
 .detail-artwork-image {
@@ -767,11 +908,9 @@ listboxrow:selected {
 /* Album detail: actions live beside the artwork, songs fill the width below. */
 .album-detail-page,
 .artist-detail-page {
-    background-image: linear-gradient(
-        180deg,
-        rgba(255, 255, 255, 0.04),
-        rgba(255, 255, 255, 0.00) 40%
-    );
+    /* One surface for the whole page: no washed-out band behind the songs. */
+    background-color: var(--surface-app);
+    background-image: none;
     min-width: 0;
 }
 
@@ -783,23 +922,172 @@ listboxrow:selected {
     min-height: 36px;
     padding: 0 18px;
     border-radius: var(--radius-control);
-    background-color: rgba(255, 255, 255, 0.08);
-    color: var(--text-primary);
+    background-color: var(--detail-action-bg);
+    color: var(--detail-action-on);
     font-size: var(--font-footnote);
     font-weight: var(--font-weight-semibold);
 }
 
 .album-detail-play-button {
-    background-color: var(--accent-color);
-    color: var(--text-on-accent);
+    font-weight: var(--font-weight-bold);
+    box-shadow: 0 4px 12px var(--shadow-20);
 }
 
-.album-detail-play-button:hover {
-    background-color: var(--accent-hover);
+.album-detail-action-button:hover,
+.favourite-music-action-button:hover {
+    background-color: var(--detail-action-hover);
+}
+
+.album-detail-action-button:active,
+.favourite-music-action-button:active {
+    background-color: var(--detail-action-active);
+}
+
+/* Favourite Music: large artwork hero with vertically centered metadata and
+ * a bottom-aligned Play/Shuffle row. Buttons stay rectangular with modest
+ * rounded corners, matching the app-wide control shape. */
+.favourite-music-page {
+    /* Same single-surface rule as album/artist detail pages. */
+    background-color: var(--surface-app);
+    background-image: none;
+    min-width: 0;
+}
+
+.favourite-music-header {
+    min-width: 0;
+}
+
+.favourite-music-artwork {
+    border-radius: 12px;
+    box-shadow: 0 10px 28px var(--shadow-38);
+    min-width: 500px;
+    min-height: 500px;
+}
+
+.favourite-music-artwork-image {
+    border-radius: 12px;
+}
+
+.favourite-music-title {
+    color: var(--text-primary);
+    font-size: var(--font-display-small);
+    font-weight: var(--font-weight-bold);
+    letter-spacing: -0.6px;
+}
+
+.favourite-music-updated {
+    color: var(--text-secondary);
+    font-size: var(--font-footnote);
+    font-weight: var(--font-weight-regular);
+}
+
+.favourite-music-actions {
+    margin-top: 10px;
+}
+
+.favourite-music-action-button {
+    min-height: 36px;
+    padding: 0 18px;
+    border-radius: var(--radius-sm);
+    background-color: var(--detail-action-bg);
+    color: var(--detail-action-on);
+    font-size: var(--font-footnote);
+    font-weight: var(--font-weight-semibold);
+}
+
+.favourite-music-play-button {
+    font-weight: var(--font-weight-bold);
+    box-shadow: 0 4px 12px var(--shadow-20);
+}
+
+.favourite-music-menu-button {
+    min-width: 36px;
+    min-height: 36px;
+    padding: 0;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+}
+
+.favourite-music-menu-button:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
 }
 
 .album-detail-songs-title {
     margin-top: 8px;
+}
+
+/* Artist detail: information, biography, and related library content. */
+.artist-detail-section {
+    background-color: var(--overlay-2);
+    border-radius: var(--radius-lg);
+    padding: 18px 20px;
+    min-width: 0;
+}
+
+.artist-detail-biography {
+    color: var(--text-secondary);
+    font-size: var(--font-body);
+    line-height: 1.55;
+    min-width: 0;
+}
+
+.artist-detail-facts {
+    background-color: var(--overlay-4);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    min-width: 0;
+}
+
+.artist-detail-fact-value {
+    color: var(--text-primary);
+    font-size: var(--font-title3);
+    font-weight: var(--font-weight-semibold);
+}
+
+.artist-detail-fact-label {
+    color: var(--text-tertiary);
+    font-size: var(--font-caption1);
+}
+
+.artist-related-albums,
+.artist-related-genres {
+    background-color: transparent;
+    min-width: 0;
+}
+
+.artist-related-album-card {
+    background-color: var(--overlay-4);
+    border-radius: var(--radius-md);
+    padding: 10px;
+    min-width: 132px;
+}
+
+.artist-related-album-card:hover {
+    background-color: var(--bg-hover);
+}
+
+.artist-related-album-artwork {
+    border-radius: 8px;
+}
+
+.artist-related-album-title {
+    color: var(--text-primary);
+    font-size: var(--font-footnote);
+    font-weight: var(--font-weight-medium);
+}
+
+.artist-genre-chip {
+    border-radius: var(--radius-sm);
+    padding: 6px 14px;
+    background-color: var(--overlay-6);
+    color: var(--text-secondary);
+    font-size: var(--font-footnote);
+}
+
+.artist-genre-chip:hover {
+    background-color: var(--accent-soft);
+    color: var(--text-primary);
 }
 
 .search-empty {
@@ -853,6 +1141,10 @@ listboxrow:selected {
     color: var(--text-tertiary);
 }
 
+.error-state-icon {
+    color: var(--error);
+}
+
 .empty-state-title,
 .error-state-title {
     color: var(--text-primary);
@@ -884,7 +1176,10 @@ listboxrow:selected {
  * ============================================================================ */
 
 .right-now-playing {
-    background-color: var(--bg-secondary);
+    background-color: var(--surface-panel);
+    /* Artwork tint (§7): one large translucent radial, no blur. */
+    background-image: radial-gradient(circle at 50% 0%, var(--tint-strong),
+                                      transparent 55%);
     min-width: 0;
     min-height: 0;
 }
@@ -1045,7 +1340,7 @@ listboxrow:selected {
 
 .now-playing-tab-buttons {
     background-color: var(--bg-tertiary);
-    border-radius: 10px;
+    border-radius: var(--radius-sm);
     padding: 3px;
     min-width: 0;
 }
@@ -1066,8 +1361,8 @@ listboxrow:selected {
 }
 
 .now-playing-tab-button.active {
-    color: var(--text-primary);
-    background-color: var(--bg-secondary);
+    color: var(--accent-color);
+    background-color: var(--accent-soft);
     box-shadow: 0 2px 8px var(--shadow-subtle);
 }
 
@@ -1213,7 +1508,8 @@ listboxrow:selected {
  * ============================================================================ */
 
 .bottom-playback {
-    background-color: var(--bg-secondary);
+    background-color: var(--surface-sidebar);
+    background-image: linear-gradient(180deg, var(--tint-soft), transparent 60%);
     border-top: 1px solid var(--border-subtle);
     min-height: 76px;
 }
@@ -1316,7 +1612,7 @@ listboxrow:selected {
 .pip-volume-scale slider {
     min-width: 14px;
     min-height: 14px;
-    border-radius: 7px;
+    border-radius: 3px;
     background-color: var(--text-primary);
     border: none;
     box-shadow: 0 2px 8px var(--shadow-subtle);
@@ -1395,11 +1691,11 @@ scrollbar button {
     background-color: var(--glass-regular-bg);
     border: 1px solid var(--glass-regular-border);
     border-radius: 16px;
-    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 24px 64px var(--shadow-40);
 }
 .pip-window:focus-within {
     border-color: var(--accent-color);
-    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.4), 0 0 0 2px var(--accent-color);
+    box-shadow: 0 24px 64px var(--shadow-40), 0 0 0 2px var(--accent-color);
 }
 
 .pip-header {
@@ -1443,7 +1739,7 @@ scrollbar button {
 }
 .pip-close-button:hover {
     background-color: var(--destructive-bg);
-    color: white;
+    color: var(--error);
 }
 
 /* Transport */
@@ -1465,7 +1761,7 @@ scrollbar button {
     min-height: 48px;
     border-radius: var(--radius-sm);
     background-color: var(--accent-color);
-    color: white;
+    color: var(--accent-on);
     box-shadow: 0 4px 16px var(--accent-shadow);
 }
 .pip-play-pause:hover {
@@ -1553,7 +1849,7 @@ scrollbar button {
 .pip-volume-scale slider {
     min-width: 14px;
     min-height: 14px;
-    border-radius: 7px;
+    border-radius: 3px;
     background-color: var(--text-primary);
     border: none;
     box-shadow: 0 2px 8px var(--shadow-subtle);
@@ -1669,11 +1965,11 @@ scrollbar button {
 
 /* Window chrome and startup state. */
 .main-header-bar {
-    background-color: rgba(26, 26, 34, 0.82);
+    background-color: var(--toolbar-bg);
     background-image: linear-gradient(
         180deg,
-        rgba(255, 255, 255, 0.06),
-        rgba(255, 255, 255, 0.00)
+        var(--overlay-6),
+        var(--overlay-8)
     );
     border-bottom: 1px solid var(--border-subtle);
     min-height: 48px;
@@ -1725,6 +2021,7 @@ scrollbar button {
 /* List-backed pages. Row padding lives in the row widgets themselves. */
 .songs-list,
 .liked-music-list,
+.favourite-music-list,
 .search-results-list,
 .home-track-list,
 .album-detail-track-list,
@@ -1745,34 +2042,13 @@ scrollbar button {
     background-color: var(--bg-hover);
 }
 
-/* Album / artist detail: soft accent wash behind the hero content. */
+/* Detail pages own a single background; the content box must stay transparent
+ * so the music list never introduces a second surface. */
 .album-detail-content,
 .artist-detail-content {
-    background-image: linear-gradient(
-        180deg,
-        rgba(255, 255, 255, 0.04),
-        rgba(255, 255, 255, 0.00) 40%
-    );
+    background-color: transparent;
+    background-image: none;
     min-width: 0;
-}
-
-.album-detail-content > box > button,
-.artist-detail-content > box > button {
-    border-radius: var(--radius-control);
-    padding: 10px 20px;
-    font-size: var(--font-subhead);
-    font-weight: var(--font-weight-semibold);
-}
-
-.album-detail-content > box > button:first-child,
-.artist-detail-content > box > button:first-child {
-    background-color: var(--accent-color);
-    color: var(--text-on-accent);
-}
-
-.album-detail-content > box > button:first-child:hover,
-.artist-detail-content > box > button:first-child:hover {
-    background-color: var(--accent-hover);
 }
 
 /* Search results header. */
@@ -1853,8 +2129,13 @@ scrollbar button {
 }
 
 .track-row.playing .track-row-like-button,
-.track-row-like-button:focus-visible {
+.track-row-like-button:focus-visible,
+.track-row-like-button.liked {
     opacity: 1;
+}
+
+.track-row-like-button.liked {
+    color: var(--accent-color);
 }
 
 /* Custom-drawn volume dial and waveform surfaces. */
@@ -1930,12 +2211,12 @@ searchentry:focus,
 
 @media (prefers-contrast: more) {
     :root {
-        --glass-regular-bg: rgba(255, 255, 255, 0.15);
-        --glass-regular-border: rgba(255, 255, 255, 0.3);
-        --glass-thin-bg: rgba(255, 255, 255, 0.1);
-        --glass-thin-border: rgba(255, 255, 255, 0.2);
-        --glass-thick-bg: rgba(255, 255, 255, 0.2);
-        --glass-thick-border: rgba(255, 255, 255, 0.4);
+        --glass-regular-bg: var(--overlay-8);
+        --glass-regular-border: var(--overlay-8);
+        --glass-thin-bg: var(--overlay-10);
+        --glass-thin-border: var(--overlay-8);
+        --glass-thick-bg: var(--overlay-8);
+        --glass-thick-border: var(--overlay-8);
     }
 }
 /* ============================================================================

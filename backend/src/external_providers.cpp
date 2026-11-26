@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <vector>
 #include <iostream>
 #include <mutex>
@@ -479,89 +480,44 @@ make_lyrics_fetch_fn() {
 
 std::function<std::string(const std::string&, const std::string&, int)>
 make_artwork_extract_fn() {
-    return [](const std::string& file_path, const std::string& key, int max_size) -> std::string {
-        // This function is called by ArtworkManager when it needs to extract artwork
-        // The key is typically "album_artist|album" (from ArtworkManager::make_key)
-        // max_size is the requested thumbnail size in pixels
+    // Artwork extraction is local-only. Embedded pictures are extracted by the
+    // library scanner; this callback resolves sidecar folder art when the
+    // scanner did not find an embedded picture. Network providers (iTunes,
+    // MusicBrainz) are available only through explicit fetch APIs.
+    return [](const std::string& file_path, const std::string& /*key*/,
+              int /*max_size*/) -> std::string {
+        if (file_path.empty()) return "";
 
-        // Parse key to extract artist and album
-        // Format: "album_artist|album" or just "album" if album_artist is empty
-        std::string album_artist;
-        std::string album;
-        size_t pos = key.find('|');
-        if (pos != std::string::npos) {
-            album_artist = key.substr(0, pos);
-            album = key.substr(pos + 1);
-        } else {
-            album = key;
-        }
-
-        if (album.empty()) return "";
-
-        // Use album_artist if available, otherwise try to infer from file_path
-        std::string artist = album_artist;
-        if (artist.empty() && !file_path.empty()) {
-            // Try to get artist from the file's tags
-            // For now, we'll skip this and just use the album name
-        }
-
-        // 1. iTunes Search API first (free, no API key, returns 600px artwork).
-        auto itunes = iTunesProvider::search_album(artist, album);
-        if (itunes && !itunes->artwork_url.empty()) {
-            std::string cache_dir;
-            if (const char* home = std::getenv("HOME")) {
-                cache_dir = std::string(home) + "/.local/share/lollypop-cpp/artwork";
-            } else {
-                cache_dir = "/tmp/lollypop-cpp/artwork";
-            }
-
-            std::string cache_key = key;
-            std::replace(cache_key.begin(), cache_key.end(), '/', '_');
-            std::replace(cache_key.begin(), cache_key.end(), ':', '_');
-
-            return iTunesProvider::download_artwork(itunes->artwork_url, cache_dir,
-                                                    cache_key);
-        }
-
-        // 2. Local folder artwork next (e.g. /home/Music/Artist/Album/cover.jpg).
-        if (!file_path.empty()) {
-            std::filesystem::path p(file_path);
-            if (p.has_parent_path()) {
-                const std::filesystem::path dir = p.parent_path();
-                // Common folder artwork names, in preference order.
-                const std::vector<std::string> candidates = {
-                    "cover.jpg", "cover.jpeg", "cover.png", "folder.jpg",
-                    "front.jpg", "front.png", "album.jpg", "album.png",
-                };
-                std::error_code ec;
-                for (const auto& name : candidates) {
-                    std::filesystem::path candidate = dir / name;
-                    if (std::filesystem::is_regular_file(candidate, ec)) {
-                        return candidate.string();
-                    }
+        static const std::vector<std::string> candidates = {
+            "cover.jpg", "cover.jpeg", "cover.png", "folder.jpg",
+            "front.jpg", "front.png", "album.jpg", "album.png",
+        };
+        auto in_directory = [](const std::filesystem::path& dir) {
+            std::error_code ec;
+            if (!std::filesystem::is_directory(dir, ec)) return std::string{};
+            for (const auto& name : candidates) {
+                const auto candidate = dir / name;
+                if (std::filesystem::is_regular_file(candidate, ec)) {
+                    return candidate.string();
                 }
             }
+            return std::string{};
+        };
+
+        const std::filesystem::path audio(file_path);
+        std::error_code ec;
+        const std::string name = audio.filename().string();
+        if (std::find(candidates.begin(), candidates.end(), name) !=
+                candidates.end() &&
+            std::filesystem::is_regular_file(audio, ec)) {
+            return file_path;
         }
+        if (!audio.has_parent_path()) return "";
 
-        // 3. Fall back to Cover Art Archive (MusicBrainz) when neither iTunes
-        //    nor local artwork is available.
-        auto result = ArtworkProvider::fetch_album_artwork_by_name(artist, album);
-        if (result) {
-            std::string cache_dir;
-            if (const char* home = std::getenv("HOME")) {
-                cache_dir = std::string(home) + "/.local/share/lollypop-cpp/artwork";
-            } else {
-                cache_dir = "/tmp/lollypop-cpp/artwork";
-            }
-
-            std::string cache_key = key;
-            std::replace(cache_key.begin(), cache_key.end(), '/', '_');
-            std::replace(cache_key.begin(), cache_key.end(), ':', '_');
-
-            return ArtworkProvider::download_artwork(result->url, cache_dir, cache_key);
+        if (auto found = in_directory(audio.parent_path()); !found.empty()) {
+            return found;
         }
-
-        return "";
+        return in_directory(audio.parent_path().parent_path());
     };
 }
 
@@ -783,6 +739,84 @@ std::string iTunesProvider::download_artwork(const std::string& url,
                                               const std::string& cache_dir,
                                               const std::string& key) {
     return ArtworkProvider::download_artwork(url, cache_dir, key);
+}
+
+// ============================================================================
+// ArtistInfoProvider Implementation (Wikipedia REST summary)
+// ============================================================================
+
+std::string ArtistInfoProvider::user_agent_ =
+    "Lollypop-CPP/1.0 (https://github.com/lollypop-cpp)";
+std::string ArtistInfoProvider::base_url_ =
+    "https://en.wikipedia.org/api/rest_v1/page/summary";
+
+namespace {
+std::mutex artist_info_cache_mutex_;
+std::map<std::string, std::optional<ArtistInfoProvider::BiographyResult>>
+    artist_info_cache_;
+} // namespace
+
+void ArtistInfoProvider::set_user_agent(const std::string& ua) {
+    user_agent_ = ua;
+}
+
+void ArtistInfoProvider::set_base_url(const std::string& url) {
+    std::lock_guard<std::mutex> lock(artist_info_cache_mutex_);
+    base_url_ = url;
+    artist_info_cache_.clear();
+}
+
+std::optional<ArtistInfoProvider::BiographyResult>
+ArtistInfoProvider::parse_biography(const std::string& json_body) {
+    try {
+        json j = json::parse(json_body);
+        if (!j.is_object()) return std::nullopt;
+        if (j.value("type", "") == "disambiguation") return std::nullopt;
+
+        const auto extract = j.value("extract", "");
+        if (extract.empty()) return std::nullopt;
+
+        BiographyResult result;
+        result.extract = extract;
+        result.title = j.value("title", "");
+        result.description = j.value("description", "");
+        return result;
+    } catch (const std::exception& e) {
+        std::cerr << "ArtistInfoProvider: biography parse error: "
+                  << e.what() << std::endl;
+        return std::nullopt;
+    }
+}
+
+std::optional<ArtistInfoProvider::BiographyResult>
+ArtistInfoProvider::fetch_biography(const std::string& artist_name) {
+    if (artist_name.empty()) return std::nullopt;
+
+    {
+        std::lock_guard<std::mutex> lock(artist_info_cache_mutex_);
+        auto it = artist_info_cache_.find(artist_name);
+        if (it != artist_info_cache_.end()) return it->second;
+    }
+
+    std::string title = artist_name;
+    std::replace(title.begin(), title.end(), ' ', '_');
+    const std::string url = base_url_ + "/" + url_encode(title);
+    const CurlResponse response = http_get(url, user_agent_, 8);
+
+    std::optional<BiographyResult> result;
+    if (response.success) {
+        result = parse_biography(response.data);
+    } else {
+        std::cerr << "ArtistInfoProvider: biography request failed for "
+                  << artist_name << " (HTTP " << response.http_code << ")"
+                  << std::endl;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(artist_info_cache_mutex_);
+        artist_info_cache_[artist_name] = result;
+    }
+    return result;
 }
 
 // ============================================================================

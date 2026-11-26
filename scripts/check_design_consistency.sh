@@ -94,7 +94,7 @@ static_checks = {
     cpp_string('kFontFamilyName'): cpp_string('kFontFamily'),
     cpp_string('kEaseOutName'): cpp_string('kEaseOut'),
     cpp_string('kBorderFocusName'): 'var(--accent-color)',
-    cpp_string('kTextOnAccentName'): cpp_string('kTextOnAccent'),
+    cpp_string('kTextOnAccentName'): 'var(--accent-on)',
 }
 for name, expected in static_checks.items():
     if not name:

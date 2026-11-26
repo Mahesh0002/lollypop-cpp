@@ -75,6 +75,9 @@ public:
     /// Refresh every live row when playback changes. Safe on the main context.
     static void update_playing_state(const std::string& track_id, bool playing);
 
+    /// Refresh every live row for a track after its like state changes.
+    static void update_liked_state(const std::string& track_id, bool liked);
+
 private:
     struct WidgetDeleter {
         void operator()(GtkWidget* w) const {

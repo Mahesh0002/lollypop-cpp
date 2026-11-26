@@ -452,3 +452,10 @@ acceptance_metrics:
   gtk_criticals_in_smoke_flow: 0
   components_with_state_matrix: "100%"
   hover_only_controls: 0
+  # Theme plan §11 (verified by scripts/check_theme_contrast.py)
+  raw_rgba_outside_token_definitions: 0
+  contrast_failures_body_text: 0
+  hardcoded_accent_in_canvas_widgets: 0
+  accent_tokens_emitted: 9
+  schemes_verified: 2
+  undefined_css_variables: 0

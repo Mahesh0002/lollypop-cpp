@@ -20,7 +20,9 @@
 #include <condition_variable>
 #include <ctime>
 #include <filesystem>
+#include <optional>
 #include <thread>
+#include <unordered_set>
 
 namespace lollypop {
 
@@ -43,6 +45,63 @@ std::string metadata_cache_path() {
                                         "/.local/share/lollypop-cpp"
                                   : std::string("/tmp/lollypop-cpp");
     return base + "/metadata_cache.json";
+}
+
+std::string artwork_data_dir() {
+    const char* home = g_get_home_dir();
+    const std::string base = home ? std::string(home) +
+                                        "/.local/share/lollypop-cpp"
+                                  : std::string("/tmp/lollypop-cpp");
+    return base + "/artwork";
+}
+
+// Downloaded artwork is kept as a reference before local paths are restored.
+bool looks_like_downloaded_artwork(const std::string& path) {
+    const std::string name = std::filesystem::path(path).filename().string();
+    return name.compare(0, 7, "itunes_") == 0;
+}
+
+// Local artwork first: a cover beside the audio file, then one level up.
+std::string find_local_artwork(const std::string& file_path) {
+    std::error_code ec;
+    std::filesystem::path audio(file_path);
+    if (!audio.has_parent_path()) return {};
+
+    static const std::vector<std::string> names = {
+        "cover.jpg", "cover.jpeg", "cover.png", "folder.jpg",
+        "front.jpg", "front.png", "album.jpg", "album.png",
+    };
+    auto in_directory = [](const std::filesystem::path& dir) {
+        std::error_code local_ec;
+        if (!std::filesystem::is_directory(dir, local_ec)) return std::string{};
+        for (const auto& name : names) {
+            const auto candidate = dir / name;
+            if (std::filesystem::is_regular_file(candidate, local_ec)) {
+                return candidate.string();
+            }
+        }
+        return std::string{};
+    };
+
+    if (auto found = in_directory(audio.parent_path()); !found.empty()) return found;
+    return in_directory(audio.parent_path().parent_path());
+}
+
+// One-time copy of previously downloaded artwork into a reference folder.
+void backup_downloaded_artwork(const std::string& art_dir) {
+    std::error_code ec;
+    std::filesystem::create_directories(art_dir + "/itunes-reference", ec);
+    for (std::filesystem::directory_iterator it(art_dir, ec), end;
+         !ec && it != end; it.increment(ec)) {
+        if (!it->is_regular_file(ec)) continue;
+        const std::string name = it->path().filename().string();
+        if (!looks_like_downloaded_artwork(name)) continue;
+        const auto destination =
+            std::filesystem::path(art_dir) / "itunes-reference" / name;
+        if (!std::filesystem::exists(destination, ec)) {
+            std::filesystem::copy_file(it->path(), destination, ec);
+        }
+    }
 }
 
 template <typename T>
@@ -180,7 +239,11 @@ bool BackendController::initialize() {
     };
     if (const auto value = storage_->get_preference("player.volume")) {
         try {
-            volume_ = std::clamp(std::stod(*value), 0.0, 1.0);
+            const double restored = std::clamp(std::stod(*value), 0.0, 1.0);
+            // A zero preference means the app was previously muted, but there
+            // is no separate mute preference. Restoring it makes every new
+            // session start silent, so keep the audible default instead.
+            if (restored > 0.0) volume_ = restored;
         } catch (...) {
             // Ignore corrupt preference values.
         }
@@ -268,64 +331,16 @@ bool BackendController::initialize() {
                           << track.file_path << std::endl;
             }
 
-            // Enrich missing metadata from iTunes in the background (non-blocking).
-            // Fills genre, year, track/disc number, and artwork when tags are absent.
-            if (storage_) {
-                spawn_background_worker([this, track](const WorkerAliveToken& alive) {
-                    if (!alive->load()) return;
-                    auto meta = fetch_itunes_metadata(track.artist, track.title,
-                                                      track.album);
-                    if (!alive->load() || !meta) return;
-
+            // Local-only enrichment: embedded artwork comes from the scanner.
+            // Fall back to a cover file beside the audio; never fetch over the
+            // network during a scan.
+            if (storage_ && track.artwork_path.empty()) {
+                const std::string local_art = find_local_artwork(track.file_path);
+                if (!local_art.empty()) {
                     Track updated = track;
-                    bool changed = false;
-
-                    if (updated.genre.empty() && !meta->genre.empty()) {
-                        updated.genre = meta->genre;
-                        changed = true;
-                    }
-                    if (updated.year == 0 && meta->year != 0) {
-                        updated.year = meta->year;
-                        changed = true;
-                    }
-                    if (updated.track_number == 0 && meta->track_number != 0) {
-                        updated.track_number = meta->track_number;
-                        changed = true;
-                    }
-                    if (updated.disc_number == 0 && meta->disc_number != 0) {
-                        updated.disc_number = meta->disc_number;
-                        changed = true;
-                    }
-                    // Use iTunes high-quality artwork if the track has none.
-                    if (updated.artwork_path.empty() && !meta->artwork_url.empty()) {
-                        std::string cache_dir;
-                        if (const char* home = std::getenv("HOME")) {
-                            cache_dir =
-                                std::string(home) +
-                                "/.local/share/lollypop-cpp/artwork";
-                        } else {
-                            cache_dir = "/tmp/lollypop-cpp/artwork";
-                        }
-                        std::string key = "itunes_" + track.id;
-                        std::replace(key.begin(), key.end(), '/', '_');
-                        std::replace(key.begin(), key.end(), ':', '_');
-                        std::string art_path =
-                            iTunesProvider::download_artwork(
-                                meta->artwork_url, cache_dir, key);
-                        if (!art_path.empty()) {
-                            updated.artwork_path = art_path;
-                            changed = true;
-                        }
-                    }
-
-                    if (changed && alive->load()) {
-                        std::lock_guard<std::mutex> storage_lock(storage_mutex_);
-                        if (!alive->load() || !storage_) return;
-                        // insert_track upserts on file_path, so re-adding enriches
-                        // the existing row while preserving liked/play counts.
-                        storage_->add_track(updated);
-                    }
-                });
+                    updated.artwork_path = local_art;
+                    storage_->update_track_artwork(updated.id, local_art);
+                }
             }
         });
         library_manager_->set_error_callback([](const std::string& file,
@@ -447,8 +462,8 @@ void BackendController::initialize_deferred_services() {
         artwork_manager_->set_extract_fn(make_artwork_extract_fn());
     }
 
-    // Refresh stored album artwork once using the 1200px iTunes images.
-    refresh_album_artwork_from_itunes();
+    // Artwork, tags and lyrics come from the local Music folder. iTunes is
+    // available only as an explicit fallback (refresh_album_artwork_from_itunes).
 
     lyrics_manager_ = std::make_unique<LyricsManager>();
     if (!lyrics_manager_->initialize(
@@ -476,6 +491,7 @@ void BackendController::initialize_deferred_services() {
         sync_mpris_capabilities();
     }
 
+
     // CAVA visualizer for external/system audio capture (optional).
     cava_visualizer_ = std::make_unique<CavaVisualizer>();
     if (cava_visualizer_->start()) {
@@ -487,6 +503,7 @@ void BackendController::initialize_deferred_services() {
                   << std::endl;
         cava_visualizer_.reset();
     }
+
 
     // Warm the read models and write a snapshot for the next launch. This runs
     // on a low-priority idle callback, after the first frame is on screen.
@@ -857,6 +874,9 @@ bool BackendController::start_scan_library(const std::string& path) {
                 std::lock_guard<std::mutex> lock(storage_mutex_);
                 storage_->rebuild_smart_playlists();
             }
+            // Restore artwork/tags/lyrics from the Music folder before the
+            // read models and snapshot are rebuilt. This is local-only.
+            apply_local_metadata_pipeline();
             // Refresh the read models and metadata snapshot off the UI thread.
             preload_common_queries();
             save_metadata_cache();
@@ -1183,6 +1203,58 @@ std::vector<Track> BackendController::get_tracks_by_artist(
     return storage_->get_tracks_by_artist(artist_name);
 }
 
+void BackendController::request_artist_info(
+    const std::string& artist_name,
+    ILibraryService::ArtistInfoCallback callback) {
+    if (artist_name.empty() || !callback) return;
+
+    const auto alive = workers_alive_;
+    spawn_background_worker(
+        [alive, artist_name, callback](const WorkerAliveToken& worker_alive) {
+            if (!worker_alive || !worker_alive->load()) return;
+            const auto result = ArtistInfoProvider::fetch_biography(artist_name);
+            if (!worker_alive->load()) return;
+
+            struct Dispatch {
+                std::string name;
+                ArtistInfo info;
+                ILibraryService::ArtistInfoCallback callback;
+                WorkerAliveToken alive;
+            };
+            auto* payload = new Dispatch{
+                artist_name,
+                ArtistInfo{result ? result->extract : "",
+                           result ? "Wikipedia" : ""},
+                callback,
+                alive};
+
+            g_idle_add(
+                [](gpointer data) -> gboolean {
+                    std::unique_ptr<Dispatch> dispatch(
+                        static_cast<Dispatch*>(data));
+                    if (dispatch->alive && dispatch->alive->load() &&
+                        dispatch->callback) {
+                        try {
+                            dispatch->callback(dispatch->name,
+                                               dispatch->info);
+                        } catch (const std::exception& e) {
+                            std::cerr
+                                << "BackendController: artist info callback "
+                                   "threw: "
+                                << e.what() << std::endl;
+                        } catch (...) {
+                            std::cerr
+                                << "BackendController: artist info callback "
+                                   "threw unknown exception"
+                                << std::endl;
+                        }
+                    }
+                    return G_SOURCE_REMOVE;
+                },
+                payload);
+        });
+}
+
 std::vector<Playlist> BackendController::get_all_playlists() {
     return storage_->get_all_playlists();
 }
@@ -1457,8 +1529,11 @@ std::string BackendController::get_artwork_path_for_artist(
     return artist.artwork_path;
 }
 
-std::string BackendController::find_local_artist_artwork(const Artist& artist) {
-    if (!artist.artwork_path.empty()) return artist.artwork_path;
+std::string BackendController::find_local_artist_artwork(
+    const Artist& artist, bool ignore_stored) {
+    if (!ignore_stored && !artist.artwork_path.empty()) {
+        return artist.artwork_path;
+    }
     if (!storage_ || artist.name.empty()) return "";
 
     const std::vector<std::string> names = {
@@ -1487,10 +1562,14 @@ std::string BackendController::find_local_artist_artwork(const Artist& artist) {
         if (auto found = in_directory(file.parent_path().parent_path()); !found.empty()) return found;
     }
 
-    // Fall back to the first album cover associated with this artist.
+    // Fall back to the first local album cover associated with this artist.
     for (const auto& album : storage_->get_albums_by_artist(artist.id)) {
-        if (!album.artwork_path.empty() &&
-            std::filesystem::exists(album.artwork_path)) {
+        if (album.artwork_path.empty() ||
+            looks_like_downloaded_artwork(album.artwork_path)) {
+            continue;
+        }
+        std::error_code ec;
+        if (std::filesystem::exists(album.artwork_path, ec)) {
             return album.artwork_path;
         }
     }
@@ -1586,6 +1665,158 @@ void BackendController::fetch_missing_artist_artwork() {
             save_metadata_cache();
         }
     });
+}
+
+void BackendController::apply_local_metadata_pipeline() {
+    if (!storage_ || !library_scanner_) return;
+
+    // Keep the downloaded images for reference before any DB path is replaced.
+    backup_downloaded_artwork(artwork_data_dir());
+
+    std::vector<Track> tracks;
+    std::vector<Album> albums;
+    std::vector<Artist> artists;
+    {
+        std::lock_guard<std::mutex> lock(storage_mutex_);
+        tracks = storage_->get_all_tracks();
+        albums = storage_->get_all_albums();
+        artists = storage_->get_all_artists();
+    }
+
+    const auto album_key = [](const std::string& artist,
+                              const std::string& album) {
+        return artist.empty() ? album : artist + "|" + album;
+    };
+
+    std::unordered_map<std::string, std::string> local_art_by_album;
+    std::unordered_map<std::string, std::string> local_art_by_title;
+    bool metadata_changed = false;
+    int lyrics_imported = 0;
+
+    for (const auto& stored : tracks) {
+        if (stored.file_path.empty()) continue;
+
+        const auto cached = library_scanner_->get_cached_track(stored.file_path);
+        Track local = cached ? *cached : stored;
+
+        // Embedded artwork extracted by the scanner wins; sidecar folder art is
+        // the fallback. A downloaded path is never treated as local artwork.
+        std::string art;
+        if (!local.artwork_path.empty() &&
+            !looks_like_downloaded_artwork(local.artwork_path)) {
+            std::error_code ec;
+            if (std::filesystem::exists(local.artwork_path, ec)) {
+                art = local.artwork_path;
+            }
+        }
+        if (art.empty()) art = find_local_artwork(stored.file_path);
+        local.artwork_path = art;
+
+        const bool track_changed =
+            local.title != stored.title || local.artist != stored.artist ||
+            local.album != stored.album ||
+            local.album_artist != stored.album_artist ||
+            local.genre != stored.genre ||
+            local.track_number != stored.track_number ||
+            local.disc_number != stored.disc_number ||
+            local.year != stored.year || local.duration != stored.duration ||
+            local.embedded_lyrics != stored.embedded_lyrics ||
+            local.artwork_path != stored.artwork_path;
+
+        if (cached && track_changed) {
+            // insert_track() upserts on file_path and preserves user data such
+            // as liked/play counts while refreshing tags from the local files.
+            std::lock_guard<std::mutex> lock(storage_mutex_);
+            storage_->add_track(local);
+        } else if (!cached && track_changed) {
+            std::lock_guard<std::mutex> lock(storage_mutex_);
+            storage_->update_track_artwork(stored.id, art);
+        }
+        metadata_changed = metadata_changed || track_changed;
+
+        if (!art.empty()) {
+            local_art_by_album.emplace(
+                album_key(local.album_artist, local.album), art);
+            local_art_by_title.emplace(local.album, art);
+        }
+
+        // Sidecar .lrc takes precedence over embedded lyrics; both are local.
+        const std::string lrc =
+            LyricsManager::read_local_lrc_file(stored.file_path);
+        std::string text;
+        bool synced = false;
+        std::string source;
+        if (!lrc.empty()) {
+            text = lrc;
+            synced = !LyricsManager::parse_lrc(lrc).empty();
+            source = "local";
+        } else if (!local.embedded_lyrics.empty()) {
+            text = local.embedded_lyrics;
+            synced = !LyricsManager::parse_lrc(text).empty();
+            source = "embedded";
+        }
+        if (text.empty()) continue;
+
+        std::lock_guard<std::mutex> lock(storage_mutex_);
+        const auto existing = storage_->get_lyrics(stored.id);
+        if (!existing || existing->text != text || existing->synced != synced) {
+            storage_->set_lyrics(stored.id, text, synced, source);
+            ++lyrics_imported;
+        }
+    }
+
+    for (auto& album : albums) {
+        std::string art;
+        if (auto it = local_art_by_album.find(album_key(album.artist, album.title));
+            it != local_art_by_album.end()) {
+            art = it->second;
+        } else if (auto title_it = local_art_by_title.find(album.title);
+                   title_it != local_art_by_title.end()) {
+            art = title_it->second;
+        }
+        if (album.artwork_path == art) continue;
+
+        {
+            std::lock_guard<std::mutex> lock(storage_mutex_);
+            storage_->update_album_artwork(album.id, art);
+        }
+        album.artwork_path = art;
+        metadata_changed = true;
+        if (artwork_manager_) {
+            artwork_manager_->invalidate(
+                ArtworkManager::make_key(album.artist, album.title));
+        }
+    }
+
+    for (auto& artist : artists) {
+        bool stale = artist.artwork_path.empty() ||
+                     looks_like_downloaded_artwork(artist.artwork_path);
+        if (!stale) {
+            std::error_code ec;
+            stale = !std::filesystem::exists(artist.artwork_path, ec);
+        }
+        if (!stale) continue;
+
+        const std::string art = find_local_artist_artwork(artist, true);
+        if (artist.artwork_path == art) continue;
+
+        {
+            std::lock_guard<std::mutex> lock(storage_mutex_);
+            storage_->update_artist_artwork(artist.id, art);
+        }
+        artist.artwork_path = art;
+        metadata_changed = true;
+        if (artwork_manager_) {
+            artwork_manager_->invalidate(
+                ArtworkManager::make_key("", artist.name));
+        }
+    }
+
+    if (lyrics_imported > 0) {
+        std::cout << "BackendController: imported " << lyrics_imported
+                  << " local lyrics entries" << std::endl;
+    }
+    if (metadata_changed) emit_library_changed();
 }
 
 void BackendController::refresh_album_artwork_from_itunes(bool force) {
@@ -1933,6 +2164,18 @@ void BackendController::toggle_play_pause() {
         }
     }
 
+    // The audio-engine state callback ignores Paused transitions while
+    // `pausing_` is set. Going through pause() keeps playing_ and the UI in
+    // sync; resuming must clear the stale guard before reporting Playing.
+    if (is_playback_source_internal()) {
+        if (playing_) {
+            pause();
+            return;
+        }
+        pausing_ = false;
+        set_playing(true);
+    }
+
     playback_source_manager_->play_pause();
     // State change will be reflected via callbacks (audio engine or MPRIS).
     sync_mpris_capabilities();
@@ -2052,7 +2295,9 @@ void BackendController::seek(double position_seconds) {
 void BackendController::set_volume(double volume) {
     volume_ = std::clamp(volume, 0.0, 1.0);
     playback_source_manager_->set_volume(volume_);
-    if (storage_) {
+    if (storage_ && volume_ > 0.0) {
+        // Do not persist mute as a permanent volume of zero; the next session
+        // would otherwise start completely silent.
         std::lock_guard<std::mutex> lock(storage_mutex_);
         storage_->set_preference("player.volume", std::to_string(volume_));
     }
@@ -2254,11 +2499,19 @@ bool BackendController::can_seek() const {
 }
 
 void BackendController::toggle_like(const std::string& track_id) {
+    bool changed = false;
     {
         std::lock_guard<std::mutex> lock(storage_mutex_);
-        storage_->toggle_like(track_id);
+        changed = storage_->toggle_like(track_id);
     }
-    invalidate_read_caches();
+    if (!changed) return;
+
+    // Let the clicked row's handler finish before pages refresh and destroy
+    // the widget that emitted the change, just as for album favourites.
+    g_idle_add([](gpointer data) -> gboolean {
+        static_cast<BackendController*>(data)->emit_library_changed();
+        return G_SOURCE_REMOVE;
+    }, this);
 }
 
 void BackendController::toggle_favorite_album(const std::string& album_id) {

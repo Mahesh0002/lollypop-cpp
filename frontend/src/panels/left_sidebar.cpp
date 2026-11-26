@@ -417,7 +417,7 @@ void LeftSidebar::create_navigation_items() {
         {"genres",    "Genres",           "audio-x-generic-symbolic"},
         {"songs",     "Songs",            "media-playlist-repeat-symbolic"},
         {"favorites", "Favourite Albums", "starred-symbolic"},
-        {"liked",     "Liked Music",      "star-new-symbolic"},
+        {"liked",     "Favourite Music",  "star-new-symbolic"},
     };
     for (const auto& item : nav_items_) {
         add_nav_row(item);

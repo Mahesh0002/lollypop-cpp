@@ -152,6 +152,34 @@ private:
 };
 
 // ============================================================================
+// External Artist Information Provider (Wikipedia REST API - no API key)
+// https://en.wikipedia.org/api/rest_v1/#/Page%20content
+// ============================================================================
+
+class ArtistInfoProvider {
+public:
+    struct BiographyResult {
+        std::string extract;
+        std::string title;
+        std::string description;
+    };
+
+    // Fetch a short artist biography. Returns an empty optional when the
+    // service has no article or the request fails.
+    static std::optional<BiographyResult> fetch_biography(const std::string& artist_name);
+
+    // Parse a Wikipedia summary response. Kept separate for unit testing.
+    static std::optional<BiographyResult> parse_biography(const std::string& json_body);
+
+    static void set_user_agent(const std::string& ua);
+    static void set_base_url(const std::string& url);
+
+private:
+    static std::string user_agent_;
+    static std::string base_url_;
+};
+
+// ============================================================================
 // Provider Integration Helpers
 // ============================================================================
 

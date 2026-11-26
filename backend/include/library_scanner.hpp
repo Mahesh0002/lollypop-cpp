@@ -9,6 +9,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -59,6 +60,11 @@ public:
     // with extracted metadata so unchanged files do not need TagLib parsing.
     // If empty, incremental scanning is disabled (full scan every time).
     void set_incremental_cache_path(const std::string& cache_path);
+
+    // Metadata restored from the on-disk scan cache for a previously scanned
+    // file. Used by the local-first metadata pipeline to recover artwork and
+    // tags without re-parsing the audio file.
+    std::optional<Track> get_cached_track(const std::string& file_path);
 
 private:
     struct Impl;

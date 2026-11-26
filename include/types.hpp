@@ -50,6 +50,11 @@ struct Artist {
     std::vector<std::string> album_ids;
 };
 
+struct ArtistInfo {
+    std::string biography;
+    std::string source;
+};
+
 struct Playlist {
     std::string id;
     std::string name;
