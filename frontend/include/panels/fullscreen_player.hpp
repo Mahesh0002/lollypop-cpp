@@ -62,7 +62,7 @@ private:
     ILibraryService* library_service_;
 
     GtkWidget* root_;
-    GtkWidget* content_box_;
+    GtkWidget* content_overlay_;
     GtkWidget* center_box_;
     GtkWidget* title_label_;
     GtkWidget* subtitle_label_;
@@ -76,6 +76,7 @@ private:
     GtkWidget* loop_button_;
     GtkWidget* lyrics_toggle_;
     GtkWidget* lyrics_revealer_;
+    GtkWidget* lyrics_frame_;
 
     GtkAdjustment* volume_adjustment_;
 

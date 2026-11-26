@@ -32,6 +32,23 @@ constexpr int kLyricsPanelWidth = 480;
 constexpr int kLyricsGap = 100;
 constexpr double kLyricsAnimMs = 220.0;
 
+int effective_lyrics_panel_width(int root_width, int center_width) {
+    const int available = root_width - center_width - kLyricsGap;
+    return std::min(kLyricsPanelWidth, std::max(240, available));
+}
+
+int lyrics_slide_offset(int root_width, int center_width, double reveal) {
+    if (reveal <= 0.0) return 0;
+    const int panel = static_cast<int>(std::lround(
+        effective_lyrics_panel_width(root_width, center_width) * reveal));
+    const int gap = static_cast<int>(std::lround(kLyricsGap * reveal));
+    const double centered =
+        0.5 * (static_cast<double>(center_width) - root_width +
+               2.0 * panel + 2.0 * gap);
+    const int max_offset = std::max(0, (root_width - center_width) / 2 - 12);
+    return std::clamp(static_cast<int>(std::lround(centered)), 0, max_offset);
+}
+
 GtkWidget* create_icon_button(const char* icon_name,
                               int pixel_size,
                               const char* tooltip,
@@ -76,7 +93,7 @@ FullscreenPlayer::FullscreenPlayer(MainWindow* main_window,
       lyrics_service_(lyrics_service),
       library_service_(library_service),
       root_(nullptr),
-      content_box_(nullptr),
+      content_overlay_(nullptr),
       center_box_(nullptr),
       title_label_(nullptr),
       subtitle_label_(nullptr),
@@ -90,6 +107,7 @@ FullscreenPlayer::FullscreenPlayer(MainWindow* main_window,
       loop_button_(nullptr),
       lyrics_toggle_(nullptr),
       lyrics_revealer_(nullptr),
+      lyrics_frame_(nullptr),
       volume_adjustment_(nullptr) {
     setup_ui();
     gtk_widget_add_tick_callback(root_, on_allocation_tick, this, nullptr);
@@ -108,22 +126,22 @@ void FullscreenPlayer::setup_ui() {
 
     create_top_bar();
 
-    content_box_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_add_css_class(content_box_, "fullscreen-content");
-    gtk_widget_set_hexpand(content_box_, TRUE);
-    gtk_widget_set_vexpand(content_box_, TRUE);
-    gtk_widget_set_visible(content_box_, TRUE);
-    safe_box_append(GTK_BOX(root_), content_box_);
+    content_overlay_ = gtk_overlay_new();
+    gtk_widget_add_css_class(content_overlay_, "fullscreen-content");
+    gtk_widget_set_hexpand(content_overlay_, TRUE);
+    gtk_widget_set_vexpand(content_overlay_, TRUE);
+    gtk_widget_set_visible(content_overlay_, TRUE);
+    safe_box_append(GTK_BOX(root_), content_overlay_);
 
     center_box_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_widget_add_css_class(center_box_, "fullscreen-player-center");
     gtk_widget_set_size_request(center_box_, 940, -1);
     gtk_widget_set_hexpand(center_box_, TRUE);
     gtk_widget_set_vexpand(center_box_, TRUE);
-    gtk_widget_set_halign(center_box_, GTK_ALIGN_FILL);
+    gtk_widget_set_halign(center_box_, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(center_box_, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(center_box_, TRUE);
-    safe_box_append(GTK_BOX(content_box_), center_box_);
+    gtk_overlay_set_child(GTK_OVERLAY(content_overlay_), center_box_);
 
     create_artwork();
     create_track_info();
@@ -368,6 +386,7 @@ void FullscreenPlayer::create_lyrics() {
     }
 
     GtkWidget* frame = gtk_frame_new(nullptr);
+    lyrics_frame_ = frame;
     gtk_widget_add_css_class(frame, "fullscreen-lyrics-frame");
     gtk_widget_set_hexpand(frame, TRUE);
     gtk_widget_set_vexpand(frame, TRUE);
@@ -389,7 +408,7 @@ void FullscreenPlayer::create_lyrics() {
     gtk_widget_set_visible(lyrics_revealer_, TRUE);
     gtk_revealer_set_child(GTK_REVEALER(lyrics_revealer_), frame);
 
-    safe_box_append(GTK_BOX(content_box_), lyrics_revealer_);
+    gtk_overlay_add_overlay(GTK_OVERLAY(content_overlay_), lyrics_revealer_);
 }
 
 void FullscreenPlayer::sync_from_backend() {
@@ -549,14 +568,17 @@ gboolean FullscreenPlayer::on_allocation_tick(GtkWidget* widget, GdkFrameClock*,
     self->last_width_ = width;
     self->last_height_ = height;
 
-    const int panel_width = static_cast<int>(
-        std::lround(kLyricsPanelWidth * self->lyrics_reveal_));
-    const int gap = static_cast<int>(
-        std::lround(kLyricsGap * self->lyrics_reveal_));
-    const int center_width =
-        std::clamp(width - panel_width - gap - 48, 360, 940);
+    const int center_width = std::clamp(width - 48, 360, 940);
     if (self->center_box_) {
         gtk_widget_set_size_request(self->center_box_, center_width, -1);
+        const int offset =
+            lyrics_slide_offset(width, center_width, self->lyrics_reveal_);
+        gtk_widget_set_margin_end(self->center_box_, offset * 2);
+    }
+    if (self->lyrics_frame_) {
+        gtk_widget_set_size_request(
+            self->lyrics_frame_,
+            effective_lyrics_panel_width(width, center_width), -1);
     }
 
     // Lyrics now live beside the player, so only metadata and transport need
@@ -586,10 +608,17 @@ gboolean FullscreenPlayer::on_lyrics_animation_tick(GtkWidget*, GdkFrameClock*,
         self->lyrics_reveal_from_ +
         (self->lyrics_reveal_target_ - self->lyrics_reveal_from_) * eased;
 
-    if (self->center_box_) {
-        gtk_widget_set_margin_end(
-            self->center_box_,
-            static_cast<int>(std::lround(kLyricsGap * self->lyrics_reveal_)));
+    if (self->center_box_ && self->root_) {
+        const int width = gtk_widget_get_width(self->root_);
+        const int center_width = gtk_widget_get_width(self->center_box_);
+        const int offset =
+            lyrics_slide_offset(width, center_width, self->lyrics_reveal_);
+        gtk_widget_set_margin_end(self->center_box_, offset * 2);
+        if (self->lyrics_frame_) {
+            gtk_widget_set_size_request(
+                self->lyrics_frame_,
+                effective_lyrics_panel_width(width, center_width), -1);
+        }
     }
     if (self->root_) gtk_widget_queue_resize(self->root_);
     self->last_height_ = 0;
