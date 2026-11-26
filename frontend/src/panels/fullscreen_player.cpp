@@ -237,9 +237,9 @@ void FullscreenPlayer::create_progress() {
 void FullscreenPlayer::create_controls() {
     GtkWidget* row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_widget_add_css_class(row, "fullscreen-controls");
-    gtk_box_set_homogeneous(GTK_BOX(row), FALSE);
+    gtk_box_set_homogeneous(GTK_BOX(row), TRUE);
     gtk_widget_set_hexpand(row, TRUE);
-    gtk_widget_set_halign(row, GTK_ALIGN_CENTER);
+    gtk_widget_set_halign(row, GTK_ALIGN_FILL);
     gtk_widget_set_valign(row, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(row, TRUE);
 
@@ -286,6 +286,11 @@ void FullscreenPlayer::create_controls() {
                      G_CALLBACK(on_lyrics_toggled), this);
     safe_box_append(GTK_BOX(row), lyrics_toggle_);
 
+    for (GtkWidget* button = gtk_widget_get_first_child(row); button;
+         button = gtk_widget_get_next_sibling(button)) {
+        gtk_widget_set_hexpand(button, TRUE);
+    }
+
     safe_box_append(GTK_BOX(center_box_), row);
 }
 
@@ -293,12 +298,13 @@ void FullscreenPlayer::create_volume() {
     GtkWidget* row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_widget_add_css_class(row, "fullscreen-volume-row");
     gtk_widget_set_hexpand(row, TRUE);
-    gtk_widget_set_halign(row, GTK_ALIGN_CENTER);
+    gtk_widget_set_halign(row, GTK_ALIGN_FILL);
     gtk_widget_set_valign(row, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(row, TRUE);
 
     volume_button_ = create_icon_button(
         "audio-volume-high-symbolic", 20, "Volume", "Volume");
+    gtk_widget_set_halign(volume_button_, GTK_ALIGN_START);
     g_signal_connect(volume_button_, "clicked",
                      G_CALLBACK(on_volume_clicked), this);
     safe_box_append(GTK_BOX(row), volume_button_);
@@ -309,6 +315,7 @@ void FullscreenPlayer::create_volume() {
                                      GTK_REVEALER_TRANSITION_TYPE_SLIDE_RIGHT);
     gtk_revealer_set_transition_duration(GTK_REVEALER(volume_revealer_), 180);
     gtk_revealer_set_reveal_child(GTK_REVEALER(volume_revealer_), FALSE);
+    gtk_widget_set_halign(volume_revealer_, GTK_ALIGN_START);
     gtk_widget_set_valign(volume_revealer_, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(volume_revealer_, TRUE);
 
