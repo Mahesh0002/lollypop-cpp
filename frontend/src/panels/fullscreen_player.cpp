@@ -45,22 +45,6 @@ GtkWidget* create_icon_button(const char* icon_name,
     return button;
 }
 
-GtkWidget* create_menu_icon_button(const char* icon_name,
-                                   int pixel_size,
-                                   const char* tooltip,
-                                   const char* accessible_label) {
-    GtkWidget* button = gtk_menu_button_new();
-    gtk_widget_add_css_class(button, "fullscreen-control-button");
-    gtk_widget_set_size_request(button, 44, 44);
-    gtk_widget_set_tooltip_text(button, tooltip);
-    accessibility::set_label(button, accessible_label);
-
-    GtkWidget* icon = gtk_image_new_from_icon_name(icon_name);
-    gtk_image_set_pixel_size(GTK_IMAGE(icon), pixel_size);
-    safe_menu_button_set_child(GTK_MENU_BUTTON(button), icon);
-    return button;
-}
-
 GtkWidget* create_icon_toggle_button(const char* icon_name,
                                      int pixel_size,
                                      const char* tooltip,
@@ -93,6 +77,8 @@ FullscreenPlayer::FullscreenPlayer(MainWindow* main_window,
       subtitle_label_(nullptr),
       play_button_(nullptr),
       play_icon_(nullptr),
+      volume_button_(nullptr),
+      volume_revealer_(nullptr),
       volume_scale_(nullptr),
       shuffle_button_(nullptr),
       repeat_button_(nullptr),
@@ -225,7 +211,7 @@ void FullscreenPlayer::create_progress() {
     safe_box_append(GTK_BOX(row), prev_button);
 
     progress_wave_ = std::make_unique<ProgressWave>();
-    progress_wave_->set_wave_frequency(18.0);
+    progress_wave_->set_wave_frequency(12.0);
     GtkWidget* progress = progress_wave_->get_widget();
     gtk_widget_add_css_class(progress, "fullscreen-progress");
     gtk_widget_set_hexpand(progress, TRUE);
@@ -245,38 +231,13 @@ void FullscreenPlayer::create_progress() {
     g_signal_connect(next_button, "clicked", G_CALLBACK(on_next_clicked), this);
     safe_box_append(GTK_BOX(row), next_button);
 
-    play_button_ = gtk_button_new();
-    gtk_button_set_has_frame(GTK_BUTTON(play_button_), FALSE);
-    gtk_widget_add_css_class(play_button_, "fullscreen-play-button");
-    gtk_widget_set_size_request(play_button_, 56, 56);
-    gtk_widget_set_tooltip_text(play_button_, "Play");
-    accessibility::set_label(play_button_, "Start playback");
-    play_icon_ = gtk_image_new_from_icon_name("media-playback-start-symbolic");
-    gtk_image_set_pixel_size(GTK_IMAGE(play_icon_), 26);
-    safe_button_set_child(GTK_BUTTON(play_button_), play_icon_);
-    g_signal_connect(play_button_, "clicked", G_CALLBACK(on_play_clicked), this);
-    safe_box_append(GTK_BOX(row), play_button_);
-
-    lyrics_toggle_ = gtk_toggle_button_new();
-    gtk_button_set_has_frame(GTK_BUTTON(lyrics_toggle_), FALSE);
-    gtk_widget_add_css_class(lyrics_toggle_, "fullscreen-control-button");
-    gtk_widget_set_size_request(lyrics_toggle_, 44, 44);
-    gtk_widget_set_tooltip_text(lyrics_toggle_, "Lyrics");
-    accessibility::set_label(lyrics_toggle_, "Show lyrics");
-    GtkWidget* lyrics_icon = gtk_image_new_from_icon_name("text-x-generic-symbolic");
-    gtk_image_set_pixel_size(GTK_IMAGE(lyrics_icon), 20);
-    safe_button_set_child(GTK_BUTTON(lyrics_toggle_), lyrics_icon);
-    g_signal_connect(lyrics_toggle_, "toggled",
-                     G_CALLBACK(on_lyrics_toggled), this);
-    safe_box_append(GTK_BOX(row), lyrics_toggle_);
-
     safe_box_append(GTK_BOX(center_box_), row);
 }
 
 void FullscreenPlayer::create_controls() {
-    GtkWidget* row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget* row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_widget_add_css_class(row, "fullscreen-controls");
-    gtk_box_set_homogeneous(GTK_BOX(row), TRUE);
+    gtk_box_set_homogeneous(GTK_BOX(row), FALSE);
     gtk_widget_set_hexpand(row, TRUE);
     gtk_widget_set_halign(row, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(row, GTK_ALIGN_CENTER);
@@ -300,42 +261,71 @@ void FullscreenPlayer::create_controls() {
                      G_CALLBACK(on_loop_toggled), this);
     safe_box_append(GTK_BOX(row), loop_button_);
 
+    play_button_ = gtk_button_new();
+    gtk_button_set_has_frame(GTK_BUTTON(play_button_), FALSE);
+    gtk_widget_add_css_class(play_button_, "fullscreen-play-button");
+    gtk_widget_set_size_request(play_button_, 44, 44);
+    gtk_widget_set_tooltip_text(play_button_, "Play");
+    accessibility::set_label(play_button_, "Start playback");
+    play_icon_ = gtk_image_new_from_icon_name("media-playback-start-symbolic");
+    gtk_image_set_pixel_size(GTK_IMAGE(play_icon_), 24);
+    safe_button_set_child(GTK_BUTTON(play_button_), play_icon_);
+    g_signal_connect(play_button_, "clicked", G_CALLBACK(on_play_clicked), this);
+    safe_box_append(GTK_BOX(row), play_button_);
+
+    lyrics_toggle_ = gtk_toggle_button_new();
+    gtk_button_set_has_frame(GTK_BUTTON(lyrics_toggle_), FALSE);
+    gtk_widget_add_css_class(lyrics_toggle_, "fullscreen-control-button");
+    gtk_widget_set_size_request(lyrics_toggle_, 44, 44);
+    gtk_widget_set_tooltip_text(lyrics_toggle_, "Lyrics");
+    accessibility::set_label(lyrics_toggle_, "Show lyrics");
+    GtkWidget* lyrics_icon = gtk_image_new_from_icon_name("text-x-generic-symbolic");
+    gtk_image_set_pixel_size(GTK_IMAGE(lyrics_icon), 20);
+    safe_button_set_child(GTK_BUTTON(lyrics_toggle_), lyrics_icon);
+    g_signal_connect(lyrics_toggle_, "toggled",
+                     G_CALLBACK(on_lyrics_toggled), this);
+    safe_box_append(GTK_BOX(row), lyrics_toggle_);
+
     safe_box_append(GTK_BOX(center_box_), row);
 }
 
 void FullscreenPlayer::create_volume() {
-    GtkWidget* row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    GtkWidget* row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_widget_add_css_class(row, "fullscreen-volume-row");
     gtk_widget_set_hexpand(row, TRUE);
     gtk_widget_set_halign(row, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(row, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(row, TRUE);
 
-    GtkWidget* volume_button = create_menu_icon_button(
+    volume_button_ = create_icon_button(
         "audio-volume-high-symbolic", 20, "Volume", "Volume");
-    GtkWidget* volume_popover = gtk_popover_new();
-    GtkWidget* volume_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
-    gtk_widget_set_margin_start(volume_box, 12);
-    gtk_widget_set_margin_end(volume_box, 12);
-    gtk_widget_set_margin_top(volume_box, 12);
-    gtk_widget_set_margin_bottom(volume_box, 12);
-    gtk_widget_set_visible(volume_box, TRUE);
+    g_signal_connect(volume_button_, "clicked",
+                     G_CALLBACK(on_volume_clicked), this);
+    safe_box_append(GTK_BOX(row), volume_button_);
+
+    volume_revealer_ = gtk_revealer_new();
+    gtk_widget_add_css_class(volume_revealer_, "fullscreen-volume-revealer");
+    gtk_revealer_set_transition_type(GTK_REVEALER(volume_revealer_),
+                                     GTK_REVEALER_TRANSITION_TYPE_SLIDE_RIGHT);
+    gtk_revealer_set_transition_duration(GTK_REVEALER(volume_revealer_), 180);
+    gtk_revealer_set_reveal_child(GTK_REVEALER(volume_revealer_), FALSE);
+    gtk_widget_set_valign(volume_revealer_, GTK_ALIGN_CENTER);
+    gtk_widget_set_visible(volume_revealer_, TRUE);
 
     volume_adjustment_ = gtk_adjustment_new(1.0, 0.0, 1.0, 0.01, 0.1, 0.0);
     volume_scale_ = gtk_scale_new(GTK_ORIENTATION_HORIZONTAL,
                                   GTK_ADJUSTMENT(volume_adjustment_));
     gtk_widget_add_css_class(volume_scale_, "fullscreen-volume");
     gtk_scale_set_draw_value(GTK_SCALE(volume_scale_), FALSE);
-    gtk_widget_set_size_request(volume_scale_, 180, -1);
+    gtk_widget_set_size_request(volume_scale_, 190, 44);
+    gtk_widget_set_valign(volume_scale_, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(volume_scale_, TRUE);
     accessibility::set_label(volume_scale_, "Volume level");
     g_signal_connect(volume_adjustment_, "value-changed",
                      G_CALLBACK(on_volume_value_changed), this);
 
-    safe_box_append(GTK_BOX(volume_box), volume_scale_);
-    gtk_popover_set_child(GTK_POPOVER(volume_popover), volume_box);
-    gtk_menu_button_set_popover(GTK_MENU_BUTTON(volume_button), volume_popover);
-    safe_box_append(GTK_BOX(row), volume_button);
+    gtk_revealer_set_child(GTK_REVEALER(volume_revealer_), volume_scale_);
+    safe_box_append(GTK_BOX(row), volume_revealer_);
     safe_box_append(GTK_BOX(center_box_), row);
 }
 
@@ -584,6 +574,19 @@ void FullscreenPlayer::on_next_clicked(GtkButton*, gpointer user_data) {
     if (IPlayerService* backend = self->main_window_->get_backend()) {
         backend->next_track();
     }
+}
+
+void FullscreenPlayer::on_volume_clicked(GtkButton* button,
+                                         gpointer user_data) {
+    auto* self = static_cast<FullscreenPlayer*>(user_data);
+    if (!self->volume_revealer_) return;
+    const bool visible =
+        !gtk_revealer_get_reveal_child(GTK_REVEALER(self->volume_revealer_));
+    gtk_revealer_set_reveal_child(GTK_REVEALER(self->volume_revealer_), visible);
+    gtk_widget_set_tooltip_text(GTK_WIDGET(button),
+                                visible ? "Hide volume slider" : "Volume");
+    accessibility::set_label(GTK_WIDGET(button),
+                             visible ? "Hide volume slider" : "Volume");
 }
 
 void FullscreenPlayer::on_volume_value_changed(GtkAdjustment* adjustment,

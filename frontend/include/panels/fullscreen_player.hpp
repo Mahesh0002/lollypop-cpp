@@ -5,9 +5,9 @@
  *   [close]
  *        large square artwork
  *        title / artist — album
- *   [prev] [wavy progress] [next] [play/pause] [lyrics]
- *        [shuffle] [repeat all] [repeat one]
- *                    [volume]
+ *   [prev] [wavy progress] [next]
+ *   [shuffle] [repeat all] [repeat one] [play/pause] [lyrics]
+ *          [volume] [inline volume slider]
  *        collapsible synced lyrics
  *
  * All state is observed from IPlayerService through MainWindow; mutations go
@@ -68,6 +68,8 @@ private:
     GtkWidget* subtitle_label_;
     GtkWidget* play_button_;
     GtkWidget* play_icon_;
+    GtkWidget* volume_button_;
+    GtkWidget* volume_revealer_;
     GtkWidget* volume_scale_;
     GtkWidget* shuffle_button_;
     GtkWidget* repeat_button_;
@@ -111,6 +113,7 @@ private:
     static void on_play_clicked(GtkButton* button, gpointer user_data);
     static void on_prev_clicked(GtkButton* button, gpointer user_data);
     static void on_next_clicked(GtkButton* button, gpointer user_data);
+    static void on_volume_clicked(GtkButton* button, gpointer user_data);
     static void on_volume_value_changed(GtkAdjustment* adjustment,
                                         gpointer user_data);
     static void on_shuffle_toggled(GtkToggleButton* button, gpointer user_data);

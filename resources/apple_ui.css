@@ -395,8 +395,8 @@ button {
 }
 
 .fullscreen-play-button {
-    min-width: 56px;
-    min-height: 56px;
+    min-width: 44px;
+    min-height: 44px;
     padding: 0;
     border: none;
     border-radius: 50%;
@@ -450,26 +450,28 @@ button {
     margin-top: 0;
 }
 
-.fullscreen-player popover checkbutton,
-.fullscreen-player popover label {
-    color: var(--text-primary);
+.fullscreen-volume-revealer,
+.fullscreen-volume {
+    min-height: 44px;
+    margin: 0;
+    padding: 0;
 }
 
 .fullscreen-volume trough {
-    min-height: 4px;
-    border-radius: 2px;
+    min-height: 6px;
+    border-radius: 3px;
     background-color: var(--border-subtle);
 }
 
 .fullscreen-volume trough highlight {
     background-color: var(--accent-color);
-    border-radius: 2px;
+    border-radius: 3px;
 }
 
 .fullscreen-volume slider {
-    min-width: 12px;
-    min-height: 12px;
-    margin: -4px 0;
+    min-width: 14px;
+    min-height: 14px;
+    margin: 0;
     border: none;
     border-radius: 50%;
     background-color: var(--accent-color);
