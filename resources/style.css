@@ -1441,6 +1441,14 @@ listboxrow:selected {
     padding: 0;
 }
 
+/* Scroll spacers: head pins the active line to the upper-third anchor, tail
+   lets the final line reach that same anchor. */
+.lyrics-head-spacer,
+.lyrics-tail-spacer {
+    background-color: transparent;
+    min-width: 0;
+}
+
 .lyrics-row {
     background-color: transparent;
     border-radius: var(--radius-sm);
@@ -1449,14 +1457,19 @@ listboxrow:selected {
     font-weight: var(--font-weight-medium);
     padding: 6px 12px;
     min-width: 0;
+    transition: color var(--motion-base) var(--ease-out);
 }
 
 .lyrics-row.future {
     color: var(--text-secondary);
+    padding-top: 8px;
+    padding-bottom: 8px;
 }
 
 .lyrics-row.past {
     color: var(--text-tertiary);
+    padding-top: 8px;
+    padding-bottom: 8px;
 }
 
 .lyrics-row.active {
@@ -1477,6 +1490,7 @@ listboxrow:selected {
     background-color: transparent;
     color: inherit;
     min-width: 0;
+    transition: color var(--motion-base) var(--ease-out);
 }
 
 .lyrics-message {

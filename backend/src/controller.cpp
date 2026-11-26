@@ -785,12 +785,16 @@ void BackendController::setup_audio_callbacks() {
 void BackendController::setup_mpris_callbacks() {
     if (!mpris_manager_) return;
 
-    mpris_manager_->set_playback_state_changed_callback([this](bool) {
-        // External player state is informational only; do not overwrite
-        // the authoritative internal playing_ unless we are in external mode.
+    // External player events must never overwrite the state exported for our
+    // own internal AudioEngine. Otherwise the shell sees a stale "Paused"
+    // status and its next PlayPause toggles us in the wrong direction.
+    mpris_manager_->set_playback_state_changed_callback([this](bool playing) {
+        if (is_playback_source_internal()) return;
+        set_playing(playing);
     });
 
     mpris_manager_->set_position_changed_callback([this](double position, double duration) {
+        if (is_playback_source_internal()) return;
         position_ = position;
         duration_ = duration;
         emit_position_changed(position_, duration_);
@@ -801,6 +805,8 @@ void BackendController::setup_mpris_callbacks() {
     });
 
     mpris_manager_->set_active_player_changed_callback([this](const MprisPlayerInfo& info) {
+        if (is_playback_source_internal()) return;
+        set_playing(info.is_playing);
         if (mpris_server_) {
             mpris_server_->update_playback_status(info.is_playing);
         }
@@ -2164,9 +2170,9 @@ void BackendController::toggle_play_pause() {
         }
     }
 
-    // The audio-engine state callback ignores Paused transitions while
-    // `pausing_` is set. Going through pause() keeps playing_ and the UI in
-    // sync; resuming must clear the stale guard before reporting Playing.
+    // For internal playback, playing_ is authoritative. Drive the engine to
+    // the chosen state instead of asking play_pause() to infer it from a
+    // possibly stale GStreamer state left by an interrupted pause.
     if (is_playback_source_internal()) {
         if (playing_) {
             pause();
@@ -2174,10 +2180,13 @@ void BackendController::toggle_play_pause() {
         }
         pausing_ = false;
         set_playing(true);
+        playback_source_manager_->play();
+        sync_mpris_capabilities();
+        return;
     }
 
+    // External players own their state; delegate the toggle to them.
     playback_source_manager_->play_pause();
-    // State change will be reflected via callbacks (audio engine or MPRIS).
     sync_mpris_capabilities();
 }
 
@@ -2557,32 +2566,42 @@ void BackendController::setup_cava_callbacks() {
 }
 
 void BackendController::setup_mpris_server_callbacks() {
-    // Remote MPRIS client (media keys, sound menu) wants to play/pause
+    // Remote MPRIS client (media keys, sound menu) wants to play/pause.
     mpris_server_->set_playback_state_changed_callback([this](bool playing) {
-        if (playing) {
-            // MPRIS Play
-            if (playing_) {
-                // Already playing: just ensure the engine is running.
-                audio_engine_->play();
-                return;
-            }
-            if (current_track_.id.empty()) {
-                if (!queue_manager_->queue().empty()) {
-                    start_queue_index(queue_manager_->current_index());
-                }
-                return;
-            }
-            if (audio_engine_->get_state() == AudioEngine::PlaybackState::Stopped ||
-                audio_engine_->get_state() == AudioEngine::PlaybackState::Error) {
-                start_queue_index(queue_manager_->current_index());
-                return;
-            }
-            audio_engine_->play();
-            set_playing(true);
-        } else {
-            // MPRIS Pause
+        if (!playing) {
             pause();
+            return;
         }
+
+        if (!is_playback_source_internal()) {
+            set_playing(true);
+            playback_source_manager_->play();
+            return;
+        }
+
+        if (playing_) {
+            // Keep the engine aligned with the authoritative state without
+            // treating this as a toggle.
+            pausing_ = false;
+            set_playing(true);
+            playback_source_manager_->play();
+            return;
+        }
+
+        if (current_track_.id.empty()) {
+            if (!queue_manager_->queue().empty()) {
+                start_queue_index(queue_manager_->current_index());
+            }
+            return;
+        }
+        if (audio_engine_->get_state() == AudioEngine::PlaybackState::Stopped ||
+            audio_engine_->get_state() == AudioEngine::PlaybackState::Error) {
+            start_queue_index(queue_manager_->current_index());
+            return;
+        }
+        pausing_ = false;
+        set_playing(true);
+        playback_source_manager_->play();
     });
     mpris_server_->set_play_pause_callback([this] { toggle_play_pause(); });
     mpris_server_->set_volume_changed_callback([this](double volume) {

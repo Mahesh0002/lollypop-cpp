@@ -346,8 +346,8 @@ button {
  * its identity in both light and dark application schemes.
  * ========================================================================== */
 .fullscreen-player {
-    --fs-bg: #2B2B33;
-    --fs-text: #FFFFFF;
+    --fs-bg: var(--n-700);
+    --fs-text: var(--n-100);
     --fs-secondary: rgba(255, 255, 255, 0.66);
     --fs-line: rgba(255, 255, 255, 0.22);
     --fs-hover: rgba(255, 255, 255, 0.10);
@@ -423,7 +423,7 @@ button {
 
 .fullscreen-track-title {
     font-family: var(--font-family);
-    font-size: 30px;
+    font-size: var(--font-display-small);
     font-weight: var(--font-weight-semibold);
     letter-spacing: -0.5px;
     color: var(--fs-text);
@@ -431,7 +431,7 @@ button {
 
 .fullscreen-track-subtitle {
     font-family: var(--font-family);
-    font-size: 15px;
+    font-size: var(--font-subhead);
     font-weight: var(--font-weight-regular);
     color: var(--fs-secondary);
 }
@@ -562,17 +562,19 @@ button {
 
 .fullscreen-player .lyrics-heading {
     color: var(--fs-secondary);
-    font-size: 12px;
+    font-size: var(--font-caption1);
 }
 
 .fullscreen-player .lyrics-row {
     padding: 10px 16px;
-    font-size: 21px;
+    font-size: var(--font-title2);
 }
 
 .fullscreen-player .lyrics-row.past,
 .fullscreen-player .lyrics-row.future {
     color: var(--fs-secondary);
+    padding-top: 14px;
+    padding-bottom: 14px;
 }
 
 .fullscreen-player .lyrics-row.active {
@@ -581,11 +583,11 @@ button {
 
 .fullscreen-player .lyrics-row.active .lyrics-line {
     color: var(--fs-text);
-    font-size: 25px;
+    font-size: var(--font-title1);
 }
 
 .fullscreen-player .lyrics-message {
     color: var(--fs-secondary);
-    font-size: 18px;
+    font-size: var(--font-ui-medium);
 }
 

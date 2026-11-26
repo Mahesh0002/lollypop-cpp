@@ -5,6 +5,8 @@
 #include "ui/components/LyricRow.hpp"
 
 #include <gtk/gtk.h>
+#include <algorithm>
+#include <cmath>
 #include <memory>
 
 namespace lollypop {
@@ -100,6 +102,13 @@ void LyricRow::set_gap_phase(double phase) {
     if (line_.is_gap) {
         label_.set_gap_phase(phase);
     }
+}
+
+void LyricRow::set_prominence(double alpha) {
+    alpha = std::clamp(alpha, 0.0, 1.0);
+    if (std::abs(alpha - prominence_) < 0.004) return;
+    prominence_ = alpha;
+    gtk_widget_set_opacity(widget_, alpha);
 }
 
 void LyricRow::on_button_release(GtkGestureClick* gesture, int n_press, double x, double y, gpointer user_data) {

@@ -1,6 +1,6 @@
 /**
  * Lollypop C++ - Synced Lyrics View
- * Scrollable list of lyric rows with auto-scroll and progressive fill
+ * Apple Music-style auto-scrolling list of lyric rows with karaoke fill.
  */
 
 #pragma once
@@ -41,6 +41,8 @@ private:
     GtkWidget* list_box_ = nullptr;
     GtkWidget* heading_ = nullptr;
     GtkWidget* message_label_ = nullptr;
+    GtkWidget* head_spacer_ = nullptr;
+    GtkWidget* tail_spacer_ = nullptr;
 
     std::vector<std::unique_ptr<LyricRow>> rows_;
     std::vector<int> line_starts_;  // start_ms for each line
@@ -48,14 +50,15 @@ private:
     bool synced_ = false;
     int active_index_ = -1;
     int duration_ms_ = 0;
-    bool first_sync_ = true;
+
+    // Continuous-follow state. Anchored scrolling is driven by a persistent
+    // tick callback rather than a one-shot animation per line change.
+    double follow_target_ = 0.0;
+    bool target_valid_ = false;
+    double last_frame_time_ = 0.0;
     double follow_paused_until_ = 0.0;
-    int scroll_token_ = 0;
     bool programmatic_scroll_ = false;
-    guint scroll_source_ = 0;
-    guint anim_source_ = 0;
-    gpointer scroll_data_ = nullptr;
-    gpointer anim_data_ = nullptr;
+    guint tick_id_ = 0;
 
     struct WidgetDeleter {
         void operator()(GtkWidget* w) const {
@@ -68,15 +71,20 @@ private:
     void clear();
     void build_rows();
     void set_active_index(int index);
-    void schedule_scroll(int index, bool animate);
-    void schedule_top(bool animate);
-    void animate_to(double target);
-    void cancel_scroll();
+    void reset_follow();
+    void update_follow_target();
+
+    double row_content_y(GtkWidget* row_widget) const;
+    static double row_height(GtkWidget* row_widget);
+    double compute_scroll_target(GtkAdjustment* adj) const;
+    void update_head_spacer(GtkAdjustment* adj);
+    void update_tail_spacer(GtkAdjustment* adj);
+    void update_row_prominence(GtkAdjustment* adj);
+    void reset_row_prominence();
     void set_adjustment_value(GtkAdjustment* adj, double value);
-    void update_scroll_position();
+
     static void on_vadjustment_changed(GtkAdjustment* adjustment, gpointer user_data);
-    static gboolean on_scroll_measure(gpointer user_data);
-    static gboolean on_animate_step(gpointer user_data);
+    static gboolean on_follow_tick(GtkWidget* widget, GdkFrameClock* clock, gpointer user_data);
 };
 
 } // namespace lollypop

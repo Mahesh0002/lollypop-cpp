@@ -28,6 +28,7 @@ public:
     void set_state(State state);
     void set_progress(double fraction);  // 0.0 - 1.0 for active line
     void set_gap_phase(double phase);    // For pulsing dots
+    void set_prominence(double alpha);   // 0.0 - 1.0 fade based on scroll position
 
     const SyncedLyricLine& get_line() const { return line_; }
     int get_start_ms() const { return line_.start_ms; }
@@ -37,6 +38,7 @@ private:
     GdkRGBA accent_;
     SeekCallback on_seek_;
     State state_ = State::Future;
+    double prominence_ = 1.0;
 
     GtkWidget* widget_ = nullptr;
     SyncedLyricsLabel label_;

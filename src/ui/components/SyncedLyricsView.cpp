@@ -1,12 +1,13 @@
 /**
  * Lollypop C++ - Synced Lyrics View Implementation
- * Auto-scrolling lyric list with progressive fill
+ * Apple Music-style anchored scrolling with per-row fade.
  */
 
 #include "ui/components/SyncedLyricsView.hpp"
 #include "ui/components/LyricRow.hpp"
 
 #include <gtk/gtk.h>
+#include <graphene.h>
 #include <algorithm>
 #include <cmath>
 #include <memory>
@@ -54,8 +55,12 @@ double line_fraction(const SyncedLyricLine& line, int position_ms,
 
 } // namespace
 
-static constexpr double SCROLL_PAUSE_SECONDS = 4.0;
-static constexpr double SCROLL_DURATION = 0.32;
+// The active line sits in the upper third of the visible lyric area, so past
+// lines have room to travel upwards before they fade away.
+static constexpr double kAnchorFraction = 0.28;
+static constexpr double kFallbackAnchorPx = 90.0;
+static constexpr double kScrollTimeConstant = 0.22; // seconds
+static constexpr double kManualPauseSeconds = 4.0;
 static constexpr int LAST_LINE_FALLBACK_MS = 6000;
 
 void SyncedLyricsView::create_widget() {
@@ -96,13 +101,14 @@ void SyncedLyricsView::create_widget() {
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroller_), list_box_);
     gtk_box_append(GTK_BOX(widget_), scroller_);
 
-    // Connect scroll handling
     GtkAdjustment* vadj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(scroller_));
     if (vadj) {
         g_signal_connect(vadj, "value-changed", G_CALLBACK(on_vadjustment_changed), this);
     }
 
     widget_owner_.reset(widget_);
+    tick_id_ = gtk_widget_add_tick_callback(
+        widget_, &SyncedLyricsView::on_follow_tick, this, nullptr);
 }
 
 SyncedLyricsView::SyncedLyricsView(SeekCallback on_seek, bool fullscreen)
@@ -111,24 +117,29 @@ SyncedLyricsView::SyncedLyricsView(SeekCallback on_seek, bool fullscreen)
 }
 
 SyncedLyricsView::~SyncedLyricsView() {
-    cancel_scroll();
+    // The widget can outlive this object (parents keep their own ref), so the
+    // tick callback must be detached explicitly.
+    if (widget_ && tick_id_) {
+        gtk_widget_remove_tick_callback(widget_, tick_id_);
+        tick_id_ = 0;
+    }
 }
 
 void SyncedLyricsView::clear() {
-    cancel_scroll();
     synced_ = false;
     active_index_ = -1;
     rows_.clear();
     line_starts_.clear();
     current_lyrics_.lines.clear();
     duration_ms_ = 0;
-    first_sync_ = true;
+    target_valid_ = false;
     follow_paused_until_ = 0.0;
 
-    // GTK wraps every appended widget in an internal GtkListBoxRow. Walking
-    // gtk_widget_get_first_child() removes those wrappers, not the original
-    // children, and can leave stale widgets behind. remove_all() clears both.
+    // GTK wraps every appended widget in an internal GtkListBoxRow. remove_all()
+    // clears both the wrappers and the original children.
     gtk_list_box_remove_all(GTK_LIST_BOX(list_box_));
+    head_spacer_ = nullptr;
+    tail_spacer_ = nullptr;
     message_label_ = nullptr;
 }
 
@@ -143,12 +154,10 @@ void SyncedLyricsView::set_lyrics(const SyncedLyrics& lyrics) {
     current_lyrics_ = lyrics;
     synced_ = true;
     duration_ms_ = 0;
-    first_sync_ = true;
-    follow_paused_until_ = 0.0;
+    reset_follow();
 
     build_rows();
 
-    // Show the scroller
     gtk_widget_set_visible(scroller_, TRUE);
     if (heading_) gtk_widget_set_visible(heading_, TRUE);
 }
@@ -157,6 +166,13 @@ void SyncedLyricsView::build_rows() {
     line_starts_.clear();
     line_starts_.reserve(current_lyrics_.lines.size());
 
+    // Leading spacer puts the first line at the anchor, so every line change
+    // produces real upward scroll instead of clamping the target to zero.
+    head_spacer_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class(head_spacer_, "lyrics-head-spacer");
+    gtk_widget_set_hexpand(head_spacer_, TRUE);
+    gtk_list_box_append(GTK_LIST_BOX(list_box_), head_spacer_);
+
     for (size_t i = 0; i < current_lyrics_.lines.size(); ++i) {
         const auto& line = current_lyrics_.lines[i];
         line_starts_.push_back(line.start_ms);
@@ -164,7 +180,7 @@ void SyncedLyricsView::build_rows() {
         auto row = std::make_unique<LyricRow>(line, accent_,
             [this](int pos_ms) {
                 if (on_seek_) on_seek_(pos_ms);
-            }, 0.5);
+            });
         row->set_accent(accent_);
 
         GtkWidget* row_widget = row->get_widget();
@@ -172,7 +188,13 @@ void SyncedLyricsView::build_rows() {
         rows_.push_back(std::move(row));
     }
 
-    // Set initial state
+    // Extra scrollable space below the last line so it can still reach the
+    // upper-third anchor instead of being stuck at the bottom of the list.
+    tail_spacer_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class(tail_spacer_, "lyrics-tail-spacer");
+    gtk_widget_set_hexpand(tail_spacer_, TRUE);
+    gtk_list_box_append(GTK_LIST_BOX(list_box_), tail_spacer_);
+
     active_index_ = -2;
     set_active_index(-1);
     gtk_widget_show(list_box_);
@@ -249,14 +271,19 @@ void SyncedLyricsView::set_position(int position_ms, int duration_ms) {
     }
     if (end <= start) end = start + 1000;
 
-    // Update progress for active row
-    auto& row = rows_[index];
-    if (current_lyrics_.lines[index].is_gap) {
+    // Update karaoke fill for the active row; scrolling is handled by the tick.
+    const auto line_index = static_cast<size_t>(index);
+    auto& row = rows_[line_index];
+    if (current_lyrics_.lines[line_index].is_gap) {
         row->set_gap_phase(static_cast<double>(position_ms) / 420.0);
     } else {
-        row->set_progress(line_fraction(current_lyrics_.lines[index],
+        row->set_progress(line_fraction(current_lyrics_.lines[line_index],
                                         position_ms, end));
     }
+
+    // The follow target is persistent and refreshed with every position
+    // update; the tick callback only eases the adjustment toward it.
+    update_follow_target();
 }
 
 void SyncedLyricsView::set_active_index(int index) {
@@ -272,200 +299,211 @@ void SyncedLyricsView::set_active_index(int index) {
             rows_[i]->set_state(LyricRow::State::Future);
         }
     }
-
-    if (index < 0) {
-        schedule_top(!first_sync_);
-        return;
-    }
-
-    // Check if user manually scrolled recently
-    double now = g_get_monotonic_time() / 1000000.0;
-    if (now < follow_paused_until_) return;
-
-    bool animate = !first_sync_;
-    first_sync_ = false;
-    schedule_scroll(index, animate);
+    // Keep target_valid_: ordinary line changes must glide to the new anchor.
+    // Seeks and relayouts are handled by the large-delta branch in the tick.
 }
 
-void SyncedLyricsView::on_vadjustment_changed(GtkAdjustment* adjustment, gpointer user_data) {
-    (void)adjustment;
-    auto* self = static_cast<SyncedLyricsView*>(user_data);
-    if (!self->synced_ || self->programmatic_scroll_) return;
-
-    double now = g_get_monotonic_time() / 1000000.0;
-    self->follow_paused_until_ = now + SCROLL_PAUSE_SECONDS;
-    self->cancel_scroll();
+void SyncedLyricsView::reset_follow() {
+    target_valid_ = false;
+    follow_paused_until_ = 0.0;
 }
 
-namespace {
-
-struct ScrollMeasureData {
-    SyncedLyricsView* self;
-    int index;
-    bool animate;
-    int token;
-    int attempts;
-};
-
-} // namespace
-
-gboolean SyncedLyricsView::on_scroll_measure(gpointer user_data) {
-    auto* data = static_cast<ScrollMeasureData*>(user_data);
-    auto* self = data->self;
-
-    auto finish = [&]() {
-        if (self->scroll_data_ == data) self->scroll_data_ = nullptr;
-        self->scroll_source_ = 0;
-        delete data;
-    };
-
-    if (data->token != self->scroll_token_ || !self->synced_) {
-        finish();
-        return G_SOURCE_REMOVE;
-    }
-    if (data->index >= static_cast<int>(self->rows_.size())) {
-        finish();
-        return G_SOURCE_REMOVE;
-    }
-
-    auto* row_widget = self->rows_[data->index]->get_widget();
-    int row_height = gtk_widget_get_allocated_height(row_widget);
-    if (gtk_widget_get_allocated_height(self->scroller_) <= 1 || row_height <= 1) {
-        ++data->attempts;
-        if (data->attempts >= 20) {
-            finish();
-            return G_SOURCE_REMOVE;
-        }
-        // Keep the same data alive; this replaces the expired source id.
-        self->scroll_source_ = g_timeout_add(25, &SyncedLyricsView::on_scroll_measure, data);
-        return G_SOURCE_REMOVE;
-    }
-
-    GtkAdjustment* adj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(self->scroller_));
-    GtkAllocation alloc;
-    gtk_widget_get_allocation(row_widget, &alloc);
-    double target = alloc.y + row_height / 2.0
-                    - gtk_adjustment_get_page_size(adj) / 2.0;
-    double maximum = std::max(0.0, gtk_adjustment_get_upper(adj) - gtk_adjustment_get_page_size(adj));
-    target = std::max(0.0, std::min(target, maximum));
-    if (target < row_height) target = 0.0;
-
-    // Clear our own source bookkeeping before anything can trigger
-    // cancel_scroll() through the adjustment change callback.
-    if (self->scroll_data_ == data) self->scroll_data_ = nullptr;
-    self->scroll_source_ = 0;
-    self->follow_paused_until_ = g_get_monotonic_time() / 1000000.0 + SCROLL_PAUSE_SECONDS;
-
-    if (data->animate) {
-        self->animate_to(target);
-        delete data;
-    } else {
-        self->set_adjustment_value(adj, target);
-        delete data;
-    }
-    return G_SOURCE_REMOVE;
-}
-
-void SyncedLyricsView::schedule_scroll(int index, bool animate) {
-    cancel_scroll();
-    ++scroll_token_;
-    auto* data = new ScrollMeasureData{this, index, animate, scroll_token_, 0};
-    scroll_data_ = data;
-    scroll_source_ = g_timeout_add(25, &SyncedLyricsView::on_scroll_measure, data);
-}
-
-void SyncedLyricsView::schedule_top(bool animate) {
-    cancel_scroll();
-    if (animate) {
-        animate_to(0.0);
-    } else {
-        GtkAdjustment* adj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(scroller_));
-        if (adj) set_adjustment_value(adj, 0.0);
-    }
-}
-
-struct AnimateData {
-    SyncedLyricsView* self;
-    GtkAdjustment* adj;
-    double start_value;
-    double delta;
-    double start_time;
-};
-
-gboolean SyncedLyricsView::on_animate_step(gpointer user_data) {
-    auto* data = static_cast<AnimateData*>(user_data);
-    auto* self = data->self;
-    self->follow_paused_until_ = g_get_monotonic_time() / 1000000.0 + SCROLL_PAUSE_SECONDS;
-    double elapsed = g_get_monotonic_time() / 1000000.0 - data->start_time;
-    double progress = elapsed / SCROLL_DURATION;
-    if (progress >= 1.0) {
-        self->set_adjustment_value(data->adj, data->start_value + data->delta);
-        if (self->anim_data_ == data) self->anim_data_ = nullptr;
-        self->anim_source_ = 0;
-        delete data;
-        return G_SOURCE_REMOVE;
-    }
-    // Cubic ease-out: 1 - (1 - t)^3
-    double eased = 1.0 - std::pow(1.0 - progress, 3);
-    self->set_adjustment_value(data->adj, data->start_value + data->delta * eased);
-    return G_SOURCE_CONTINUE;
-}
-
-void SyncedLyricsView::animate_to(double target) {
-    cancel_scroll();
-    GtkAdjustment* adj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(scroller_));
+void SyncedLyricsView::update_follow_target() {
+    GtkAdjustment* adj = gtk_scrolled_window_get_vadjustment(
+        GTK_SCROLLED_WINDOW(scroller_));
     if (!adj) return;
 
-    double start_value = gtk_adjustment_get_value(adj);
-    double delta = target - start_value;
-    if (std::abs(delta) < 1.0) {
-        set_adjustment_value(adj, target);
+    // Resizing the spacers can clamp the adjustment; treat that as ours.
+    programmatic_scroll_ = true;
+    update_head_spacer(adj);
+    update_tail_spacer(adj);
+    programmatic_scroll_ = false;
+
+    follow_target_ = compute_scroll_target(adj);
+}
+
+double SyncedLyricsView::row_content_y(GtkWidget* row_widget) const {
+    // Bounds relative to the list give the row's offset in scrollable content
+    // coordinates (GtkListBox wraps each child in an internal GtkListBoxRow).
+    graphene_rect_t bounds;
+    if (gtk_widget_compute_bounds(row_widget, list_box_, &bounds)) {
+        return static_cast<double>(bounds.origin.y);
+    }
+    return 0.0;
+}
+
+double SyncedLyricsView::row_height(GtkWidget* row_widget) {
+    return std::max(1, gtk_widget_get_height(row_widget));
+}
+
+double SyncedLyricsView::compute_scroll_target(GtkAdjustment* adj) const {
+    const double page = gtk_adjustment_get_page_size(adj);
+    const double anchor = page > 1.0 ? page * kAnchorFraction : kFallbackAnchorPx;
+
+    double row_y = 0.0;
+    if (active_index_ >= 0 && active_index_ < static_cast<int>(rows_.size())) {
+        row_y = row_content_y(rows_[static_cast<size_t>(active_index_)]->get_widget());
+    }
+    // Bounds are unavailable before the first layout; don't snap to zero.
+    if (active_index_ > 0 && row_y <= 0.0) {
+        return gtk_adjustment_get_value(adj);
+    }
+
+    const double maximum = std::max(
+        0.0, gtk_adjustment_get_upper(adj) - page);
+    return std::clamp(row_y - anchor, 0.0, maximum);
+}
+
+void SyncedLyricsView::update_head_spacer(GtkAdjustment* adj) {
+    if (!head_spacer_) return;
+    const double page = gtk_adjustment_get_page_size(adj);
+    if (page <= 1.0) return;
+
+    // Match the scroll anchor so the active line starts at the upper third.
+    const int requested = static_cast<int>(std::ceil(page * kAnchorFraction));
+
+    int current = 0;
+    gtk_widget_get_size_request(head_spacer_, nullptr, &current);
+    if (std::abs(requested - current) > 4) {
+        gtk_widget_set_size_request(head_spacer_, -1, requested);
+    }
+}
+
+void SyncedLyricsView::update_tail_spacer(GtkAdjustment* adj) {
+    if (!tail_spacer_) return;
+    const double page = gtk_adjustment_get_page_size(adj);
+    if (page <= 1.0) return;
+
+    // One viewport minus the anchor offset: enough for the last line to
+    // travel up to the anchor without adding dead scroll space.
+    const int requested = static_cast<int>(std::ceil(
+        page * (1.0 - kAnchorFraction)));
+
+    int current = 0;
+    gtk_widget_get_size_request(tail_spacer_, nullptr, &current);
+    if (std::abs(requested - current) > 4) {
+        gtk_widget_set_size_request(tail_spacer_, -1, requested);
+    }
+}
+
+void SyncedLyricsView::update_row_prominence(GtkAdjustment* adj) {
+    if (active_index_ < 0 ||
+        active_index_ >= static_cast<int>(rows_.size())) {
+        reset_row_prominence();
         return;
     }
 
-    double start_time = g_get_monotonic_time() / 1000000.0;
-    follow_paused_until_ = start_time + SCROLL_PAUSE_SECONDS;
+    const double view_top = gtk_adjustment_get_value(adj);
+    const double page = gtk_adjustment_get_page_size(adj);
+    const double anchor_offset = page > 1.0
+        ? page * kAnchorFraction
+        : kFallbackAnchorPx;
+    const double unit = row_height(
+        rows_[static_cast<size_t>(active_index_)]->get_widget());
 
-    auto* data = new AnimateData{this, adj, start_value, delta, start_time};
-    anim_data_ = data;
-    anim_source_ = g_timeout_add(16, &SyncedLyricsView::on_animate_step, data);
+    for (size_t i = 0; i < rows_.size(); ++i) {
+        GtkWidget* row_widget = rows_[i]->get_widget();
+        const double top = row_content_y(row_widget);
+        const double bottom = top + row_height(row_widget);
+        double alpha = 1.0;
+
+        if (static_cast<int>(i) < active_index_) {
+            // Past lines keep scrolling at full strength and dissolve only as
+            // their bottom edge reaches the top of the viewport.
+            alpha = std::clamp((bottom - view_top) / (unit * 1.25), 0.0, 1.0);
+        } else if (static_cast<int>(i) > active_index_) {
+            // Upcoming lines stay readable, gently receding with distance.
+            const double distance = std::max(
+                0.0, top - view_top - anchor_offset) / unit;
+            alpha = std::clamp(1.0 - distance / 2.0, 0.55, 1.0);
+        }
+
+        rows_[i]->set_prominence(alpha);
+    }
+}
+
+void SyncedLyricsView::reset_row_prominence() {
+    for (auto& row : rows_) {
+        row->set_prominence(1.0);
+    }
 }
 
 void SyncedLyricsView::set_adjustment_value(GtkAdjustment* adj, double value) {
-    // Programmatic scrolling must not be mistaken for a user scroll and
-    // pause line-following for four seconds.
+    // Programmatic scrolling must not be mistaken for a user scroll and pause
+    // line-following.
     programmatic_scroll_ = true;
     gtk_adjustment_set_value(adj, value);
     programmatic_scroll_ = false;
 }
 
-void SyncedLyricsView::cancel_scroll() {
-    if (scroll_source_) {
-        g_source_remove(scroll_source_);
-        scroll_source_ = 0;
+void SyncedLyricsView::on_vadjustment_changed(GtkAdjustment*, gpointer user_data) {
+    auto* self = static_cast<SyncedLyricsView*>(user_data);
+    if (!self->synced_ || self->programmatic_scroll_) return;
+
+    self->follow_paused_until_ =
+        static_cast<double>(g_get_monotonic_time()) / 1000000.0 + kManualPauseSeconds;
+    self->target_valid_ = false;
+    self->reset_row_prominence();
+}
+
+gboolean SyncedLyricsView::on_follow_tick(GtkWidget*, GdkFrameClock* clock,
+                                          gpointer user_data) {
+    auto* self = static_cast<SyncedLyricsView*>(user_data);
+    if (!self->synced_ || self->rows_.empty()) return G_SOURCE_CONTINUE;
+
+    GtkAdjustment* adj = gtk_scrolled_window_get_vadjustment(
+        GTK_SCROLLED_WINDOW(self->scroller_));
+    if (!adj) return G_SOURCE_CONTINUE;
+
+    // Refresh the persistent target every frame; set_position() also does so
+    // immediately so karaoke updates never lag the scroll anchor.
+    self->update_follow_target();
+
+    const double now = static_cast<double>(g_get_monotonic_time()) / 1000000.0;
+    if (now < self->follow_paused_until_) {
+        return G_SOURCE_CONTINUE;
     }
-    if (scroll_data_) {
-        delete static_cast<ScrollMeasureData*>(scroll_data_);
-        scroll_data_ = nullptr;
+
+    double dt = 0.0;
+    if (clock) {
+        const gint64 frame_time = gdk_frame_clock_get_frame_time(clock);
+        if (self->last_frame_time_ > 0.0) {
+            dt = (static_cast<double>(frame_time) - self->last_frame_time_) / 1000000.0;
+        }
+        self->last_frame_time_ = static_cast<double>(frame_time);
+    } else {
+        dt = now - self->last_frame_time_;
+        self->last_frame_time_ = now;
     }
-    if (anim_source_) {
-        g_source_remove(anim_source_);
-        anim_source_ = 0;
+    dt = std::clamp(dt, 0.0, 0.05);
+
+    const double target = self->follow_target_;
+    const double current = gtk_adjustment_get_value(adj);
+
+    if (!self->target_valid_) {
+        self->set_adjustment_value(adj, target);
+        self->target_valid_ = true;
+    } else {
+        const double delta = target - current;
+        const double page = gtk_adjustment_get_page_size(adj);
+        // Seeks and first layout land directly; ordinary line changes glide.
+        if (std::abs(delta) > std::max(120.0, page * 0.8)) {
+            self->set_adjustment_value(adj, target);
+        } else if (std::abs(delta) > 0.5) {
+            const double blend = 1.0 - std::exp(-dt / kScrollTimeConstant);
+            self->set_adjustment_value(adj, current + delta * blend);
+        }
     }
-    if (anim_data_) {
-        delete static_cast<AnimateData*>(anim_data_);
-        anim_data_ = nullptr;
-    }
-    ++scroll_token_;
+
+    self->update_row_prominence(adj);
+    return G_SOURCE_CONTINUE;
 }
 
 void SyncedLyricsView::scroll_to_current(bool animate) {
     if (!synced_) return;
-    if (active_index_ >= 0) {
-        schedule_scroll(active_index_, animate);
-    } else {
-        schedule_top(animate);
-    }
+    follow_paused_until_ = 0.0;
+    target_valid_ = false;
+    (void)animate;
 }
 
 } // namespace lollypop
