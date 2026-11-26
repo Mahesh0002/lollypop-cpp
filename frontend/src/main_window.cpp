@@ -434,9 +434,10 @@ void MainWindow::connect_backend() {
         fullscreen_player_->set_repeat_one(enabled);
     });
 
-    // Queue changed → update RightNowPlaying queue view
+    // Queue changed → update both the right panel and fullscreen queue view
     backend->add_queue_changed_callback([this](const std::vector<std::string>& queue_ids) {
         right_now_playing_->set_queue(queue_ids);
+        fullscreen_player_->set_queue(queue_ids);
     });
 
     // Seed panels with current backend state. initialize() emits the initial
@@ -468,6 +469,7 @@ void MainWindow::connect_backend() {
     TrackRow::update_playing_state(backend->get_current_track().id,
                                    backend->is_playing());
     right_now_playing_->set_queue(backend->get_queue());
+    fullscreen_player_->set_queue(backend->get_queue());
     right_now_playing_->set_shuffle(backend->get_shuffle());
     right_now_playing_->set_repeat(backend->get_repeat());
     right_now_playing_->set_loop(backend->get_repeat_one());

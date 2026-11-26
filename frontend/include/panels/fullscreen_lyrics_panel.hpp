@@ -2,9 +2,9 @@
  * Lollypop C++ - Fullscreen Lyrics Panel
  *
  * Owns only the synced lyrics surface: the revealer, framed list, async lyric
- * requests, and its slide animation. It is added as an overlay sibling of the
- * FullscreenPlayerPanel, so revealing it never resizes the player. A reveal
- * callback lets the coordinator slide the player by the same eased amount.
+ * requests, and its slide transition. It is added as an overlay sibling of the
+ * FullscreenPlayerPanel, so revealing it never resizes the player. The
+ * coordinator owns the matching player slide animation.
  */
 
 #pragma once
@@ -24,7 +24,6 @@ class SyncedLyricsView;
 class FullscreenLyricsPanel {
 public:
     using SeekCallback = std::function<void(int position_ms)>;
-    using RevealCallback = std::function<void(double reveal)>;
 
     explicit FullscreenLyricsPanel(ILyricsService* lyrics_service);
     ~FullscreenLyricsPanel();
@@ -33,13 +32,9 @@ public:
     FullscreenLyricsPanel& operator=(const FullscreenLyricsPanel&) = delete;
 
     GtkWidget* get_widget() const { return revealer_; }
-    double get_reveal() const { return reveal_; }
 
     void set_seek_callback(SeekCallback callback) {
         seek_callback_ = std::move(callback);
-    }
-    void set_reveal_callback(RevealCallback callback) {
-        reveal_callback_ = std::move(callback);
     }
 
     void set_accent(const GdkRGBA& accent);
@@ -60,20 +55,10 @@ private:
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
 
     SeekCallback seek_callback_;
-    RevealCallback reveal_callback_;
     std::string current_track_id_;
 
-    double reveal_ = 0.0;
-    double reveal_from_ = 0.0;
-    double reveal_target_ = 0.0;
-    gint64 anim_start_ = 0;
-    guint anim_source_ = 0;
     int last_width_ = 0;
     int last_right_margin_ = -1;
-
-    static gboolean on_animation_tick(GtkWidget* widget,
-                                      GdkFrameClock* clock,
-                                      gpointer user_data);
 };
 
 } // namespace lollypop

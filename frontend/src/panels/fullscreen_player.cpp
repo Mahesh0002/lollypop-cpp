@@ -8,6 +8,7 @@
 #include "panels/fullscreen_close_button.hpp"
 #include "panels/fullscreen_lyrics_panel.hpp"
 #include "panels/fullscreen_player_panel.hpp"
+#include "panels/fullscreen_queue_panel.hpp"
 #include "services/IPlayerService.hpp"
 #include "services/ILibraryService.hpp"
 #include "services/ILyricsService.hpp"
@@ -31,6 +32,7 @@ constexpr int kPlayerLeftInset = 100;
 constexpr int kLyricsGap = 100;
 constexpr int kLyricsRightInset = 200;
 constexpr int kDividerWidth = 3;
+constexpr double kPanelAnimMs = 340.0;
 
 int player_panel_width(int root_width) {
     // Both panels are the same width: left inset + gap + right inset must fit
@@ -43,7 +45,7 @@ int player_panel_width(int root_width) {
         kLyricsPanelMaxWidth);
 }
 
-int lyrics_slide_offset(int root_width, int panel_width, double reveal) {
+int panel_slide_offset(int root_width, int panel_width, double reveal) {
     if (reveal <= 0.0) return 0;
     const int centered_left = (root_width - panel_width) / 2;
     const int target_offset = std::max(0, centered_left - kPlayerLeftInset);
@@ -76,8 +78,9 @@ FullscreenPlayer::FullscreenPlayer(MainWindow* main_window,
       lyrics_service_(lyrics_service),
       library_service_(library_service),
       root_(nullptr),
+      queue_toggle_(nullptr),
       lyrics_toggle_(nullptr),
-      lyrics_divider_(nullptr),
+      panel_divider_(nullptr),
       volume_button_(nullptr),
       volume_revealer_(nullptr),
       volume_scale_(nullptr),
@@ -144,6 +147,7 @@ void FullscreenPlayer::setup_ui() {
     });
 
     create_divider();
+    create_queue();
     create_lyrics();
 }
 
@@ -173,24 +177,45 @@ void FullscreenPlayer::create_top_bar() {
 }
 
 void FullscreenPlayer::create_divider() {
-    lyrics_divider_ = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
-    gtk_widget_add_css_class(lyrics_divider_, "fullscreen-lyrics-divider");
-    gtk_widget_set_size_request(lyrics_divider_, kDividerWidth, -1);
-    gtk_widget_set_hexpand(lyrics_divider_, FALSE);
-    gtk_widget_set_vexpand(lyrics_divider_, TRUE);
-    gtk_widget_set_halign(lyrics_divider_, GTK_ALIGN_END);
-    gtk_widget_set_valign(lyrics_divider_, GTK_ALIGN_FILL);
-    gtk_widget_set_can_target(lyrics_divider_, FALSE);
-    gtk_widget_set_opacity(lyrics_divider_, 0.0);
-    gtk_widget_set_visible(lyrics_divider_, TRUE);
+    panel_divider_ = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
+    gtk_widget_add_css_class(panel_divider_, "fullscreen-panel-divider");
+    gtk_widget_set_size_request(panel_divider_, kDividerWidth, -1);
+    gtk_widget_set_hexpand(panel_divider_, FALSE);
+    gtk_widget_set_vexpand(panel_divider_, TRUE);
+    gtk_widget_set_halign(panel_divider_, GTK_ALIGN_END);
+    gtk_widget_set_valign(panel_divider_, GTK_ALIGN_FILL);
+    gtk_widget_set_can_target(panel_divider_, FALSE);
+    gtk_widget_set_opacity(panel_divider_, 0.0);
+    gtk_widget_set_visible(panel_divider_, TRUE);
     gtk_overlay_add_overlay(
-        GTK_OVERLAY(player_panel_->get_widget()), lyrics_divider_);
+        GTK_OVERLAY(player_panel_->get_widget()), panel_divider_);
+}
+
+void FullscreenPlayer::create_queue() {
+    queue_panel_ = std::make_unique<FullscreenQueuePanel>(
+        main_window_, library_service_);
+    gtk_overlay_add_overlay(
+        GTK_OVERLAY(player_panel_->get_widget()), queue_panel_->get_widget());
+
+    queue_toggle_ = gtk_toggle_button_new();
+    gtk_button_set_has_frame(GTK_BUTTON(queue_toggle_), FALSE);
+    gtk_widget_add_css_class(queue_toggle_, "fullscreen-control-button");
+    gtk_widget_set_hexpand(queue_toggle_, TRUE);
+    gtk_widget_set_size_request(queue_toggle_, 44, 44);
+    gtk_widget_set_tooltip_text(queue_toggle_, "Queue");
+    accessibility::set_label(queue_toggle_, "Show queue");
+    GtkWidget* queue_icon =
+        gtk_image_new_from_icon_name("view-list-symbolic");
+    gtk_image_set_pixel_size(GTK_IMAGE(queue_icon), 20);
+    safe_button_set_child(GTK_BUTTON(queue_toggle_), queue_icon);
+    g_signal_connect(queue_toggle_, "toggled",
+                     G_CALLBACK(on_queue_toggled), this);
+    // Row order: queue, shuffle, repeat all, repeat one, play, lyrics.
+    gtk_box_prepend(GTK_BOX(player_panel_->get_controls_row()), queue_toggle_);
 }
 
 void FullscreenPlayer::create_lyrics() {
     lyrics_panel_ = std::make_unique<FullscreenLyricsPanel>(lyrics_service_);
-    lyrics_panel_->set_reveal_callback(
-        [this](double reveal) { on_lyrics_reveal(reveal); });
     lyrics_panel_->set_seek_callback([this](int position_ms) {
         if (!main_window_) return;
         if (IPlayerService* backend = main_window_->get_backend()) {
@@ -284,6 +309,7 @@ void FullscreenPlayer::sync_from_backend() {
     set_shuffle(backend->get_shuffle());
     set_repeat(backend->get_repeat());
     set_repeat_one(backend->get_repeat_one());
+    set_queue(backend->get_queue());
     set_playing(backend->is_playing());
 }
 
@@ -345,6 +371,11 @@ void FullscreenPlayer::request_lyrics_for_track(const std::string& track_id) {
     if (lyrics_panel_) lyrics_panel_->request_lyrics_for_track(track_id);
 }
 
+void FullscreenPlayer::set_queue(
+    const std::vector<std::string>& queue_track_ids) {
+    if (queue_panel_) queue_panel_->set_queue(queue_track_ids);
+}
+
 void FullscreenPlayer::apply_layout() {
     if (!root_ || !player_panel_) return;
     const int width = gtk_widget_get_width(root_);
@@ -355,18 +386,22 @@ void FullscreenPlayer::apply_layout() {
     player_panel_->set_width(panel_width);
 
     const int offset =
-        lyrics_slide_offset(width, panel_width, lyrics_reveal_);
+        panel_slide_offset(width, panel_width, panel_reveal_);
     player_panel_->set_slide_offset(offset * 2);
 
-    // The lyrics revealer is the same width as the player panel, held 200px
-    // away from the right edge so the 100px gap is preserved.
+    // Both side panels share the same slot: equal width to the player, held
+    // 200px from the right edge so the 100px gap is preserved.
     if (lyrics_panel_) {
         lyrics_panel_->set_width(panel_width);
         lyrics_panel_->set_right_margin(kLyricsRightInset);
     }
+    if (queue_panel_) {
+        queue_panel_->set_width(panel_width);
+        queue_panel_->set_right_margin(kLyricsRightInset);
+    }
 
     // Keep the divider centred inside the actual gap between the two panels.
-    if (lyrics_divider_) {
+    if (panel_divider_) {
         const int player_left = (width - panel_width) / 2 - offset;
         const int player_right = player_left + panel_width;
         const int lyrics_left = width - kLyricsRightInset - panel_width;
@@ -379,7 +414,7 @@ void FullscreenPlayer::apply_layout() {
                 static_cast<double>(kDividerWidth) / 2.0)));
         if (margin != last_divider_margin_) {
             last_divider_margin_ = margin;
-            gtk_widget_set_margin_end(lyrics_divider_, margin);
+            gtk_widget_set_margin_end(panel_divider_, margin);
         }
     }
 
@@ -391,13 +426,49 @@ void FullscreenPlayer::apply_layout() {
     player_panel_->set_artwork_side(side);
 }
 
-void FullscreenPlayer::on_lyrics_reveal(double reveal) {
-    lyrics_reveal_ = reveal;
-    if (lyrics_divider_) {
-        gtk_widget_set_opacity(lyrics_divider_, reveal);
+void FullscreenPlayer::set_panel_visible(bool visible) {
+    // Switching lyrics ↔ queue keeps the player in place: only the revealers
+    // cross-fade in the shared slot.
+    if (visible == panel_visible_ && panel_anim_source_ == 0) return;
+
+    panel_visible_ = visible;
+    panel_reveal_from_ = panel_reveal_;
+    panel_reveal_target_ = visible ? 1.0 : 0.0;
+    panel_anim_start_ = g_get_monotonic_time();
+
+    if (root_) {
+        if (panel_anim_source_ != 0) {
+            gtk_widget_remove_tick_callback(root_, panel_anim_source_);
+        }
+        panel_anim_source_ = gtk_widget_add_tick_callback(
+            root_, on_panel_animation_tick, this, nullptr);
     }
-    apply_layout();
-    if (root_) gtk_widget_queue_resize(root_);
+}
+
+gboolean FullscreenPlayer::on_panel_animation_tick(GtkWidget*, GdkFrameClock*,
+                                                   gpointer user_data) {
+    auto* self = static_cast<FullscreenPlayer*>(user_data);
+    const gint64 elapsed_us =
+        g_get_monotonic_time() - self->panel_anim_start_;
+    const double t = std::clamp(
+        static_cast<double>(elapsed_us) / (kPanelAnimMs * 1000.0), 0.0, 1.0);
+    // Quintic ease-in-out: slow departure and arrival, faster middle.
+    const double eased = t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+    self->panel_reveal_ = self->panel_reveal_from_ +
+        (self->panel_reveal_target_ - self->panel_reveal_from_) * eased;
+
+    if (self->panel_divider_) {
+        gtk_widget_set_opacity(self->panel_divider_, self->panel_reveal_);
+    }
+    self->apply_layout();
+    if (self->root_) gtk_widget_queue_resize(self->root_);
+
+    if (t >= 1.0) {
+        self->panel_reveal_ = self->panel_reveal_target_;
+        self->panel_anim_source_ = 0;
+        return G_SOURCE_REMOVE;
+    }
+    return G_SOURCE_CONTINUE;
 }
 
 gboolean FullscreenPlayer::on_allocation_tick(GtkWidget* widget, GdkFrameClock*,
@@ -440,15 +511,59 @@ void FullscreenPlayer::on_volume_value_changed(GtkAdjustment* adjustment,
 void FullscreenPlayer::on_lyrics_toggled(GtkToggleButton* button,
                                          gpointer user_data) {
     auto* self = static_cast<FullscreenPlayer*>(user_data);
-    const bool visible = gtk_toggle_button_get_active(button);
+    if (self->updating_toggles_) return;
+    const bool visible = gtk_toggle_button_get_active(button) != FALSE;
+
+    if (visible && self->queue_toggle_) {
+        self->updating_toggles_ = true;
+        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(self->queue_toggle_),
+                                     FALSE);
+        self->updating_toggles_ = false;
+        gtk_widget_set_tooltip_text(self->queue_toggle_, "Queue");
+        accessibility::set_label(self->queue_toggle_, "Show queue");
+    }
     self->lyrics_visible_ = visible;
+    if (visible) self->queue_visible_ = false;
     if (self->lyrics_panel_) self->lyrics_panel_->set_visible(visible);
+    if (self->queue_panel_) {
+        self->queue_panel_->set_visible(self->queue_visible_);
+    }
+    self->set_panel_visible(visible || self->queue_visible_);
     if (self->root_) gtk_widget_queue_resize(self->root_);
 
     gtk_widget_set_tooltip_text(GTK_WIDGET(button),
                                 visible ? "Hide lyrics" : "Lyrics");
     accessibility::set_label(GTK_WIDGET(button),
                              visible ? "Hide lyrics" : "Show lyrics");
+}
+
+void FullscreenPlayer::on_queue_toggled(GtkToggleButton* button,
+                                        gpointer user_data) {
+    auto* self = static_cast<FullscreenPlayer*>(user_data);
+    if (self->updating_toggles_) return;
+    const bool visible = gtk_toggle_button_get_active(button) != FALSE;
+
+    if (visible && self->lyrics_toggle_) {
+        self->updating_toggles_ = true;
+        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(self->lyrics_toggle_),
+                                     FALSE);
+        self->updating_toggles_ = false;
+        gtk_widget_set_tooltip_text(self->lyrics_toggle_, "Lyrics");
+        accessibility::set_label(self->lyrics_toggle_, "Show lyrics");
+    }
+    self->queue_visible_ = visible;
+    if (visible) self->lyrics_visible_ = false;
+    if (self->queue_panel_) self->queue_panel_->set_visible(visible);
+    if (self->lyrics_panel_) {
+        self->lyrics_panel_->set_visible(self->lyrics_visible_);
+    }
+    self->set_panel_visible(visible || self->lyrics_visible_);
+    if (self->root_) gtk_widget_queue_resize(self->root_);
+
+    gtk_widget_set_tooltip_text(GTK_WIDGET(button),
+                                visible ? "Hide queue" : "Queue");
+    accessibility::set_label(GTK_WIDGET(button),
+                             visible ? "Hide queue" : "Show queue");
 }
 
 } // namespace lollypop

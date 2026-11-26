@@ -10,12 +10,10 @@
 
 #include <gtk/gtk.h>
 
-#include <algorithm>
-
 namespace lollypop {
 namespace {
 
-constexpr double kLyricsAnimMs = 340.0;
+constexpr guint kLyricsAnimMs = 340;
 
 } // namespace
 
@@ -41,7 +39,7 @@ FullscreenLyricsPanel::FullscreenLyricsPanel(ILyricsService* lyrics_service)
     gtk_revealer_set_transition_type(
         GTK_REVEALER(revealer_), GTK_REVEALER_TRANSITION_TYPE_SLIDE_LEFT);
     gtk_revealer_set_transition_duration(
-        GTK_REVEALER(revealer_), static_cast<guint>(kLyricsAnimMs));
+        GTK_REVEALER(revealer_), kLyricsAnimMs);
     gtk_revealer_set_reveal_child(GTK_REVEALER(revealer_), FALSE);
     gtk_widget_set_hexpand(revealer_, FALSE);
     gtk_widget_set_vexpand(revealer_, TRUE);
@@ -60,18 +58,8 @@ void FullscreenLyricsPanel::set_accent(const GdkRGBA& accent) {
 }
 
 void FullscreenLyricsPanel::set_visible(bool visible) {
-    reveal_from_ = reveal_;
-    reveal_target_ = visible ? 1.0 : 0.0;
-    anim_start_ = g_get_monotonic_time();
-
     if (revealer_) {
         gtk_revealer_set_reveal_child(GTK_REVEALER(revealer_), visible);
-        if (anim_source_ != 0) {
-            gtk_widget_remove_tick_callback(revealer_, anim_source_);
-            anim_source_ = 0;
-        }
-        anim_source_ = gtk_widget_add_tick_callback(
-            revealer_, on_animation_tick, this, nullptr);
     }
 }
 
@@ -123,30 +111,6 @@ void FullscreenLyricsPanel::request_lyrics_for_track(
 
 void FullscreenLyricsPanel::set_position(int position_ms, int duration_ms) {
     if (lyrics_view_) lyrics_view_->set_position(position_ms, duration_ms);
-}
-
-gboolean FullscreenLyricsPanel::on_animation_tick(GtkWidget* widget,
-                                                  GdkFrameClock*,
-                                                  gpointer user_data) {
-    auto* self = static_cast<FullscreenLyricsPanel*>(user_data);
-    const gint64 elapsed_us = g_get_monotonic_time() - self->anim_start_;
-    const double t = std::clamp(
-        static_cast<double>(elapsed_us) / (kLyricsAnimMs * 1000.0), 0.0, 1.0);
-    // Quintic ease-in-out: slow departure and arrival, faster middle.
-    const double eased =
-        t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
-    self->reveal_ = self->reveal_from_ +
-        (self->reveal_target_ - self->reveal_from_) * eased;
-
-    if (self->reveal_callback_) self->reveal_callback_(self->reveal_);
-    gtk_widget_queue_resize(widget);
-
-    if (t >= 1.0) {
-        self->reveal_ = self->reveal_target_;
-        self->anim_source_ = 0;
-        return G_SOURCE_REMOVE;
-    }
-    return G_SOURCE_CONTINUE;
 }
 
 } // namespace lollypop
