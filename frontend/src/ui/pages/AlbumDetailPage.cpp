@@ -158,6 +158,7 @@ void AlbumDetailPage::setup_ui() {
 
     GtkWidget* actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_widget_add_css_class(actions, "album-detail-actions");
+    gtk_box_set_homogeneous(GTK_BOX(actions), TRUE);
     gtk_widget_set_halign(actions, GTK_ALIGN_START);
     gtk_widget_set_valign(actions, GTK_ALIGN_END);
     gtk_widget_set_visible(actions, TRUE);

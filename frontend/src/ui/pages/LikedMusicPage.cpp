@@ -154,6 +154,14 @@ void LikedMusicPage::setup_ui() {
     gtk_widget_set_visible(actions, TRUE);
     safe_box_append(GTK_BOX(data_box), actions);
 
+    // Nested homogeneous row keeps Play and Shuffle equal-width without
+    // dragging the trailing menu spacer into the equal-width calculation.
+    GtkWidget* action_buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_box_set_homogeneous(GTK_BOX(action_buttons), TRUE);
+    gtk_widget_set_halign(action_buttons, GTK_ALIGN_START);
+    gtk_widget_set_visible(action_buttons, TRUE);
+    safe_box_append(GTK_BOX(actions), action_buttons);
+
     GtkWidget* play_button = gtk_button_new_with_label("Play");
     gtk_widget_add_css_class(play_button, "favourite-music-action-button");
     gtk_widget_add_css_class(play_button, "favourite-music-play-button");
@@ -164,7 +172,7 @@ void LikedMusicPage::setup_ui() {
     g_signal_connect(play_button, "clicked",
                      G_CALLBACK(on_play_clicked), this);
     gtk_widget_set_visible(play_button, TRUE);
-    safe_box_append(GTK_BOX(actions), play_button);
+    safe_box_append(GTK_BOX(action_buttons), play_button);
 
     GtkWidget* shuffle_button = gtk_button_new_with_label("Shuffle");
     gtk_widget_add_css_class(shuffle_button, "favourite-music-action-button");
@@ -175,7 +183,7 @@ void LikedMusicPage::setup_ui() {
     g_signal_connect(shuffle_button, "clicked",
                      G_CALLBACK(on_shuffle_clicked), this);
     gtk_widget_set_visible(shuffle_button, TRUE);
-    safe_box_append(GTK_BOX(actions), shuffle_button);
+    safe_box_append(GTK_BOX(action_buttons), shuffle_button);
 
     GtkWidget* spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_set_hexpand(spacer, TRUE);
