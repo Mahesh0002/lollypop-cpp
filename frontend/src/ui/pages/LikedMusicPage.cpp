@@ -7,6 +7,7 @@
 #include "services/IPlayerService.hpp"
 #include "ui/components/ArtworkView.hpp"
 #include "ui/components/PlaylistDialogs.hpp"
+#include "ui/theme/ThemeManager.hpp"
 #include "util/safe_gtk.hpp"
 
 #include <gtk/gtk.h>
@@ -156,6 +157,10 @@ void LikedMusicPage::setup_ui() {
     GtkWidget* play_button = gtk_button_new_with_label("Play");
     gtk_widget_add_css_class(play_button, "favourite-music-action-button");
     gtk_widget_add_css_class(play_button, "favourite-music-play-button");
+    if (ThemeManager* theme =
+            main_window_ ? main_window_->get_theme_manager() : nullptr) {
+        theme->apply_detail_action_style(play_button);
+    }
     g_signal_connect(play_button, "clicked",
                      G_CALLBACK(on_play_clicked), this);
     gtk_widget_set_visible(play_button, TRUE);
@@ -163,6 +168,10 @@ void LikedMusicPage::setup_ui() {
 
     GtkWidget* shuffle_button = gtk_button_new_with_label("Shuffle");
     gtk_widget_add_css_class(shuffle_button, "favourite-music-action-button");
+    if (ThemeManager* theme =
+            main_window_ ? main_window_->get_theme_manager() : nullptr) {
+        theme->apply_detail_action_style(shuffle_button);
+    }
     g_signal_connect(shuffle_button, "clicked",
                      G_CALLBACK(on_shuffle_clicked), this);
     gtk_widget_set_visible(shuffle_button, TRUE);

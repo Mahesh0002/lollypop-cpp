@@ -61,6 +61,11 @@ public:
     /// or colourless artwork clears the current tint.
     void set_artwork_tint_from_path(const std::string& path);
 
+    /// Force the artwork-tinted rectangular shape onto an individual control.
+    /// Display-level providers can lose to libadwaita's own button styling, so
+    /// detail hero buttons get a user-priority provider attached directly.
+    void apply_detail_action_style(GtkWidget* button) const;
+
     /// Persist the selected palette/accent to settings (placeholder).
     void persist_accent_color();
 

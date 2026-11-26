@@ -331,6 +331,53 @@ void ThemeManager::set_artwork_tint_from_path(const std::string& path) {
     }
 }
 
+void ThemeManager::apply_detail_action_style(GtkWidget* button) const {
+    if (!button) return;
+
+    // Libadwaita installs its own filled-button shape at a priority that can
+    // beat display-level application providers. A user-priority provider on
+    // the widget itself is authoritative; the tokens still resolve live so
+    // artwork changes keep recolouring the control.
+    static constexpr const char* kDetailButtonCss = R"CSS(
+button {
+    background-color: var(--detail-action-bg);
+    background-image: none;
+    border: 1px solid var(--detail-action-bg);
+    border-radius: 6px;
+    min-height: 36px;
+    padding: 0 18px;
+    color: var(--detail-action-on);
+    box-shadow: none;
+}
+
+button:hover {
+    background-color: var(--detail-action-hover);
+    border-color: var(--detail-action-hover);
+}
+
+button:active {
+    background-color: var(--detail-action-active);
+    border-color: var(--detail-action-active);
+}
+
+button.album-detail-play-button,
+button.favourite-music-play-button {
+    font-weight: 700;
+    box-shadow: 0 4px 12px var(--shadow-20);
+}
+)CSS";
+
+    GtkCssProvider* provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(provider, kDetailButtonCss);
+    gtk_style_context_add_provider(gtk_widget_get_style_context(button),
+                                   GTK_STYLE_PROVIDER(provider),
+                                   GTK_STYLE_PROVIDER_PRIORITY_USER);
+    // The style context does not own the provider; keep it alive for as long
+    // as the button exists.
+    g_object_set_data_full(G_OBJECT(button), "lollypop-detail-action-css",
+                           provider, g_object_unref);
+}
+
 void ThemeManager::get_accent_color(double& r, double& g, double& b,
                                     double& a) const {
     r = accent_r_;

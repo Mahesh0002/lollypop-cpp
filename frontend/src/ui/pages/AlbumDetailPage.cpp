@@ -17,6 +17,7 @@
 #include "util/safe_gtk.hpp"
 #include "ui/components/ArtworkView.hpp"
 #include "ui/components/TrackRow.hpp"
+#include "ui/theme/ThemeManager.hpp"
 
 #include <gtk/gtk.h>
 #include <iostream>
@@ -165,12 +166,20 @@ void AlbumDetailPage::setup_ui() {
     GtkWidget* play_btn = gtk_button_new_with_label("Play Album");
     gtk_widget_add_css_class(play_btn, "album-detail-action-button");
     gtk_widget_add_css_class(play_btn, "album-detail-play-button");
+    if (ThemeManager* theme =
+            main_window_ ? main_window_->get_theme_manager() : nullptr) {
+        theme->apply_detail_action_style(play_btn);
+    }
     g_signal_connect(play_btn, "clicked", G_CALLBACK(on_album_play_trampoline), this);
     gtk_widget_set_visible(play_btn, TRUE);
     safe_box_append(GTK_BOX(actions), play_btn);
 
     GtkWidget* shuffle_btn = gtk_button_new_with_label("Shuffle");
     gtk_widget_add_css_class(shuffle_btn, "album-detail-action-button");
+    if (ThemeManager* theme =
+            main_window_ ? main_window_->get_theme_manager() : nullptr) {
+        theme->apply_detail_action_style(shuffle_btn);
+    }
     g_signal_connect(shuffle_btn, "clicked", G_CALLBACK(on_album_shuffle_trampoline), this);
     gtk_widget_set_visible(shuffle_btn, TRUE);
     safe_box_append(GTK_BOX(actions), shuffle_btn);
