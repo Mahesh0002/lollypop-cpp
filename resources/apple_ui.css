@@ -497,6 +497,15 @@ button {
     color: var(--fs-text);
 }
 
+/* Thin vertical rule centred in the 100px gap between player and lyrics. */
+.fullscreen-lyrics-divider {
+    min-width: 3px;
+    margin-top: 56px;
+    margin-bottom: 12px;
+    border-radius: 2px;
+    background-color: var(--fs-hover);
+}
+
 .fullscreen-lyrics-frame list,
 .fullscreen-lyrics-frame viewport {
     background-color: transparent;

@@ -1,13 +1,14 @@
 /**
  * Lollypop C++ - Fullscreen Now Playing
  *
- * Immersive, full-window playback surface:
- *   [close]
- *        large square artwork        synced lyrics panel
- *        title / artist — album      (slides in from the right)
- *   [prev] [wavy progress] [next]
- *   [shuffle] [repeat all] [repeat one] [play/pause] [lyrics]
- *        player shifts left with a 100px gap beside the lyrics
+ * Immersive, full-window playback surface. This class is a thin coordinator:
+ *   FullscreenCloseButton  - standalone close control in the top bar
+ *   FullscreenPlayerPanel  - artwork, metadata, progress, transport
+ *   FullscreenLyricsPanel  - synced lyrics revealer on the right
+ *   lyrics toggle          - owned here, inserted into the player controls row
+ *
+ * The player panel keeps its width and only slides left when lyrics open. The
+ * lyrics panel is the same width as the player, separated by a 100px gap.
  *
  * All state is observed from IPlayerService through MainWindow; mutations go
  * back through the same interface so the shell/MPRIS remains the authority.
@@ -23,11 +24,11 @@
 namespace lollypop {
 
 class MainWindow;
-class ArtworkView;
-class SyncedLyricsView;
-class ProgressWave;
 class ILyricsService;
 class ILibraryService;
+class FullscreenPlayerPanel;
+class FullscreenLyricsPanel;
+class FullscreenCloseButton;
 
 class FullscreenPlayer {
 public:
@@ -62,72 +63,40 @@ private:
     ILibraryService* library_service_;
 
     GtkWidget* root_;
-    GtkWidget* content_overlay_;
-    GtkWidget* center_box_;
-    GtkWidget* title_label_;
-    GtkWidget* subtitle_label_;
-    GtkWidget* play_button_;
-    GtkWidget* play_icon_;
+    GtkWidget* lyrics_toggle_;
+    GtkWidget* lyrics_divider_;
+
     GtkWidget* volume_button_;
     GtkWidget* volume_revealer_;
     GtkWidget* volume_scale_;
-    GtkWidget* shuffle_button_;
-    GtkWidget* repeat_button_;
-    GtkWidget* loop_button_;
-    GtkWidget* lyrics_toggle_;
-    GtkWidget* lyrics_revealer_;
-    GtkWidget* lyrics_frame_;
-
     GtkAdjustment* volume_adjustment_;
 
-    std::unique_ptr<ArtworkView> artwork_view_;
-    std::unique_ptr<ProgressWave> progress_wave_;
-    std::unique_ptr<SyncedLyricsView> lyrics_view_;
+    std::unique_ptr<FullscreenCloseButton> close_button_;
+    std::unique_ptr<FullscreenPlayerPanel> player_panel_;
+    std::unique_ptr<FullscreenLyricsPanel> lyrics_panel_;
 
-    // Async lyric requests may outlive the panel; callbacks check this flag.
-    std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
-
-    std::string current_track_id_;
     double current_position_ = 0.0;
     double current_duration_ = 0.0;
     bool updating_controls_ = false;
     bool playing_ = false;
     bool lyrics_visible_ = false;
     double lyrics_reveal_ = 0.0;
-    double lyrics_reveal_from_ = 0.0;
-    double lyrics_reveal_target_ = 0.0;
-    gint64 lyrics_anim_start_ = 0;
-    guint lyrics_anim_source_ = 0;
     int last_width_ = 0;
     int last_height_ = 0;
-    int last_artwork_side_ = 0;
 
     void setup_ui();
     void create_top_bar();
-    void create_artwork();
-    void create_track_info();
-    void create_progress();
-    void create_controls();
     void create_volume();
+    void create_divider();
     void create_lyrics();
-
-    void apply_playback_icon();
+    void apply_layout();
+    void on_lyrics_reveal(double reveal);
 
     static gboolean on_allocation_tick(GtkWidget* widget, GdkFrameClock* clock,
                                        gpointer user_data);
-    static gboolean on_lyrics_animation_tick(GtkWidget* widget,
-                                             GdkFrameClock* clock,
-                                             gpointer user_data);
-    static void on_close_clicked(GtkButton* button, gpointer user_data);
-    static void on_play_clicked(GtkButton* button, gpointer user_data);
-    static void on_prev_clicked(GtkButton* button, gpointer user_data);
-    static void on_next_clicked(GtkButton* button, gpointer user_data);
     static void on_volume_clicked(GtkButton* button, gpointer user_data);
     static void on_volume_value_changed(GtkAdjustment* adjustment,
                                         gpointer user_data);
-    static void on_shuffle_toggled(GtkToggleButton* button, gpointer user_data);
-    static void on_repeat_toggled(GtkToggleButton* button, gpointer user_data);
-    static void on_loop_toggled(GtkToggleButton* button, gpointer user_data);
     static void on_lyrics_toggled(GtkToggleButton* button, gpointer user_data);
 };
 
