@@ -27,31 +27,27 @@ namespace lollypop {
 namespace {
 
 constexpr int kLyricsPanelMaxWidth = 940;
+constexpr int kPlayerLeftInset = 100;
 constexpr int kLyricsGap = 100;
-constexpr int kSideInset = 12;
+constexpr int kLyricsRightInset = 200;
 constexpr int kDividerWidth = 3;
 
 int player_panel_width(int root_width) {
-    // Both panels are the same width. Reserving the gap and both side insets
-    // here keeps the player width identical whether lyrics are open or closed.
+    // Both panels are the same width: left inset + gap + right inset must fit
+    // around two equal panels. The width is identical in both reveal states.
+    const int reserved =
+        kPlayerLeftInset + kLyricsGap + kLyricsRightInset;
     return std::clamp(
-        (root_width - kLyricsGap - kSideInset) / 2,
+        (root_width - reserved) / 2,
         360,
         kLyricsPanelMaxWidth);
 }
 
 int lyrics_slide_offset(int root_width, int panel_width, double reveal) {
     if (reveal <= 0.0) return 0;
-    const int panel = static_cast<int>(
-        std::lround(static_cast<double>(panel_width) * reveal));
-    const int gap = static_cast<int>(
-        std::lround(static_cast<double>(kLyricsGap) * reveal));
-    const double centered =
-        0.5 * (static_cast<double>(panel_width) - root_width +
-               2.0 * panel + 2.0 * gap);
-    const int max_offset = std::max(
-        0, (root_width - panel_width) / 2 - kSideInset);
-    return std::clamp(static_cast<int>(std::lround(centered)), 0, max_offset);
+    const int centered_left = (root_width - panel_width) / 2;
+    const int target_offset = std::max(0, centered_left - kPlayerLeftInset);
+    return static_cast<int>(std::lround(target_offset * reveal));
 }
 
 GtkWidget* create_icon_button(const char* icon_name,
@@ -362,14 +358,29 @@ void FullscreenPlayer::apply_layout() {
         lyrics_slide_offset(width, panel_width, lyrics_reveal_);
     player_panel_->set_slide_offset(offset * 2);
 
-    // The lyrics revealer is the same width as the player panel.
-    if (lyrics_panel_) lyrics_panel_->set_width(panel_width);
+    // The lyrics revealer is the same width as the player panel, held 200px
+    // away from the right edge so the 100px gap is preserved.
+    if (lyrics_panel_) {
+        lyrics_panel_->set_width(panel_width);
+        lyrics_panel_->set_right_margin(kLyricsRightInset);
+    }
 
-    // Keep the divider centred inside the gap between the two panels.
+    // Keep the divider centred inside the actual gap between the two panels.
     if (lyrics_divider_) {
-        gtk_widget_set_margin_end(
-            lyrics_divider_,
-            panel_width + (kLyricsGap - kDividerWidth) / 2);
+        const int player_left = (width - panel_width) / 2 - offset;
+        const int player_right = player_left + panel_width;
+        const int lyrics_left = width - kLyricsRightInset - panel_width;
+        const double gap_center =
+            0.5 * (static_cast<double>(player_right) + lyrics_left);
+        const int margin = std::max(
+            0,
+            static_cast<int>(std::lround(
+                static_cast<double>(width) - gap_center -
+                static_cast<double>(kDividerWidth) / 2.0)));
+        if (margin != last_divider_margin_) {
+            last_divider_margin_ = margin;
+            gtk_widget_set_margin_end(lyrics_divider_, margin);
+        }
     }
 
     // Artwork reaches its 900px target on tall windows and scales down on

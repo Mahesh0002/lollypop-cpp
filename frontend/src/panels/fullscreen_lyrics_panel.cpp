@@ -15,7 +15,7 @@
 namespace lollypop {
 namespace {
 
-constexpr double kLyricsAnimMs = 220.0;
+constexpr double kLyricsAnimMs = 340.0;
 
 } // namespace
 
@@ -81,6 +81,12 @@ void FullscreenLyricsPanel::set_width(int width) {
     gtk_widget_set_size_request(frame_, width, -1);
 }
 
+void FullscreenLyricsPanel::set_right_margin(int margin) {
+    if (!revealer_ || margin < 0 || margin == last_right_margin_) return;
+    last_right_margin_ = margin;
+    gtk_widget_set_margin_end(revealer_, margin);
+}
+
 void FullscreenLyricsPanel::request_lyrics_for_track(
     const std::string& track_id) {
     current_track_id_ = track_id;
@@ -126,7 +132,9 @@ gboolean FullscreenLyricsPanel::on_animation_tick(GtkWidget* widget,
     const gint64 elapsed_us = g_get_monotonic_time() - self->anim_start_;
     const double t = std::clamp(
         static_cast<double>(elapsed_us) / (kLyricsAnimMs * 1000.0), 0.0, 1.0);
-    const double eased = t * t * (3.0 - 2.0 * t);
+    // Quintic ease-in-out: slow departure and arrival, faster middle.
+    const double eased =
+        t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
     self->reveal_ = self->reveal_from_ +
         (self->reveal_target_ - self->reveal_from_) * eased;
 

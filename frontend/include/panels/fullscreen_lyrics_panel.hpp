@@ -45,6 +45,7 @@ public:
     void set_accent(const GdkRGBA& accent);
     void set_visible(bool visible);
     void set_width(int width);
+    void set_right_margin(int margin);
 
     void request_lyrics_for_track(const std::string& track_id);
     void set_position(int position_ms, int duration_ms);
@@ -68,6 +69,7 @@ private:
     gint64 anim_start_ = 0;
     guint anim_source_ = 0;
     int last_width_ = 0;
+    int last_right_margin_ = -1;
 
     static gboolean on_animation_tick(GtkWidget* widget,
                                       GdkFrameClock* clock,

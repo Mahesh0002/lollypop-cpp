@@ -83,6 +83,7 @@ private:
     double lyrics_reveal_ = 0.0;
     int last_width_ = 0;
     int last_height_ = 0;
+    int last_divider_margin_ = -1;
 
     void setup_ui();
     void create_top_bar();

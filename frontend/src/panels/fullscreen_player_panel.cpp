@@ -283,12 +283,16 @@ void FullscreenPlayerPanel::set_repeat_one(bool enabled) {
 }
 
 void FullscreenPlayerPanel::set_width(int width) {
-    if (!center_box_ || width <= 0) return;
+    if (!center_box_ || width <= 0 || width == last_width_) return;
+    last_width_ = width;
     gtk_widget_set_size_request(center_box_, width, -1);
 }
 
 void FullscreenPlayerPanel::set_slide_offset(int margin_end) {
-    if (!center_box_) return;
+    if (!center_box_ || margin_end < 0 || margin_end == last_slide_offset_) {
+        return;
+    }
+    last_slide_offset_ = margin_end;
     gtk_widget_set_margin_end(center_box_, margin_end);
 }
 

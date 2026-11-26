@@ -101,6 +101,8 @@ private:
 
     bool updating_controls_ = false;
     bool playing_ = false;
+    int last_width_ = -1;
+    int last_slide_offset_ = -1;
     int last_artwork_side_ = -1;
 
     void setup_ui();
