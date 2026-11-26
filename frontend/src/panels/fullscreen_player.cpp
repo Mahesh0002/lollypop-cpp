@@ -136,7 +136,7 @@ void FullscreenPlayer::setup_ui() {
     center_box_ = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_widget_add_css_class(center_box_, "fullscreen-player-center");
     gtk_widget_set_size_request(center_box_, 940, -1);
-    gtk_widget_set_hexpand(center_box_, TRUE);
+    gtk_widget_set_hexpand(center_box_, FALSE);
     gtk_widget_set_vexpand(center_box_, TRUE);
     gtk_widget_set_halign(center_box_, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(center_box_, GTK_ALIGN_CENTER);
