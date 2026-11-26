@@ -170,13 +170,20 @@ void track_columns_allocate(GtkWidget* widget, int width, int height,
             children.begin(), children.end(), [](GtkWidget* child) {
                 return column_role(child) == TrackColumnRole::Album;
             });
+        const bool has_artist = std::any_of(
+            children.begin(), children.end(), [](GtkWidget* child) {
+                return column_role(child) == TrackColumnRole::Artist;
+            });
         if (has_album) {
             shares[0] = available * kTitleShare / kTotalShare;
             shares[1] = available * kArtistShare / kTotalShare;
             shares[2] = available - shares[0] - shares[1];
-        } else {
+        } else if (has_artist) {
             shares[0] = available * 40 / 100;
             shares[1] = available - shares[0];
+        } else {
+            // Stacked title/artist rows have a single flexible child.
+            shares[0] = available;
         }
     }
     for (int i = 0; i < 3; ++i) {
@@ -331,6 +338,19 @@ void TrackRow::setup_ui() {
         gtk_box_append(GTK_BOX(box), artwork_stack);
     }
 
+    // Title/artist. Most rows use two columns; right-panel queue rows stack
+    // them as one flexible column so the artwork can lead the row.
+    GtkWidget* text_parent = box;
+    if (options_.stack_title_artist) {
+        text_parent = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+        gtk_widget_add_css_class(text_parent, "track-row-stacked-text");
+        gtk_widget_set_halign(text_parent, GTK_ALIGN_FILL);
+        gtk_widget_set_valign(text_parent, GTK_ALIGN_CENTER);
+        gtk_widget_set_visible(text_parent, TRUE);
+        set_track_column_role(text_parent, TrackColumnRole::Title);
+        gtk_box_append(GTK_BOX(box), text_parent);
+    }
+
     // Title
     title_label_.reset(gtk_label_new(track_.title.c_str()));
     g_object_ref_sink(title_label_.get());
@@ -338,11 +358,13 @@ void TrackRow::setup_ui() {
     gtk_label_set_xalign(GTK_LABEL(title_label_.get()), 0.0);
     gtk_label_set_ellipsize(GTK_LABEL(title_label_.get()),
                             PANGO_ELLIPSIZE_END);
-    gtk_widget_set_hexpand(title_label_.get(), FALSE);
+    gtk_widget_set_hexpand(title_label_.get(), options_.stack_title_artist);
     gtk_widget_set_valign(title_label_.get(), GTK_ALIGN_CENTER);
-    set_track_column_role(title_label_.get(), TrackColumnRole::Title);
+    if (!options_.stack_title_artist) {
+        set_track_column_role(title_label_.get(), TrackColumnRole::Title);
+    }
     gtk_widget_set_visible(title_label_.get(), TRUE);
-    gtk_box_append(GTK_BOX(box), title_label_.get());
+    gtk_box_append(GTK_BOX(text_parent), title_label_.get());
 
     // Artist
     artist_label_.reset(gtk_label_new(track_.artist.c_str()));
@@ -351,11 +373,13 @@ void TrackRow::setup_ui() {
     gtk_label_set_xalign(GTK_LABEL(artist_label_.get()), 0.0);
     gtk_label_set_ellipsize(GTK_LABEL(artist_label_.get()),
                             PANGO_ELLIPSIZE_END);
-    gtk_widget_set_hexpand(artist_label_.get(), FALSE);
+    gtk_widget_set_hexpand(artist_label_.get(), options_.stack_title_artist);
     gtk_widget_set_valign(artist_label_.get(), GTK_ALIGN_CENTER);
-    set_track_column_role(artist_label_.get(), TrackColumnRole::Artist);
+    if (!options_.stack_title_artist) {
+        set_track_column_role(artist_label_.get(), TrackColumnRole::Artist);
+    }
     gtk_widget_set_visible(artist_label_.get(), TRUE);
-    gtk_box_append(GTK_BOX(box), artist_label_.get());
+    gtk_box_append(GTK_BOX(text_parent), artist_label_.get());
 
     if (options_.show_album) {
         // Album

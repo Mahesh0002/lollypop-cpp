@@ -2272,6 +2272,23 @@ searchentry:focus,
     letter-spacing: -0.1px;
 }
 
+/* Right-panel queue: compact title/artist stack centered beside artwork. */
+.right-panel-queue-row .track-row-stacked-text {
+    min-width: 0;
+}
+
+.right-panel-queue-row .track-row-title {
+    font-size: var(--font-ui-small);
+    font-weight: var(--font-weight-semibold);
+    letter-spacing: 0;
+}
+
+.right-panel-queue-row .track-row-artist {
+    font-size: var(--font-footnote);
+    font-weight: var(--font-weight-regular);
+    letter-spacing: 0;
+}
+
 .track-row-album {
     color: var(--text-tertiary);
     font-size: var(--font-subhead);

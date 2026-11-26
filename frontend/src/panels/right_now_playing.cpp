@@ -825,10 +825,11 @@ void RightNowPlaying::populate_queue(
 
         auto row = std::make_unique<TrackRow>(
             main_window_, track, static_cast<int>(i + 1),
-            TrackRowOptions{.show_track_number = true,
+            TrackRowOptions{.show_track_number = false,
                             .show_album = false,
                             .show_duration = false,
-                            .enable_queue_actions = true});
+                            .enable_queue_actions = true,
+                            .stack_title_artist = true});
 
         row->set_play_callback([this, track_id](const Track&) {
             if (!main_window_) return;
@@ -894,6 +895,7 @@ void RightNowPlaying::populate_queue(
         });
 
         GtkWidget* row_widget = row->get_widget();
+        gtk_widget_add_css_class(row_widget, "right-panel-queue-row");
         gtk_widget_set_hexpand(row_widget, TRUE);
         safe_list_box_append(GTK_LIST_BOX(queue_view_), row_widget);
         queue_rows_.push_back(std::move(row));

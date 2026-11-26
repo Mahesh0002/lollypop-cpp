@@ -39,6 +39,8 @@ struct TrackRowOptions {
     bool show_album = true;
     bool show_duration = true;
     bool enable_queue_actions = false;  // For queue page: show context menu
+    // Right-panel queue rows: artwork first, title over artist, both centered.
+    bool stack_title_artist = false;
 };
 
 using QueueActionCallback = std::function<void(const Track&, const char* action)>;
