@@ -16,6 +16,8 @@
 #include <gtk/gtk.h>
 #include <gio/gio.h>
 #include <algorithm>
+#include <chrono>
+#include <ctime>
 #include <iostream>
 #include <vector>
 #include <string>
@@ -29,6 +31,33 @@ constexpr char kLiveRowKey[] = "lollypop-live-track-row";
 }  // namespace
 
 namespace {
+
+std::string format_date_added(gint64 timestamp) {
+    if (timestamp <= 0) return std::string();
+    const auto now = std::chrono::system_clock::now();
+    const gint64 now_seconds =
+        std::chrono::duration_cast<std::chrono::seconds>(
+            now.time_since_epoch()).count();
+    const gint64 elapsed = now_seconds - timestamp;
+    if (elapsed >= 0 && elapsed < 7 * 24 * 60 * 60) {
+        if (elapsed < 60) return "now";
+        if (elapsed < 60 * 60) {
+            return std::to_string(elapsed / 60) + "m ago";
+        }
+        if (elapsed < 24 * 60 * 60) {
+            return std::to_string(elapsed / (60 * 60)) + "h ago";
+        }
+        return std::to_string(elapsed / (24 * 60 * 60)) + "d ago";
+    }
+    const std::time_t time = static_cast<std::time_t>(timestamp);
+    std::tm local_time{};
+    if (localtime_r(&time, &local_time) == nullptr) return std::string();
+    char buffer[16];
+    if (std::strftime(buffer, sizeof(buffer), "%d %b %y", &local_time) == 0) {
+        return std::string();
+    }
+    return std::string(buffer);
+}
 
 constexpr int kColumnSpacing = track_list_metrics::kColumnGap;
 constexpr const char* kTrackColumnRoleKey = "track-column-role";
@@ -47,6 +76,7 @@ int role_index(TrackColumnRole role) {
         case TrackColumnRole::Fixed:
         case TrackColumnRole::Year:
         case TrackColumnRole::Genre:
+        case TrackColumnRole::DateAdded:
         case TrackColumnRole::Duration:
         case TrackColumnRole::Favourite:
             break;
@@ -437,6 +467,23 @@ void TrackRow::setup_ui() {
         set_track_column_role(genre_label_.get(), TrackColumnRole::Genre);
         gtk_widget_set_visible(genre_label_.get(), TRUE);
         gtk_box_append(GTK_BOX(box), genre_label_.get());
+    }
+
+    if (options_.show_date_added) {
+        const std::string date_added_text =
+            format_date_added(track_.date_added);
+        date_added_label_.reset(gtk_label_new(date_added_text.c_str()));
+        g_object_ref_sink(date_added_label_.get());
+        gtk_widget_add_css_class(date_added_label_.get(),
+                                 "track-row-date-added");
+        gtk_label_set_xalign(GTK_LABEL(date_added_label_.get()), 0.0);
+        gtk_widget_set_size_request(date_added_label_.get(),
+                                    track_list_metrics::kDateAddedWidth, -1);
+        gtk_widget_set_valign(date_added_label_.get(), GTK_ALIGN_CENTER);
+        set_track_column_role(date_added_label_.get(),
+                              TrackColumnRole::DateAdded);
+        gtk_widget_set_visible(date_added_label_.get(), TRUE);
+        gtk_box_append(GTK_BOX(box), date_added_label_.get());
     }
 
     // Duration

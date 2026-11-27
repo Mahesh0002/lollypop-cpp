@@ -2312,7 +2312,8 @@ searchentry:focus,
 }
 
 .track-row-year,
-.track-row-genre {
+.track-row-genre,
+.track-row-date-added {
     color: var(--text-tertiary);
     font-size: var(--font-subhead);
     font-weight: var(--font-weight-regular);

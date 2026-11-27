@@ -28,6 +28,7 @@ constexpr int kSideMargin = 20;
 constexpr int kDurationWidth = 58;
 constexpr int kYearWidth = 64;
 constexpr int kGenreWidth = 140;  // fits longest tags (e.g. "Singer/Songwriter")
+constexpr int kDateAddedWidth = 96;  // compact relative time or short date
 
 constexpr int kLikeButtonSize = 34;
 constexpr int kLikeIconSize = 20;

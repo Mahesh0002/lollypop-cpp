@@ -148,10 +148,11 @@ void SongsPage::create_header(GtkWidget* main_box) {
         {"Title",    "title",    TrackColumnRole::Title,     false},
         {"Artist",   "artist",   TrackColumnRole::Artist,    false},
         {"Album",    "album",    TrackColumnRole::Album,     false},
-        {"Year",     "year",     TrackColumnRole::Year,       false},
-        {"Genre",    "genre",    TrackColumnRole::Genre,      false},
-        {"Duration", "duration", TrackColumnRole::Duration,   false},
-        {"",         "liked",    TrackColumnRole::Favourite,  true},
+        {"Year",       "year",        TrackColumnRole::Year,       false},
+        {"Genre",      "genre",       TrackColumnRole::Genre,      false},
+        {"Date Added", "date_added",  TrackColumnRole::DateAdded,  false},
+        {"Duration",   "duration",    TrackColumnRole::Duration,   false},
+        {"",           "liked",       TrackColumnRole::Favourite,  true},
     };
     constexpr size_t column_count =
         sizeof(columns_info) / sizeof(columns_info[0]);
@@ -168,18 +169,29 @@ void SongsPage::create_header(GtkWidget* main_box) {
             gtk_label_set_xalign(GTK_LABEL(col_widget), 0.0);
         }
         gtk_widget_add_css_class(col_widget, "songs-column-header");
-        if (i == 0) {
-            gtk_widget_set_size_request(col_widget,
-                                        track_list_metrics::kArtworkSize, -1);
-        } else if (i == 4) {
-            gtk_widget_set_size_request(col_widget,
-                                        track_list_metrics::kYearWidth, -1);
-        } else if (i == 5) {
-            gtk_widget_set_size_request(col_widget,
-                                        track_list_metrics::kGenreWidth, -1);
-        } else if (i == 6) {
-            gtk_widget_set_size_request(col_widget,
-                                        track_list_metrics::kDurationWidth, -1);
+        switch (info.role) {
+            case TrackColumnRole::Fixed:
+                gtk_widget_set_size_request(
+                    col_widget, track_list_metrics::kArtworkSize, -1);
+                break;
+            case TrackColumnRole::Year:
+                gtk_widget_set_size_request(
+                    col_widget, track_list_metrics::kYearWidth, -1);
+                break;
+            case TrackColumnRole::Genre:
+                gtk_widget_set_size_request(
+                    col_widget, track_list_metrics::kGenreWidth, -1);
+                break;
+            case TrackColumnRole::DateAdded:
+                gtk_widget_set_size_request(
+                    col_widget, track_list_metrics::kDateAddedWidth, -1);
+                break;
+            case TrackColumnRole::Duration:
+                gtk_widget_set_size_request(
+                    col_widget, track_list_metrics::kDurationWidth, -1);
+                break;
+            default:
+                break;
         }
 
         if (i > 0) {
@@ -291,6 +303,7 @@ void SongsPage::append_tracks(std::vector<Track>&& tracks) {
     TrackRowOptions options;
     options.show_year = true;
     options.show_genre = true;
+    options.show_date_added = true;
 
     for (size_t i = 0; i < tracks.size(); ++i) {
         auto row = std::make_unique<TrackRow>(main_window_, tracks[i],
