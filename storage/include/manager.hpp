@@ -197,7 +197,7 @@ public:
 
     // Keyset pagination (avoids OFFSET overhead on large libraries)
     // sort_key must be one of: date_added, title, artist, album, duration,
-    // play_count, last_played, year, track_number.
+    // play_count, last_played, year, track_number, genre, liked.
     // Optional genre_filter restricts results to tracks with the given genre.
     // A negative limit means unbounded (SQLite LIMIT -1).
     std::vector<Track> get_tracks_paginated(int limit,

@@ -96,6 +96,11 @@ private:
 
     static gboolean on_scroll_restore_idle(gpointer data);
     static void on_scroll_changed(GtkAdjustment* adjustment, gpointer user_data);
+    void sync_sticky_header_margin();
+    static gboolean apply_sticky_header_margin_idle(gpointer data);
+    static void on_sticky_header_height_changed(GObject* object,
+                                                GParamSpec* pspec,
+                                                gpointer user_data);
 };
 
 } // namespace lollypop

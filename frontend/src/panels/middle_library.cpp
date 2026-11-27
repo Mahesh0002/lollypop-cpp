@@ -127,6 +127,8 @@ void MiddleLibrary::setup_ui() {
                               track_list_metrics::kStickyHeaderOffset);
     gtk_widget_set_visible(sticky_header_, FALSE);
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay_), sticky_header_);
+    g_signal_connect(sticky_header_, "notify::height",
+                     G_CALLBACK(on_sticky_header_height_changed), this);
 }
 
 void MiddleLibrary::create_content_area() {
@@ -204,6 +206,36 @@ void MiddleLibrary::on_scroll_changed(GtkAdjustment* adjustment,
             search->handle_scroll(adjustment);
         }
     }
+}
+
+void MiddleLibrary::sync_sticky_header_margin() {
+    if (!sticky_header_ || !content_box_) return;
+    if (active_page_id_ != "songs" ||
+        !gtk_widget_get_visible(sticky_header_)) {
+        return;
+    }
+
+    int height = gtk_widget_get_height(sticky_header_);
+    if (height <= 0) {
+        GtkRequisition requisition{};
+        gtk_widget_get_preferred_size(sticky_header_, nullptr, &requisition);
+        height = requisition.height;
+    }
+    if (gtk_widget_get_margin_top(content_box_) != height) {
+        gtk_widget_set_margin_top(content_box_, height);
+    }
+}
+
+gboolean MiddleLibrary::apply_sticky_header_margin_idle(gpointer data) {
+    auto* self = static_cast<MiddleLibrary*>(data);
+    if (self) self->sync_sticky_header_margin();
+    return G_SOURCE_REMOVE;
+}
+
+void MiddleLibrary::on_sticky_header_height_changed(GObject*, GParamSpec*,
+                                                    gpointer user_data) {
+    auto* self = static_cast<MiddleLibrary*>(user_data);
+    if (self) self->sync_sticky_header_margin();
 }
 
 void MiddleLibrary::create_placeholder_pages() {
@@ -417,9 +449,12 @@ void MiddleLibrary::update_sticky_header() {
             gtk_box_append(GTK_BOX(sticky_header_), header);
         }
         gtk_widget_set_visible(sticky_header_, TRUE);
-        gtk_widget_set_margin_top(
-            content_box_, track_list_metrics::kStickyHeaderOffset +
-                              track_list_metrics::kStickyHeaderHeight);
+        // Reserve exactly what the sticky header occupies. The height may
+        // still be zero before the first layout pass, so also re-apply it on
+        // an idle to keep rows from starting underneath the pinned bar.
+        sync_sticky_header_margin();
+        g_idle_add_full(G_PRIORITY_DEFAULT_IDLE,
+                        apply_sticky_header_margin_idle, this, nullptr);
         return;
     }
 

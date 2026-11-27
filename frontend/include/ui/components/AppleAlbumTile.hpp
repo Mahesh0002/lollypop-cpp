@@ -33,7 +33,8 @@ public:
 
     explicit AppleAlbumTile(const Album& album,
                             int tile_size = kDefaultTileSize,
-                            bool show_favorite = false);
+                            bool show_favorite = false,
+                            bool reveal_scrim_on_hover = true);
     ~AppleAlbumTile();
 
     AppleAlbumTile(const AppleAlbumTile&) = delete;
@@ -86,6 +87,7 @@ private:
     std::unique_ptr<GtkWidget, WidgetDeleter> tile_;    // overlay inside box
     std::unique_ptr<ArtworkView> artwork_view_;
     std::unique_ptr<GtkWidget, WidgetDeleter> scrim_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> scrim_revealer_;
     std::unique_ptr<GtkWidget, WidgetDeleter> meta_box_;
     std::unique_ptr<GtkWidget, WidgetDeleter> favorite_button_;
     std::unique_ptr<GtkWidget, WidgetDeleter> favorite_image_;
@@ -97,6 +99,9 @@ private:
     int tile_width_ = kDefaultTileSize;
     int tile_height_ = kDefaultTileSize;
     bool show_favorite_ = false;
+    bool reveal_scrim_on_hover_ = false;
+    bool pointer_inside_ = false;
+    bool focus_inside_ = false;
     bool favorite_ = false;
     bool favorite_press_active_ = false;
     bool playing_ = false;
@@ -121,6 +126,7 @@ private:
     void refresh_favorite_icon();
     void refresh_play_icon();
     void animate_hover(bool hover);
+    void update_scrim_reveal();
 
     static void on_play_clicked(GtkButton* button, gpointer user_data);
 
@@ -131,6 +137,10 @@ private:
                              double y, gpointer user_data);
     static gboolean on_leave(GtkEventControllerMotion* controller,
                              gpointer user_data);
+    static gboolean on_focus_enter(GtkEventControllerFocus* controller,
+                                   gpointer user_data);
+    static gboolean on_focus_leave(GtkEventControllerFocus* controller,
+                                   gpointer user_data);
     static gboolean on_released(GtkGestureClick* gesture, int n_press,
                                 double x, double y, gpointer user_data);
     static gboolean on_key_pressed(GtkEventControllerKey* controller,

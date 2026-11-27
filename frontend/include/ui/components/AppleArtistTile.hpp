@@ -63,6 +63,7 @@ private:
     std::unique_ptr<GtkWidget, WidgetDeleter> tile_;
     std::unique_ptr<ArtworkView> artwork_view_;
     std::unique_ptr<GtkWidget, WidgetDeleter> scrim_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> scrim_revealer_;
     std::unique_ptr<GtkWidget, WidgetDeleter> meta_box_;
     std::unique_ptr<GtkWidget, WidgetDeleter> play_button_;
 
@@ -73,6 +74,8 @@ private:
     int tile_width_ = kDefaultTileSize;
     int tile_height_ = kDefaultTileSize;
     bool playing_ = false;
+    bool pointer_inside_ = false;
+    bool focus_inside_ = false;
     bool artwork_visible_ = true;
     std::string artwork_path_applied_;
     guint fit_tick_id_ = 0;
@@ -88,6 +91,7 @@ private:
     GMenu* create_menu_model();
     void refresh_play_icon();
     void animate_hover(bool hover);
+    void update_scrim_reveal();
 
     static gboolean fit_to_parent(GtkWidget* widget, GdkFrameClock* clock,
                                   gpointer user_data);
@@ -95,6 +99,10 @@ private:
                              double y, gpointer user_data);
     static gboolean on_leave(GtkEventControllerMotion* controller,
                              gpointer user_data);
+    static gboolean on_focus_enter(GtkEventControllerFocus* controller,
+                                   gpointer user_data);
+    static gboolean on_focus_leave(GtkEventControllerFocus* controller,
+                                   gpointer user_data);
     static gboolean on_released(GtkGestureClick* gesture, int n_press,
                                 double x, double y, gpointer user_data);
     static gboolean on_key_pressed(GtkEventControllerKey* controller,

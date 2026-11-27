@@ -15,6 +15,11 @@
 
 namespace lollypop {
 
+namespace {
+constexpr int kScrimRevealDurationMs = 160;  // matches --motion-base
+constexpr int kScrimPercent = 20;
+}  // namespace
+
 AppleArtistTile::AppleArtistTile(const Artist& artist, int tile_size)
     : artist_(artist),
       tile_width_(tile_size > 0 ? tile_size : kDefaultTileSize),
@@ -41,7 +46,8 @@ void AppleArtistTile::apply_size(int width, bool force) {
     gtk_widget_set_size_request(widget_.get(), width, width);
     gtk_widget_set_size_request(tile_.get(), width, width);
     artwork_view_->set_preferred_size(width, width);
-    gtk_widget_set_size_request(scrim_.get(), -1, (width * 20) / 100);
+    gtk_widget_set_size_request(scrim_.get(), -1,
+                                (width * kScrimPercent) / 100);
 
     const int inset = width < 200 ? 6 : 10;
     const int bottom_inset = width < 200 ? 3 : 7;
@@ -112,6 +118,7 @@ void AppleArtistTile::setup_ui() {
     g_object_ref_sink(widget_.get());
     gtk_widget_add_css_class(widget_.get(), "apple-album-tile");
     gtk_widget_add_css_class(widget_.get(), "apple-artist-tile");
+    gtk_widget_add_css_class(widget_.get(), "apple-artist-tile-hover-scrim");
     gtk_widget_set_focusable(widget_.get(), TRUE);
     gtk_widget_set_size_request(widget_.get(), tile_width_, tile_height_);
     gtk_widget_set_halign(widget_.get(), GTK_ALIGN_FILL);
@@ -194,7 +201,22 @@ void AppleArtistTile::setup_ui() {
     gtk_widget_set_visible(bar_row, TRUE);
     gtk_box_append(GTK_BOX(scrim_.get()), bar_row);
     gtk_box_append(GTK_BOX(bar_row), meta_box_.get());
-    gtk_overlay_add_overlay(GTK_OVERLAY(tile_.get()), scrim_.get());
+
+    // The scrim grows from 0 to its 20% height on hover or keyboard focus,
+    // matching every other translucent artwork scrim in the app.
+    scrim_revealer_.reset(gtk_revealer_new());
+    g_object_ref_sink(scrim_revealer_.get());
+    gtk_widget_set_halign(scrim_revealer_.get(), GTK_ALIGN_FILL);
+    gtk_widget_set_valign(scrim_revealer_.get(), GTK_ALIGN_END);
+    gtk_widget_set_hexpand(scrim_revealer_.get(), TRUE);
+    gtk_widget_set_visible(scrim_revealer_.get(), TRUE);
+    gtk_revealer_set_transition_type(
+        GTK_REVEALER(scrim_revealer_.get()),
+        GTK_REVEALER_TRANSITION_TYPE_SLIDE_UP);
+    gtk_revealer_set_transition_duration(
+        GTK_REVEALER(scrim_revealer_.get()), kScrimRevealDurationMs);
+    gtk_revealer_set_child(GTK_REVEALER(scrim_revealer_.get()), scrim_.get());
+    gtk_overlay_add_overlay(GTK_OVERLAY(tile_.get()), scrim_revealer_.get());
 
     play_button_.reset(gtk_button_new_from_icon_name(
         "media-playback-start-symbolic"));
@@ -215,6 +237,11 @@ void AppleArtistTile::setup_ui() {
     g_signal_connect(motion, "enter", G_CALLBACK(on_enter), this);
     g_signal_connect(motion, "leave", G_CALLBACK(on_leave), this);
     gtk_widget_add_controller(widget_.get(), motion);
+
+    auto* focus = gtk_event_controller_focus_new();
+    g_signal_connect(focus, "enter", G_CALLBACK(on_focus_enter), this);
+    g_signal_connect(focus, "leave", G_CALLBACK(on_focus_leave), this);
+    gtk_widget_add_controller(widget_.get(), GTK_EVENT_CONTROLLER(focus));
 
     auto* click = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_PRIMARY);
@@ -248,11 +275,20 @@ void AppleArtistTile::refresh_play_icon() {
 }
 
 void AppleArtistTile::animate_hover(bool hover) {
+    pointer_inside_ = hover;
     if (hover) {
         gtk_widget_add_css_class(widget_.get(), "hover");
     } else {
         gtk_widget_remove_css_class(widget_.get(), "hover");
     }
+    update_scrim_reveal();
+}
+
+void AppleArtistTile::update_scrim_reveal() {
+    if (!scrim_revealer_) return;
+    const bool reveal = pointer_inside_ || focus_inside_;
+    gtk_revealer_set_reveal_child(GTK_REVEALER(scrim_revealer_.get()),
+                                  reveal ? TRUE : FALSE);
 }
 
 gboolean AppleArtistTile::on_enter(GtkEventControllerMotion*, double, double,
@@ -266,6 +302,24 @@ gboolean AppleArtistTile::on_enter(GtkEventControllerMotion*, double, double,
 gboolean AppleArtistTile::on_leave(GtkEventControllerMotion*, gpointer user_data) {
     if (auto* self = static_cast<AppleArtistTile*>(user_data)) {
         self->animate_hover(false);
+    }
+    return FALSE;
+}
+
+gboolean AppleArtistTile::on_focus_enter(GtkEventControllerFocus*,
+                                         gpointer user_data) {
+    if (auto* self = static_cast<AppleArtistTile*>(user_data)) {
+        self->focus_inside_ = true;
+        self->update_scrim_reveal();
+    }
+    return FALSE;
+}
+
+gboolean AppleArtistTile::on_focus_leave(GtkEventControllerFocus*,
+                                         gpointer user_data) {
+    if (auto* self = static_cast<AppleArtistTile*>(user_data)) {
+        self->focus_inside_ = false;
+        self->update_scrim_reveal();
     }
     return FALSE;
 }

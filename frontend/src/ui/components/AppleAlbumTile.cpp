@@ -17,7 +17,20 @@
 
 namespace lollypop {
 
-AppleAlbumTile::AppleAlbumTile(const Album& album, int tile_size, bool show_favorite) : album_(album), tile_width_(tile_size > 0 ? tile_size : kDefaultTileSize), tile_height_(tile_width_), show_favorite_(show_favorite) { setup_ui(); }
+namespace {
+constexpr int kScrimRevealDurationMs = 160;  // matches --motion-base
+constexpr int kScrimPercent = 20;
+}  // namespace
+
+AppleAlbumTile::AppleAlbumTile(const Album& album, int tile_size,
+                               bool show_favorite, bool reveal_scrim_on_hover)
+    : album_(album),
+      tile_width_(tile_size > 0 ? tile_size : kDefaultTileSize),
+      tile_height_(tile_width_),
+      show_favorite_(show_favorite),
+      reveal_scrim_on_hover_(reveal_scrim_on_hover) {
+    setup_ui();
+}
 
 AppleAlbumTile::~AppleAlbumTile() { if (fit_tick_id_ != 0 && widget_) { gtk_widget_remove_tick_callback(widget_.get(), fit_tick_id_); fit_tick_id_ = 0; } }
 
@@ -32,9 +45,9 @@ tile_height_ = width;
 gtk_widget_set_size_request(widget_.get(), width, width);
 gtk_widget_set_size_request(tile_.get(), width, width);
 artwork_view_->set_preferred_size(width, width);
-// Strictly 20% of the artwork height (the tile is square, so `width` is
-// also the artwork height).
-gtk_widget_set_size_request(scrim_.get(), -1, (width * 20) / 100);
+// The tile is square, so `width` is also the artwork height. Both scrim
+// styles occupy 20% of it; the hover variant reveals that height on demand.
+gtk_widget_set_size_request(scrim_.get(), -1, (width * kScrimPercent) / 100);
 
 const int meta_inset = width < 200 ? 6 : 10;
 const int meta_bottom_inset = width < 200 ? 3 : 7;
@@ -105,7 +118,11 @@ artwork_path_applied_ = target;
 
 void AppleAlbumTile::setup_ui() {
     // Fill the homogeneous FlowBox cell; no centering and no fixed width.
-    widget_.reset(gtk_box_new(GTK_ORIENTATION_VERTICAL, 0)); g_object_ref_sink(widget_.get()); gtk_widget_add_css_class(widget_.get(), "apple-album-tile"); gtk_widget_set_focusable(widget_.get(), TRUE); gtk_widget_set_size_request(widget_.get(), tile_width_, tile_height_); gtk_widget_set_halign(widget_.get(), GTK_ALIGN_FILL); gtk_widget_set_valign(widget_.get(), GTK_ALIGN_FILL); gtk_widget_set_hexpand(widget_.get(), TRUE); gtk_widget_set_vexpand(widget_.get(), FALSE); gtk_widget_set_overflow(widget_.get(), GTK_OVERFLOW_HIDDEN); gtk_widget_set_tooltip_text(widget_.get(), album_.title.c_str()); const std::string album_label = album_.title + " by " + (album_.artist.empty() ? "Unknown Artist" : album_.artist); accessibility::set_label(widget_.get(), album_label.c_str()); gtk_widget_set_visible(widget_.get(), TRUE);
+    widget_.reset(gtk_box_new(GTK_ORIENTATION_VERTICAL, 0)); g_object_ref_sink(widget_.get()); gtk_widget_add_css_class(widget_.get(), "apple-album-tile");
+if (reveal_scrim_on_hover_) {
+    gtk_widget_add_css_class(widget_.get(), "apple-album-tile-hover-scrim");
+}
+gtk_widget_set_focusable(widget_.get(), TRUE); gtk_widget_set_size_request(widget_.get(), tile_width_, tile_height_); gtk_widget_set_halign(widget_.get(), GTK_ALIGN_FILL); gtk_widget_set_valign(widget_.get(), GTK_ALIGN_FILL); gtk_widget_set_hexpand(widget_.get(), TRUE); gtk_widget_set_vexpand(widget_.get(), FALSE); gtk_widget_set_overflow(widget_.get(), GTK_OVERFLOW_HIDDEN); gtk_widget_set_tooltip_text(widget_.get(), album_.title.c_str()); const std::string album_label = album_.title + " by " + (album_.artist.empty() ? "Unknown Artist" : album_.artist); accessibility::set_label(widget_.get(), album_label.c_str()); gtk_widget_set_visible(widget_.get(), TRUE);
 
 // Inner overlay holds the artwork, scrim and favourite button.
 tile_.reset(gtk_overlay_new());
@@ -180,7 +197,26 @@ gtk_widget_set_valign(bar_row, GTK_ALIGN_FILL);
 gtk_widget_set_visible(bar_row, TRUE);
 gtk_box_append(GTK_BOX(scrim_.get()), bar_row);
 gtk_box_append(GTK_BOX(bar_row), meta_box_.get());
-gtk_overlay_add_overlay(GTK_OVERLAY(tile_.get()), scrim_.get());
+
+if (reveal_scrim_on_hover_) {
+    // A revealer animates the scrim's height from 0 to its 20% request while
+    // CSS fades it in, so the bar grows upward instead of popping into view.
+    scrim_revealer_.reset(gtk_revealer_new());
+    g_object_ref_sink(scrim_revealer_.get());
+    gtk_widget_set_halign(scrim_revealer_.get(), GTK_ALIGN_FILL);
+    gtk_widget_set_valign(scrim_revealer_.get(), GTK_ALIGN_END);
+    gtk_widget_set_hexpand(scrim_revealer_.get(), TRUE);
+    gtk_widget_set_visible(scrim_revealer_.get(), TRUE);
+    gtk_revealer_set_transition_type(
+        GTK_REVEALER(scrim_revealer_.get()),
+        GTK_REVEALER_TRANSITION_TYPE_SLIDE_UP);
+    gtk_revealer_set_transition_duration(
+        GTK_REVEALER(scrim_revealer_.get()), kScrimRevealDurationMs);
+    gtk_revealer_set_child(GTK_REVEALER(scrim_revealer_.get()), scrim_.get());
+    gtk_overlay_add_overlay(GTK_OVERLAY(tile_.get()), scrim_revealer_.get());
+} else {
+    gtk_overlay_add_overlay(GTK_OVERLAY(tile_.get()), scrim_.get());
+}
 
 if (show_favorite_) {
     favorite_button_.reset(gtk_button_new_from_icon_name("non-starred-symbolic"));
@@ -237,6 +273,12 @@ g_signal_connect(motion, "enter", G_CALLBACK(on_enter), this);
 g_signal_connect(motion, "leave", G_CALLBACK(on_leave), this);
 gtk_widget_add_controller(widget_.get(), motion);
 
+// Keyboard focus reveals the same controls as hover.
+auto* focus = gtk_event_controller_focus_new();
+g_signal_connect(focus, "enter", G_CALLBACK(on_focus_enter), this);
+g_signal_connect(focus, "leave", G_CALLBACK(on_focus_leave), this);
+gtk_widget_add_controller(widget_.get(), GTK_EVENT_CONTROLLER(focus));
+
 auto* click = gtk_gesture_click_new();
 gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_PRIMARY);
 g_signal_connect(click, "released", G_CALLBACK(on_released), this);
@@ -287,11 +329,23 @@ if (favorite_button_) {
 
 }
 
-void AppleAlbumTile::animate_hover(bool hover) { if (hover) { gtk_widget_add_css_class(widget_.get(), "hover"); } else { gtk_widget_remove_css_class(widget_.get(), "hover"); } }
+void AppleAlbumTile::animate_hover(bool hover) { pointer_inside_ = hover; if (hover) { gtk_widget_add_css_class(widget_.get(), "hover"); } else { gtk_widget_remove_css_class(widget_.get(), "hover"); } update_scrim_reveal(); }
+
+void AppleAlbumTile::update_scrim_reveal() { if (!reveal_scrim_on_hover_ || !scrim_revealer_) return;
+
+const bool reveal = pointer_inside_ || focus_inside_;
+gtk_revealer_set_reveal_child(GTK_REVEALER(scrim_revealer_.get()),
+                              reveal ? TRUE : FALSE);
+
+}
 
 gboolean AppleAlbumTile::on_enter(GtkEventControllerMotion*, double, double, gpointer user_data) { if (auto* self = static_cast<AppleAlbumTile*>(user_data)) { self->animate_hover(true); } return FALSE; }
 
 gboolean AppleAlbumTile::on_leave(GtkEventControllerMotion*, gpointer user_data) { if (auto* self = static_cast<AppleAlbumTile*>(user_data)) { self->animate_hover(false); } return FALSE; }
+
+gboolean AppleAlbumTile::on_focus_enter(GtkEventControllerFocus*, gpointer user_data) { if (auto* self = static_cast<AppleAlbumTile*>(user_data)) { self->focus_inside_ = true; self->update_scrim_reveal(); } return FALSE; }
+
+gboolean AppleAlbumTile::on_focus_leave(GtkEventControllerFocus*, gpointer user_data) { if (auto* self = static_cast<AppleAlbumTile*>(user_data)) { self->focus_inside_ = false; self->update_scrim_reveal(); } return FALSE; }
 
 gboolean AppleAlbumTile::on_released(GtkGestureClick*, int n_press, double, double, gpointer user_data) { auto* self = static_cast<AppleAlbumTile*>(user_data); if (!self) return FALSE;
 

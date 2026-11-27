@@ -1282,17 +1282,23 @@ std::vector<Track> StorageManager::get_tracks_paginated(int limit,
         {"last_played", "last_played"},
         {"year", "year"},
         {"track_number", "track_number"},
+        {"genre", "genre"},
+        {"liked", "liked"},
     };
 
     auto it = valid_sort_keys.find(sort_key);
     if (it == valid_sort_keys.end()) {
         it = valid_sort_keys.find("date_added");
     }
-    const std::string& column = it->second;
+    const std::string sort_column = it->second;
     const bool is_numeric =
-        (column == "date_added" || column == "duration" ||
-         column == "play_count" || column == "last_played" ||
-         column == "year" || column == "track_number");
+        (sort_column == "date_added" || sort_column == "duration" ||
+         sort_column == "play_count" || sort_column == "last_played" ||
+         sort_column == "year" || sort_column == "track_number" ||
+         sort_column == "liked");
+    // Qualify the column so a genre-filtered join cannot make "genre"
+    // ambiguous between tracks and track_genres.
+    const std::string column = "tracks." + sort_column;
 
     std::vector<Track> tracks;
     // limit == 0 returns nothing; a negative limit maps to SQLite's LIMIT -1

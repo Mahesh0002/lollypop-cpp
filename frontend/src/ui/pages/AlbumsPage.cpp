@@ -318,7 +318,8 @@ void AlbumsPage::populate(const std::vector<Album>& albums) {
             tile = album_tiles_[i].get();
             tile->update_album(album, false);
         } else {
-            auto owned = std::make_unique<AppleAlbumTile>(album, kTileSize, true);
+            auto owned = std::make_unique<AppleAlbumTile>(album, kTileSize,
+                                                           true, true);
             tile = owned.get();
             tile->set_play_callback(
                 [this](const Album& a) { on_album_played(a); });

@@ -25,19 +25,25 @@ class ArtworkView;
 class EqualizerIndicator;
 
 // Direct children tagged with one of these roles are laid out by
-// create_track_columns_layout(). Artwork, duration and like are fixed-width;
-// Title/Artist/Album split what remains 20:30:25 (of the 75 total shares).
+// create_track_columns_layout(). Year, Genre, Duration and Favourite have
+// fixed widths; Title/Artist/Album split what remains 20:30:25.
 enum class TrackColumnRole : int {
     Fixed = 0,
     Title = 1,
     Artist = 2,
     Album = 3,
+    Year = 4,
+    Genre = 5,
+    Duration = 6,
+    Favourite = 7,
 };
 
 struct TrackRowOptions {
     bool show_track_number = false;
     bool show_album = true;
     bool show_duration = true;
+    bool show_year = false;
+    bool show_genre = false;
     bool enable_queue_actions = false;  // For queue page: show context menu
     // Right-panel queue rows: artwork first, title over artist, both centered.
     bool stack_title_artist = false;
@@ -93,6 +99,8 @@ private:
     std::unique_ptr<GtkWidget, WidgetDeleter> title_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> artist_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> album_label_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> year_label_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> genre_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> duration_label_;
     std::unique_ptr<GtkWidget, WidgetDeleter> like_button_;
 

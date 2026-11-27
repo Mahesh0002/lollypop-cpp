@@ -373,6 +373,10 @@ inline void append_scheme_tokens(std::ostringstream& css, bool dark,
     css << "  --scrim-strong: "
         << rgba_from_rgb(dark ? kBlack : kInkLight, dark ? 0.55 : 0.86)
         << ";\n";
+    // Same colour as the scrim with zero alpha, so gradients fade without
+    // interpolating towards transparent black in light mode.
+    css << "  --scrim-transparent: "
+        << rgba_from_rgb(dark ? kBlack : kInkLight, 0.0) << ";\n";
     css << "  --scrim-border: "
         << rgba_from_rgb(dark ? kInkLight : kInkDark, dark ? 0.16 : 0.08)
         << ";\n";

@@ -30,11 +30,35 @@ namespace {
 constexpr int kDetailArtworkSize = 500;
 constexpr int kDetailHeaderHeight = 500;
 constexpr int kRelatedArtworkSize = 112;
+constexpr int kRelatedScrimPercent = 20;
+constexpr int kRelatedScrimRevealMs = 160;  // matches --motion-base
 
 struct NavigationPayload {
     ArtistDetailPage* page;
     std::string value;
 };
+
+void reveal_related_album_scrim(GtkWidget* revealer, bool reveal) {
+    gtk_revealer_set_reveal_child(GTK_REVEALER(revealer),
+                                  reveal ? TRUE : FALSE);
+}
+
+void on_related_album_enter(GtkEventControllerMotion*, double, double,
+                            gpointer user_data) {
+    reveal_related_album_scrim(static_cast<GtkWidget*>(user_data), true);
+}
+
+void on_related_album_leave(GtkEventControllerMotion*, gpointer user_data) {
+    reveal_related_album_scrim(static_cast<GtkWidget*>(user_data), false);
+}
+
+void on_related_album_focus_in(GtkEventControllerFocus*, gpointer user_data) {
+    reveal_related_album_scrim(static_cast<GtkWidget*>(user_data), true);
+}
+
+void on_related_album_focus_out(GtkEventControllerFocus*, gpointer user_data) {
+    reveal_related_album_scrim(static_cast<GtkWidget*>(user_data), false);
+}
 
 } // namespace
 
@@ -577,6 +601,17 @@ void ArtistDetailPage::populate_related_albums(
         gtk_widget_set_halign(card, GTK_ALIGN_FILL);
         gtk_widget_set_visible(card, TRUE);
 
+        GtkWidget* artwork_overlay = gtk_overlay_new();
+        gtk_widget_add_css_class(artwork_overlay,
+                                 "artist-related-album-artwork-overlay");
+        gtk_widget_set_size_request(artwork_overlay, kRelatedArtworkSize,
+                                    kRelatedArtworkSize);
+        gtk_widget_set_hexpand(artwork_overlay, FALSE);
+        gtk_widget_set_halign(artwork_overlay, GTK_ALIGN_CENTER);
+        gtk_widget_set_valign(artwork_overlay, GTK_ALIGN_START);
+        gtk_widget_set_overflow(artwork_overlay, GTK_OVERFLOW_HIDDEN);
+        gtk_widget_set_visible(artwork_overlay, TRUE);
+
         auto artwork = std::make_unique<ArtworkView>();
         artwork->set_preferred_size(kRelatedArtworkSize,
                                     kRelatedArtworkSize);
@@ -586,19 +621,58 @@ void ArtistDetailPage::populate_related_albums(
         gtk_widget_add_css_class(artwork_widget,
                                  "artist-related-album-artwork");
         gtk_widget_set_visible(artwork_widget, TRUE);
-        gtk_widget_set_hexpand(artwork_widget, FALSE);
-        gtk_widget_set_halign(artwork_widget, GTK_ALIGN_CENTER);
-        safe_box_append(GTK_BOX(card), artwork_widget);
+        gtk_widget_set_hexpand(artwork_widget, TRUE);
+        gtk_widget_set_halign(artwork_widget, GTK_ALIGN_FILL);
+        gtk_widget_set_valign(artwork_widget, GTK_ALIGN_FILL);
+        gtk_overlay_set_child(GTK_OVERLAY(artwork_overlay), artwork_widget);
         related_artwork_views_.push_back(std::move(artwork));
 
+        // Every translucent artwork scrim uses the same 20% hover reveal.
+        GtkWidget* scrim = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+        gtk_widget_add_css_class(scrim, "artist-related-album-scrim");
+        gtk_widget_set_size_request(
+            scrim, -1, (kRelatedArtworkSize * kRelatedScrimPercent) / 100);
+        gtk_widget_set_halign(scrim, GTK_ALIGN_FILL);
+        gtk_widget_set_valign(scrim, GTK_ALIGN_END);
+        gtk_widget_set_hexpand(scrim, TRUE);
+        gtk_widget_set_visible(scrim, TRUE);
+
         GtkWidget* title = gtk_label_new(album.title.c_str());
-        gtk_widget_add_css_class(title, "artist-related-album-title");
+        gtk_widget_add_css_class(title, "artist-related-album-scrim-title");
         gtk_label_set_xalign(GTK_LABEL(title), 0.0);
         gtk_label_set_ellipsize(GTK_LABEL(title), PANGO_ELLIPSIZE_END);
         gtk_label_set_max_width_chars(GTK_LABEL(title), 20);
-        gtk_widget_set_halign(title, GTK_ALIGN_START);
+        gtk_widget_set_halign(title, GTK_ALIGN_FILL);
         gtk_widget_set_visible(title, TRUE);
-        safe_box_append(GTK_BOX(card), title);
+        gtk_box_append(GTK_BOX(scrim), title);
+
+        GtkWidget* revealer = gtk_revealer_new();
+        gtk_widget_set_halign(revealer, GTK_ALIGN_FILL);
+        gtk_widget_set_valign(revealer, GTK_ALIGN_END);
+        gtk_widget_set_hexpand(revealer, TRUE);
+        gtk_widget_set_visible(revealer, TRUE);
+        gtk_revealer_set_transition_type(
+            GTK_REVEALER(revealer), GTK_REVEALER_TRANSITION_TYPE_SLIDE_UP);
+        gtk_revealer_set_transition_duration(GTK_REVEALER(revealer),
+                                             kRelatedScrimRevealMs);
+        gtk_revealer_set_child(GTK_REVEALER(revealer), scrim);
+        gtk_overlay_add_overlay(GTK_OVERLAY(artwork_overlay), revealer);
+
+        auto* motion = gtk_event_controller_motion_new();
+        g_signal_connect(motion, "enter", G_CALLBACK(on_related_album_enter),
+                         revealer);
+        g_signal_connect(motion, "leave", G_CALLBACK(on_related_album_leave),
+                         revealer);
+        gtk_widget_add_controller(button, GTK_EVENT_CONTROLLER(motion));
+
+        auto* focus = gtk_event_controller_focus_new();
+        g_signal_connect(focus, "enter", G_CALLBACK(on_related_album_focus_in),
+                         revealer);
+        g_signal_connect(focus, "leave", G_CALLBACK(on_related_album_focus_out),
+                         revealer);
+        gtk_widget_add_controller(button, GTK_EVENT_CONTROLLER(focus));
+
+        safe_box_append(GTK_BOX(card), artwork_overlay);
 
         const std::string year_text =
             album.year > 0 ? std::to_string(album.year) : "";

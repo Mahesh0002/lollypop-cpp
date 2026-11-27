@@ -44,7 +44,12 @@ int role_index(TrackColumnRole role) {
         case TrackColumnRole::Title:  return 0;
         case TrackColumnRole::Artist: return 1;
         case TrackColumnRole::Album:  return 2;
-        case TrackColumnRole::Fixed:  break;
+        case TrackColumnRole::Fixed:
+        case TrackColumnRole::Year:
+        case TrackColumnRole::Genre:
+        case TrackColumnRole::Duration:
+        case TrackColumnRole::Favourite:
+            break;
     }
     return -1;
 }
@@ -156,7 +161,10 @@ void track_columns_allocate(GtkWidget* widget, int width, int height,
                            &child_min, &child_nat, nullptr, nullptr);
         const int idx = role_index(column_role(children[i]));
         if (idx < 0) {
-            widths[i] = std::max(child_min, child_nat);
+            // Fixed columns must use their configured size request, not the
+            // label's natural text width. Otherwise a long genre (or an
+            // 8-digit year tag) widens only that row and breaks alignment.
+            widths[i] = child_min > 0 ? child_min : child_nat;
             fixed_total += widths[i];
         } else {
             flex_minimum[idx] = child_min;
@@ -250,6 +258,7 @@ TrackRow::TrackRow(MainWindow* main_window, const Track& track, int track_number
       options_(options),
       display_track_number_(track.track_number > 0 ? track.track_number
                                                     : track_number) {
+    liked_ = track_.liked;
     setup_ui();
     create_context_menu();
     live_rows_.insert(this);
@@ -396,6 +405,40 @@ void TrackRow::setup_ui() {
         gtk_box_append(GTK_BOX(box), album_label_.get());
     }
 
+    if (options_.show_year) {
+        // Some tags store YYYYMMDD; show just the year so the column stays
+        // compact and consistent across rows.
+        int year = track_.year;
+        if (year > 9999) year /= 10000;
+        const std::string year_text =
+            year > 0 ? std::to_string(year) : std::string();
+        year_label_.reset(gtk_label_new(year_text.c_str()));
+        g_object_ref_sink(year_label_.get());
+        gtk_widget_add_css_class(year_label_.get(), "track-row-year");
+        gtk_label_set_xalign(GTK_LABEL(year_label_.get()), 0.0);
+        gtk_widget_set_size_request(year_label_.get(),
+                                    track_list_metrics::kYearWidth, -1);
+        gtk_widget_set_valign(year_label_.get(), GTK_ALIGN_CENTER);
+        set_track_column_role(year_label_.get(), TrackColumnRole::Year);
+        gtk_widget_set_visible(year_label_.get(), TRUE);
+        gtk_box_append(GTK_BOX(box), year_label_.get());
+    }
+
+    if (options_.show_genre) {
+        genre_label_.reset(gtk_label_new(track_.genre.c_str()));
+        g_object_ref_sink(genre_label_.get());
+        gtk_widget_add_css_class(genre_label_.get(), "track-row-genre");
+        gtk_label_set_xalign(GTK_LABEL(genre_label_.get()), 0.0);
+        gtk_label_set_ellipsize(GTK_LABEL(genre_label_.get()),
+                                PANGO_ELLIPSIZE_END);
+        gtk_widget_set_size_request(genre_label_.get(),
+                                    track_list_metrics::kGenreWidth, -1);
+        gtk_widget_set_valign(genre_label_.get(), GTK_ALIGN_CENTER);
+        set_track_column_role(genre_label_.get(), TrackColumnRole::Genre);
+        gtk_widget_set_visible(genre_label_.get(), TRUE);
+        gtk_box_append(GTK_BOX(box), genre_label_.get());
+    }
+
     // Duration
     if (options_.show_duration) {
         int dur_min = track_.duration / 60;
@@ -408,6 +451,9 @@ void TrackRow::setup_ui() {
         gtk_label_set_xalign(GTK_LABEL(duration_label_.get()), 1.0);
         gtk_widget_set_size_request(duration_label_.get(),
                                     track_list_metrics::kDurationWidth, -1);
+        gtk_widget_set_valign(duration_label_.get(), GTK_ALIGN_CENTER);
+        set_track_column_role(duration_label_.get(),
+                              TrackColumnRole::Duration);
         gtk_widget_set_visible(duration_label_.get(), TRUE);
         gtk_box_append(GTK_BOX(box), duration_label_.get());
     }
@@ -448,6 +494,7 @@ void TrackRow::setup_ui() {
                      G_CALLBACK(on_like_pressed), this);
     gtk_widget_add_controller(like_button_.get(),
                               GTK_EVENT_CONTROLLER(like_gesture));
+    set_track_column_role(like_button_.get(), TrackColumnRole::Favourite);
     gtk_widget_set_visible(like_button_.get(), TRUE);
     gtk_box_append(GTK_BOX(box), like_button_.get());
 

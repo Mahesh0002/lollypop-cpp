@@ -132,6 +132,7 @@
     /* Artwork scrims and derived tint (§7). Fallback means "no tint". */
     --scrim-bg: rgba(0, 0, 0, 0.34);
     --scrim-strong: rgba(0, 0, 0, 0.55);
+    --scrim-transparent: rgba(0, 0, 0, 0);
     --scrim-text: #FFFFFF;
     --scrim-border: rgba(255, 255, 255, 0.16);
     --tint-color: var(--surface-panel);
@@ -848,7 +849,7 @@ listboxrow:selected {
 
 .track-row {
     background-color: transparent;
-    border-radius: var(--radius-sm);
+    border-radius: 0;
     transition: background-color var(--motion-fast) var(--ease-out);
 }
 
@@ -1069,12 +1070,6 @@ listboxrow:selected {
 
 .artist-related-album-artwork {
     border-radius: 8px;
-}
-
-.artist-related-album-title {
-    color: var(--text-primary);
-    font-size: var(--font-footnote);
-    font-weight: var(--font-weight-medium);
 }
 
 .artist-genre-chip {
@@ -2087,19 +2082,25 @@ scrollbar button {
     font-weight: var(--font-weight-medium);
 }
 
-/* Songs table: quiet column labels, compact pill filter, tabular numbers. */
+/* Songs table: quiet column labels, compact filter, tabular numbers. The
+   column bar has no fixed height; it is sized by the sort buttons below. */
 .songs-header {
     min-height: 0;
 }
 
 .songs-columns {
-    min-height: 22px;
+    min-height: 0;
 }
 
-.songs-header button {
-    min-height: 22px;
-    padding: 0 6px;
-    border-radius: var(--radius-xs);
+.songs-columns > button,
+.songs-columns > button:hover,
+.songs-columns > button:active {
+    min-width: 0;
+    min-height: 32px;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background-color: transparent;
 }
 
 .songs-column-header {
@@ -2310,6 +2311,14 @@ searchentry:focus,
     letter-spacing: -0.1px;
 }
 
+.track-row-year,
+.track-row-genre {
+    color: var(--text-tertiary);
+    font-size: var(--font-subhead);
+    font-weight: var(--font-weight-regular);
+    font-feature-settings: "tnum";
+}
+
 .track-row.playing .track-row-title {
     color: var(--accent-color);
     font-weight: var(--font-weight-semibold);
@@ -2322,7 +2331,6 @@ searchentry:focus,
 
 .songs-column-header {
     font-size: var(--font-ui-small);
-    font-weight: var(--font-weight-regular);
 }
 
 .middle-sticky-header {

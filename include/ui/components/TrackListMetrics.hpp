@@ -26,6 +26,8 @@ constexpr int kEqualizerSize = 17;
 constexpr int kColumnGap = 10;
 constexpr int kSideMargin = 20;
 constexpr int kDurationWidth = 58;
+constexpr int kYearWidth = 64;
+constexpr int kGenreWidth = 140;  // fits longest tags (e.g. "Singer/Songwriter")
 
 constexpr int kLikeButtonSize = 34;
 constexpr int kLikeIconSize = 20;
@@ -39,8 +41,6 @@ constexpr int kDurationFontSize = 15;
 constexpr int kHeaderFontSize = 14;
 
 constexpr int kStickyHeaderOffset = 0;    // no floating toolbar above the list
-constexpr int kStickyHeaderHeight = 53;   // matches .middle-sticky-header
-constexpr int kColumnHeaderHeight = 22;   // sort-label row, not a full track row
 
 }  // namespace track_list_metrics
 }  // namespace lollypop

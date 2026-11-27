@@ -48,7 +48,8 @@ private:
     };
     PageStateHost host_;
     std::unique_ptr<GtkWidget, WidgetDeleter> widget_;  // Box (content: header + ListBox)
-    std::unique_ptr<GtkWidget, WidgetDeleter> header_box_;
+    std::unique_ptr<GtkWidget, WidgetDeleter> header_box_;  // sticky sort row
+    std::unique_ptr<GtkWidget, WidgetDeleter> filter_box_;  // scrolls with list
     std::unique_ptr<GtkWidget, WidgetDeleter> list_box_;
 
     MainWindow* main_window_;
